@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/context-echo/"
+title = "Context Echo Demo Tool"
+version = "1.0.0"
+id = "artifacts/context-echo"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/context-echo/" ]
+localPort = 22361
+
+[services.development]
+run = "pnpm --filter @workspace/context-echo run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/context-echo", "run", "build" ]
+publicDir = "artifacts/context-echo/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22361"
+BASE_PATH = "/context-echo/"

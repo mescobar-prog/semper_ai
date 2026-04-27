@@ -3,34 +3,1038 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: DoD AI Tool Marketplace API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+  - name: Profile
+    description: Service member profile and AI-assisted profile builder.
+  - name: Catalog
+    description: Public-facing tool catalog and favorites.
+  - name: Library
+    description: Personal RAG library — doctrine, SOPs, FMs.
+  - name: Launch
+    description: Tool launch + token-based context exchange.
+  - name: Admin
+    description: Admin tool and category CRUD.
+  - name: Dashboard
+    description: Aggregated dashboard summaries.
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
           content:
             application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+
+  # ---------- Auth ----------
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthUserEnvelope' }
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string }
+        - name: iss
+          in: query
+          required: false
+          schema: { type: string, format: uri }
+      responses:
+        '302':
+          description: Redirect to the returnTo path on success.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '302':
+          description: Redirect to the OIDC provider logout URL.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MobileTokenExchangeRequest' }
+      responses:
+        '200':
+          description: Session created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobileTokenExchangeSuccess' }
+        '400':
+          description: Bad request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogoutSuccess' }
+
+  # ---------- Profile ----------
+  /profile:
+    get:
+      tags: [Profile]
+      operationId: getMyProfile
+      summary: Get the current user's profile
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    put:
+      tags: [Profile]
+      operationId: updateMyProfile
+      summary: Update the current user's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileUpdate' }
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/chat:
+    get:
+      tags: [Profile]
+      operationId: getProfileChatHistory
+      summary: Get profile-builder chat history
+      responses:
+        '200':
+          description: Chat history
+          content:
+            application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                type: array
+                items: { $ref: '#/components/schemas/ChatMessage' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    post:
+      tags: [Profile]
+      operationId: sendProfileChat
+      summary: Send a message to the profile-builder assistant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileChatRequest' }
+      responses:
+        '200':
+          description: Assistant reply (with optional structured profile suggestion)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProfileChatResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/chat/reset:
+    post:
+      tags: [Profile]
+      operationId: resetProfileChat
+      summary: Clear profile-builder chat history
+      responses:
+        '200':
+          description: Reset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimpleSuccess' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ---------- Catalog ----------
+  /catalog/categories:
+    get:
+      tags: [Catalog]
+      operationId: listCategories
+      summary: List all tool categories
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+  /catalog/tools:
+    get:
+      tags: [Catalog]
+      operationId: listTools
+      summary: List/search catalog tools
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string }
+        - name: ato_status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: impact_level
+          in: query
+          required: false
+          schema: { type: string }
+        - name: favorites_only
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Tools
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ToolSummary' }
+  /catalog/tools/{slug}:
+    get:
+      tags: [Catalog]
+      operationId: getToolBySlug
+      summary: Get a tool by slug
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tool
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ToolDetail' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /catalog/favorites/{toolId}:
+    post:
+      tags: [Catalog]
+      operationId: addFavorite
+      summary: Favorite a tool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Favorited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimpleSuccess' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      tags: [Catalog]
+      operationId: removeFavorite
+      summary: Unfavorite a tool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Unfavorited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimpleSuccess' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ---------- Library ----------
+  /library/stats:
+    get:
+      tags: [Library]
+      operationId: getLibraryStats
+      summary: Stats for the user's RAG library
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LibraryStats' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /library/documents:
+    get:
+      tags: [Library]
+      operationId: listDocuments
+      summary: List the user's documents
+      responses:
+        '200':
+          description: Documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DocumentSummary' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    post:
+      tags: [Library]
+      operationId: uploadTextDocument
+      summary: Upload a document by sending its raw text (for plain-text uploads)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TextDocumentUploadRequest' }
+      responses:
+        '200':
+          description: Created document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentSummary' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /library/documents/{id}:
+    get:
+      tags: [Library]
+      operationId: getDocument
+      summary: Get document metadata + first chunks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Document detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentDetail' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      tags: [Library]
+      operationId: deleteDocument
+      summary: Delete a document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimpleSuccess' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ---------- Launch ----------
+  /tools/{toolId}/launch:
+    post:
+      tags: [Launch]
+      operationId: launchTool
+      summary: Initiate a tool launch (issues a single-use launch token)
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Launch initiated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchInitiateResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /tools/context-exchange:
+    post:
+      tags: [Launch]
+      operationId: exchangeContextToken
+      summary: Tool exchanges a launch token for the user's context bundle and a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContextExchangeRequest' }
+      responses:
+        '200':
+          description: Context bundle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContextExchangeResponse' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /tools/library-query:
+    post:
+      tags: [Launch]
+      operationId: queryLibrary
+      summary: Tool queries the user's library with a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LibraryQueryRequest' }
+      responses:
+        '200':
+          description: Snippets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LibraryQueryResponse' }
+        '401':
+          description: Invalid session token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /launches/recent:
+    get:
+      tags: [Launch]
+      operationId: listRecentLaunches
+      summary: List the user's recent tool launches
+      responses:
+        '200':
+          description: Launches
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LaunchHistoryItem' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ---------- Admin ----------
+  /admin/tools:
+    get:
+      tags: [Admin]
+      operationId: adminListTools
+      summary: Admin list of all tools (including inactive)
+      responses:
+        '200':
+          description: Tools
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ToolDetail' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    post:
+      tags: [Admin]
+      operationId: createTool
+      summary: Create a new tool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ToolUpsert' }
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ToolDetail' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/tools/{id}:
+    put:
+      tags: [Admin]
+      operationId: updateTool
+      summary: Update a tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ToolUpsert' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ToolDetail' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      tags: [Admin]
+      operationId: deleteTool
+      summary: Delete a tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimpleSuccess' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ---------- Dashboard ----------
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboardSummary
+      summary: Aggregated dashboard summary
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummary' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
 components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema: { type: string }
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema: { type: string }
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
-        status:
-          type: string
-      required:
-        - status
+        status: { type: string }
 
+    SimpleSuccess:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id: { type: string }
+        email: { type: [string, 'null'], format: email }
+        firstName: { type: [string, 'null'] }
+        lastName: { type: [string, 'null'] }
+        profileImageUrl: { type: [string, 'null'] }
+
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code: { type: string, minLength: 1 }
+        code_verifier: { type: string, minLength: 1 }
+        redirect_uri: { type: string, minLength: 1, format: uri }
+        state: { type: string, minLength: 1 }
+        nonce: { type: string, minLength: 1 }
+
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, const: true }
+
+    UserProfile:
+      type: object
+      required:
+        [userId, branch, rank, mosCode, dutyTitle, unit, baseLocation,
+         securityClearance, deploymentStatus, primaryMission,
+         aiUseCases, freeFormContext, isAdmin, completenessPct, updatedAt]
+      properties:
+        userId: { type: string }
+        branch: { type: [string, 'null'] }
+        rank: { type: [string, 'null'] }
+        mosCode: { type: [string, 'null'] }
+        dutyTitle: { type: [string, 'null'] }
+        unit: { type: [string, 'null'] }
+        baseLocation: { type: [string, 'null'] }
+        securityClearance: { type: [string, 'null'] }
+        deploymentStatus: { type: [string, 'null'] }
+        primaryMission: { type: [string, 'null'] }
+        aiUseCases:
+          type: array
+          items: { type: string }
+        freeFormContext: { type: [string, 'null'] }
+        isAdmin: { type: boolean }
+        completenessPct: { type: integer }
+        updatedAt: { type: string, format: date-time }
+
+    ProfileUpdate:
+      type: object
+      properties:
+        branch: { type: [string, 'null'] }
+        rank: { type: [string, 'null'] }
+        mosCode: { type: [string, 'null'] }
+        dutyTitle: { type: [string, 'null'] }
+        unit: { type: [string, 'null'] }
+        baseLocation: { type: [string, 'null'] }
+        securityClearance: { type: [string, 'null'] }
+        deploymentStatus: { type: [string, 'null'] }
+        primaryMission: { type: [string, 'null'] }
+        aiUseCases:
+          type: array
+          items: { type: string }
+        freeFormContext: { type: [string, 'null'] }
+
+    ChatMessage:
+      type: object
+      required: [id, role, content, createdAt]
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ProfileChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string, minLength: 1 }
+
+    ProfileChatResponse:
+      type: object
+      required: [reply, suggestedProfile]
+      properties:
+        reply: { type: string }
+        suggestedProfile:
+          oneOf:
+            - $ref: '#/components/schemas/ProfileUpdate'
+            - type: 'null'
+
+    Category:
+      type: object
+      required: [id, slug, name, description, icon, sortOrder]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        icon: { type: [string, 'null'] }
+        sortOrder: { type: integer }
+
+    ToolSummary:
+      type: object
+      required:
+        [id, slug, name, vendor, shortDescription, atoStatus, impactLevels,
+         dataClassification, badges, isFavorite, favoriteCount,
+         launchCount, categorySlug, categoryName]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        vendor: { type: string }
+        shortDescription: { type: string }
+        atoStatus: { type: string }
+        impactLevels:
+          type: array
+          items: { type: string }
+        dataClassification: { type: string }
+        badges:
+          type: array
+          items: { type: string }
+        isFavorite: { type: boolean }
+        favoriteCount: { type: integer }
+        launchCount: { type: integer }
+        categorySlug: { type: [string, 'null'] }
+        categoryName: { type: [string, 'null'] }
+
+    ToolDetail:
+      allOf:
+        - $ref: '#/components/schemas/ToolSummary'
+        - type: object
+          required:
+            [longDescription, version, homepageUrl, launchUrl,
+             documentationUrl, isActive, categoryId, createdAt, updatedAt]
+          properties:
+            longDescription: { type: string }
+            version: { type: [string, 'null'] }
+            homepageUrl: { type: [string, 'null'] }
+            launchUrl: { type: string }
+            documentationUrl: { type: [string, 'null'] }
+            isActive: { type: boolean }
+            categoryId: { type: [string, 'null'] }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+
+    ToolUpsert:
+      type: object
+      required:
+        [slug, name, vendor, shortDescription, longDescription, atoStatus,
+         impactLevels, dataClassification, badges, launchUrl, isActive]
+      properties:
+        slug: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        vendor: { type: string, minLength: 1 }
+        shortDescription: { type: string, minLength: 1 }
+        longDescription: { type: string, minLength: 1 }
+        categoryId: { type: [string, 'null'] }
+        atoStatus: { type: string }
+        impactLevels:
+          type: array
+          items: { type: string }
+        dataClassification: { type: string }
+        version: { type: [string, 'null'] }
+        badges:
+          type: array
+          items: { type: string }
+        homepageUrl: { type: [string, 'null'] }
+        launchUrl: { type: string, minLength: 1 }
+        documentationUrl: { type: [string, 'null'] }
+        isActive: { type: boolean }
+
+    LibraryStats:
+      type: object
+      required: [documentCount, chunkCount, totalChars]
+      properties:
+        documentCount: { type: integer }
+        chunkCount: { type: integer }
+        totalChars: { type: integer }
+
+    DocumentSummary:
+      type: object
+      required:
+        [id, title, sourceFilename, mimeType, sizeBytes, charCount,
+         chunkCount, status, uploadedAt, processedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        sourceFilename: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        charCount: { type: integer }
+        chunkCount: { type: integer }
+        status: { type: string }
+        uploadedAt: { type: string, format: date-time }
+        processedAt: { type: [string, 'null'], format: date-time }
+
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/DocumentSummary'
+        - type: object
+          required: [chunks]
+          properties:
+            chunks:
+              type: array
+              items: { $ref: '#/components/schemas/ChunkPreview' }
+
+    ChunkPreview:
+      type: object
+      required: [id, chunkIndex, content, charCount]
+      properties:
+        id: { type: string }
+        chunkIndex: { type: integer }
+        content: { type: string }
+        charCount: { type: integer }
+
+    TextDocumentUploadRequest:
+      type: object
+      required: [title, sourceFilename, content]
+      properties:
+        title: { type: string, minLength: 1 }
+        sourceFilename: { type: string, minLength: 1 }
+        mimeType: { type: string }
+        content: { type: string, minLength: 1 }
+
+    LaunchInitiateResponse:
+      type: object
+      required: [launchId, launchToken, launchUrl, expiresAt]
+      properties:
+        launchId: { type: string }
+        launchToken: { type: string }
+        launchUrl: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    ContextExchangeRequest:
+      type: object
+      required: [launchToken]
+      properties:
+        launchToken: { type: string, minLength: 1 }
+
+    ContextExchangeResponse:
+      type: object
+      required:
+        [sessionToken, sessionExpiresAt, tool, user, profile, primer]
+      properties:
+        sessionToken: { type: string }
+        sessionExpiresAt: { type: string, format: date-time }
+        tool:
+          type: object
+          required: [id, slug, name, vendor, atoStatus]
+          properties:
+            id: { type: string }
+            slug: { type: string }
+            name: { type: string }
+            vendor: { type: string }
+            atoStatus: { type: string }
+        user:
+          type: object
+          required: [id, displayName, email]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+            email: { type: [string, 'null'] }
+        profile: { $ref: '#/components/schemas/UserProfile' }
+        primer: { $ref: '#/components/schemas/RagPrimer' }
+
+    RagPrimer:
+      type: object
+      required: [queries, snippets]
+      properties:
+        queries:
+          type: array
+          items: { type: string }
+        snippets:
+          type: array
+          items: { $ref: '#/components/schemas/RagSnippet' }
+
+    RagSnippet:
+      type: object
+      required:
+        [chunkId, documentId, documentTitle, chunkIndex, content, score]
+      properties:
+        chunkId: { type: string }
+        documentId: { type: string }
+        documentTitle: { type: string }
+        chunkIndex: { type: integer }
+        content: { type: string }
+        score: { type: number }
+
+    LibraryQueryRequest:
+      type: object
+      required: [sessionToken, query]
+      properties:
+        sessionToken: { type: string, minLength: 1 }
+        query: { type: string, minLength: 1 }
+        limit: { type: integer }
+
+    LibraryQueryResponse:
+      type: object
+      required: [query, snippets]
+      properties:
+        query: { type: string }
+        snippets:
+          type: array
+          items: { $ref: '#/components/schemas/RagSnippet' }
+
+    LaunchHistoryItem:
+      type: object
+      required: [id, toolId, toolName, toolSlug, status, createdAt]
+      properties:
+        id: { type: string }
+        toolId: { type: string }
+        toolName: { type: string }
+        toolSlug: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    DashboardSummary:
+      type: object
+      required:
+        [profileCompletenessPct, libraryDocumentCount, libraryChunkCount,
+         favoritesCount, launchCount, recentLaunches, atoStatusBreakdown,
+         topTools]
+      properties:
+        profileCompletenessPct: { type: integer }
+        libraryDocumentCount: { type: integer }
+        libraryChunkCount: { type: integer }
+        favoritesCount: { type: integer }
+        launchCount: { type: integer }
+        recentLaunches:
+          type: array
+          items: { $ref: '#/components/schemas/LaunchHistoryItem' }
+        atoStatusBreakdown:
+          type: array
+          items:
+            type: object
+            required: [atoStatus, count]
+            properties:
+              atoStatus: { type: string }
+              count: { type: integer }
+        topTools:
+          type: array
+          items: { $ref: '#/components/schemas/ToolSummary' }
