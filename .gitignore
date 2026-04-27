@@ -1,0 +1,15 @@
+.env
+.env.local
+*.pyc
+__pycache__/
+.venv/
+venv/
+node_modules/
+dist/
+.DS_Store
+.idea/
+.vscode/
+*.log
+pgdata/
+caddy_data/
+caddy_config/
