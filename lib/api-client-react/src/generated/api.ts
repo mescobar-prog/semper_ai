@@ -34,6 +34,8 @@ import type {
   LibraryQueryRequest,
   LibraryQueryResponse,
   LibraryStats,
+  LibraryTestQueryRequest,
+  LibraryTestQueryResponse,
   ListToolsParams,
   LogoutSuccess,
   MobileTokenExchangeRequest,
@@ -1719,6 +1721,94 @@ export const useUploadTextDocument = <
   TContext
 > => {
   return useMutation(getUploadTextDocumentMutationOptions(options));
+};
+
+/**
+ * Lets the signed-in user verify their library is returning useful snippets BEFORE trusting it with a tool launch. Identical retrieval path to the launch-token-scoped /tools/library-query endpoint, but scoped to the current authenticated user instead of a session token.
+
+ * @summary Run a sample RAG query against the user's own library (dry-run)
+ */
+export const getTestLibraryQueryUrl = () => {
+  return `/api/library/test-query`;
+};
+
+export const testLibraryQuery = async (
+  libraryTestQueryRequest: LibraryTestQueryRequest,
+  options?: RequestInit,
+): Promise<LibraryTestQueryResponse> => {
+  return customFetch<LibraryTestQueryResponse>(getTestLibraryQueryUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(libraryTestQueryRequest),
+  });
+};
+
+export const getTestLibraryQueryMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof testLibraryQuery>>,
+    TError,
+    { data: BodyType<LibraryTestQueryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof testLibraryQuery>>,
+  TError,
+  { data: BodyType<LibraryTestQueryRequest> },
+  TContext
+> => {
+  const mutationKey = ["testLibraryQuery"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof testLibraryQuery>>,
+    { data: BodyType<LibraryTestQueryRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return testLibraryQuery(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TestLibraryQueryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof testLibraryQuery>>
+>;
+export type TestLibraryQueryMutationBody = BodyType<LibraryTestQueryRequest>;
+export type TestLibraryQueryMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Run a sample RAG query against the user's own library (dry-run)
+ */
+export const useTestLibraryQuery = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof testLibraryQuery>>,
+    TError,
+    { data: BodyType<LibraryTestQueryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof testLibraryQuery>>,
+  TError,
+  { data: BodyType<LibraryTestQueryRequest> },
+  TContext
+> => {
+  return useMutation(getTestLibraryQueryMutationOptions(options));
 };
 
 /**

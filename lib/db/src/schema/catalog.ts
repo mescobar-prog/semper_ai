@@ -36,6 +36,11 @@ export const toolsTable = pgTable(
     vendor: varchar("vendor").notNull(),
     shortDescription: text("short_description").notNull(),
     longDescription: text("long_description").notNull(),
+    purpose: text("purpose").notNull().default(""),
+    ragQueryTemplates: jsonb("rag_query_templates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     categoryId: varchar("category_id").references(() => categoriesTable.id, {
       onDelete: "set null",
     }),

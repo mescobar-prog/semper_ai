@@ -34,6 +34,8 @@ const EMPTY_TOOL: ToolUpsert = {
   vendor: "",
   shortDescription: "",
   longDescription: "",
+  purpose: "",
+  ragQueryTemplates: [],
   categoryId: null,
   atoStatus: "in_review",
   impactLevels: [],
@@ -130,6 +132,8 @@ function AdminInner() {
         vendor: t.vendor,
         shortDescription: t.shortDescription,
         longDescription: t.longDescription,
+        purpose: t.purpose ?? "",
+        ragQueryTemplates: t.ragQueryTemplates ?? [],
         categoryId: t.categoryId,
         atoStatus: t.atoStatus,
         impactLevels: t.impactLevels,
@@ -447,6 +451,38 @@ function ToolForm({
           onChange={(e) => set("longDescription", e.target.value)}
           className={`${inputCls} font-mono`}
         />
+      </Field>
+      <Field label="Tool purpose (fed to RAG query generator)">
+        <textarea
+          rows={3}
+          data-testid="textarea-purpose"
+          value={data.purpose ?? ""}
+          onChange={(e) => set("purpose", e.target.value)}
+          placeholder="One sentence on what this tool actually does with the operator's context (e.g. 'Drafts NCOER bullets anchored to the operator's library of past evals and award citations.'). The query generator weighs this heavily over marketing copy."
+          className={`${inputCls} font-mono`}
+        />
+      </Field>
+      <Field label="RAG query templates (one per line; {curlies} = profile vars)">
+        <textarea
+          rows={4}
+          data-testid="textarea-rag-templates"
+          value={(data.ragQueryTemplates ?? []).join("\n")}
+          onChange={(e) =>
+            set(
+              "ragQueryTemplates",
+              e.target.value
+                .split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            )
+          }
+          placeholder={`{primaryMission} OPORD\n{dutyTitle} commander's intent\n{unit} mission essential task`}
+          className={`${inputCls} font-mono`}
+        />
+        <div className="mt-1.5 text-[10px] font-mono text-muted-foreground leading-relaxed">
+          Available vars: {"{primaryMission} {dutyTitle} {mosCode} {unit} {branch} {rank} {baseLocation} {aiUseCases}"}.
+          Templates with vars the operator hasn't filled in are skipped.
+        </div>
       </Field>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Homepage URL">

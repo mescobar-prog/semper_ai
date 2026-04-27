@@ -30,6 +30,8 @@ export * from "./launchInitiateResponse";
 export * from "./libraryQueryRequest";
 export * from "./libraryQueryResponse";
 export * from "./libraryStats";
+export * from "./libraryTestQueryRequest";
+export * from "./libraryTestQueryResponse";
 export * from "./listToolsParams";
 export * from "./logoutSuccess";
 export * from "./mobileTokenExchangeRequest";

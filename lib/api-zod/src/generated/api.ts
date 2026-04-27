@@ -266,6 +266,16 @@ export const GetToolBySlugResponse = zod
   .and(
     zod.object({
       longDescription: zod.string(),
+      purpose: zod
+        .string()
+        .describe(
+          "Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).\n",
+        ),
+      ragQueryTemplates: zod
+        .array(zod.string())
+        .describe(
+          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+        ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
@@ -333,7 +343,18 @@ export const UploadTextDocumentBody = zod.object({
   title: zod.string().min(1),
   sourceFilename: zod.string().min(1),
   mimeType: zod.string().optional(),
-  content: zod.string().min(1),
+  content: zod
+    .string()
+    .optional()
+    .describe(
+      "UTF-8 plain-text body. Set this for paste-text uploads. Either content or contentBase64 must be provided.\n",
+    ),
+  contentBase64: zod
+    .string()
+    .optional()
+    .describe(
+      "Base64-encoded binary body for PDF\/DOCX\/MD\/TXT uploads. The server picks the right extractor based on mimeType. Either content or contentBase64 must be provided.\n",
+    ),
 });
 
 export const UploadTextDocumentResponse = zod.object({
@@ -347,6 +368,31 @@ export const UploadTextDocumentResponse = zod.object({
   status: zod.string(),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
+});
+
+/**
+ * Lets the signed-in user verify their library is returning useful snippets BEFORE trusting it with a tool launch. Identical retrieval path to the launch-token-scoped /tools/library-query endpoint, but scoped to the current authenticated user instead of a session token.
+
+ * @summary Run a sample RAG query against the user's own library (dry-run)
+ */
+
+export const TestLibraryQueryBody = zod.object({
+  query: zod.string().min(1),
+  limit: zod.number().optional(),
+});
+
+export const TestLibraryQueryResponse = zod.object({
+  query: zod.string(),
+  snippets: zod.array(
+    zod.object({
+      chunkId: zod.string(),
+      documentId: zod.string(),
+      documentTitle: zod.string(),
+      chunkIndex: zod.number(),
+      content: zod.string(),
+      score: zod.number(),
+    }),
+  ),
 });
 
 /**
@@ -447,6 +493,11 @@ export const ExchangeContextTokenResponse = zod.object({
     completenessPct: zod.number(),
     updatedAt: zod.coerce.date(),
   }),
+  contextBlock: zod
+    .string()
+    .describe(
+      "Pre-formatted Markdown block summarizing the user's identity, mission, and assignment. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.\n",
+    ),
   primer: zod.object({
     queries: zod.array(zod.string()),
     snippets: zod.array(
@@ -524,6 +575,16 @@ export const AdminListToolsResponseItem = zod
   .and(
     zod.object({
       longDescription: zod.string(),
+      purpose: zod
+        .string()
+        .describe(
+          "Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).\n",
+        ),
+      ragQueryTemplates: zod
+        .array(zod.string())
+        .describe(
+          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+        ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
@@ -546,6 +607,8 @@ export const CreateToolBody = zod.object({
   vendor: zod.string().min(1),
   shortDescription: zod.string().min(1),
   longDescription: zod.string().min(1),
+  purpose: zod.string(),
+  ragQueryTemplates: zod.array(zod.string()),
   categoryId: zod.string().nullish(),
   atoStatus: zod.string(),
   impactLevels: zod.array(zod.string()),
@@ -578,6 +641,16 @@ export const CreateToolResponse = zod
   .and(
     zod.object({
       longDescription: zod.string(),
+      purpose: zod
+        .string()
+        .describe(
+          "Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).\n",
+        ),
+      ragQueryTemplates: zod
+        .array(zod.string())
+        .describe(
+          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+        ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
@@ -602,6 +675,8 @@ export const UpdateToolBody = zod.object({
   vendor: zod.string().min(1),
   shortDescription: zod.string().min(1),
   longDescription: zod.string().min(1),
+  purpose: zod.string(),
+  ragQueryTemplates: zod.array(zod.string()),
   categoryId: zod.string().nullish(),
   atoStatus: zod.string(),
   impactLevels: zod.array(zod.string()),
@@ -634,6 +709,16 @@ export const UpdateToolResponse = zod
   .and(
     zod.object({
       longDescription: zod.string(),
+      purpose: zod
+        .string()
+        .describe(
+          "Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).\n",
+        ),
+      ragQueryTemplates: zod
+        .array(zod.string())
+        .describe(
+          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+        ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),

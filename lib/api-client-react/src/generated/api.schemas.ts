@@ -164,6 +164,12 @@ export interface ToolSummary {
 
 export type ToolDetail = ToolSummary & {
   longDescription: string;
+  /** Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).
+   */
+  purpose: string;
+  /** Admin-authored seed query templates (e.g. "{primaryMission}", "{dutyTitle} SOPs"). Variables in {curlies} are interpolated from the launching user's profile; the resolved strings are merged with LLM-generated queries before searching the user's library.
+   */
+  ragQueryTemplates: string[];
   /** @nullable */
   version: string | null;
   /** @nullable */
@@ -189,6 +195,8 @@ export interface ToolUpsert {
   shortDescription: string;
   /** @minLength 1 */
   longDescription: string;
+  purpose: string;
+  ragQueryTemplates: string[];
   /** @nullable */
   categoryId?: string | null;
   atoStatus: string;
@@ -243,8 +251,32 @@ export interface TextDocumentUploadRequest {
   /** @minLength 1 */
   sourceFilename: string;
   mimeType?: string;
+  /** UTF-8 plain-text body. Set this for paste-text uploads. Either content or contentBase64 must be provided.
+   */
+  content?: string;
+  /** Base64-encoded binary body for PDF/DOCX/MD/TXT uploads. The server picks the right extractor based on mimeType. Either content or contentBase64 must be provided.
+   */
+  contentBase64?: string;
+}
+
+export interface LibraryTestQueryRequest {
   /** @minLength 1 */
+  query: string;
+  limit?: number;
+}
+
+export interface RagSnippet {
+  chunkId: string;
+  documentId: string;
+  documentTitle: string;
+  chunkIndex: number;
   content: string;
+  score: number;
+}
+
+export interface LibraryTestQueryResponse {
+  query: string;
+  snippets: RagSnippet[];
 }
 
 export interface LaunchInitiateResponse {
@@ -274,15 +306,6 @@ export type ContextExchangeResponseUser = {
   email: string | null;
 };
 
-export interface RagSnippet {
-  chunkId: string;
-  documentId: string;
-  documentTitle: string;
-  chunkIndex: number;
-  content: string;
-  score: number;
-}
-
 export interface RagPrimer {
   queries: string[];
   snippets: RagSnippet[];
@@ -294,6 +317,9 @@ export interface ContextExchangeResponse {
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;
+  /** Pre-formatted Markdown block summarizing the user's identity, mission, and assignment. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
+   */
+  contextBlock: string;
   primer: RagPrimer;
 }
 

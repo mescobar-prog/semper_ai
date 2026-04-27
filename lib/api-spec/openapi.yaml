@@ -401,6 +401,32 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /library/test-query:
+    post:
+      tags: [Library]
+      operationId: testLibraryQuery
+      summary: Run a sample RAG query against the user's own library (dry-run)
+      description: >
+        Lets the signed-in user verify their library is returning useful
+        snippets BEFORE trusting it with a tool launch. Identical retrieval
+        path to the launch-token-scoped /tools/library-query endpoint, but
+        scoped to the current authenticated user instead of a session token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LibraryTestQueryRequest' }
+      responses:
+        '200':
+          description: Snippets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LibraryTestQueryResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /library/documents/{id}:
     get:
       tags: [Library]
@@ -828,10 +854,27 @@ components:
         - $ref: '#/components/schemas/ToolSummary'
         - type: object
           required:
-            [longDescription, version, homepageUrl, launchUrl,
-             documentationUrl, isActive, categoryId, createdAt, updatedAt]
+            [longDescription, purpose, ragQueryTemplates, version, homepageUrl,
+             launchUrl, documentationUrl, isActive, categoryId, createdAt,
+             updatedAt]
           properties:
             longDescription: { type: string }
+            purpose:
+              type: string
+              description: >
+                Admin-authored sentence describing what the tool actually does
+                with the user's context. Fed to the RAG query generator so the
+                primer queries match the tool's true intent (not just its
+                marketing copy).
+            ragQueryTemplates:
+              type: array
+              description: >
+                Admin-authored seed query templates (e.g. "{primaryMission}",
+                "{dutyTitle} SOPs"). Variables in {curlies} are interpolated
+                from the launching user's profile; the resolved strings are
+                merged with LLM-generated queries before searching the user's
+                library.
+              items: { type: string }
             version: { type: [string, 'null'] }
             homepageUrl: { type: [string, 'null'] }
             launchUrl: { type: string }
@@ -844,14 +887,19 @@ components:
     ToolUpsert:
       type: object
       required:
-        [slug, name, vendor, shortDescription, longDescription, atoStatus,
-         impactLevels, dataClassification, badges, launchUrl, isActive]
+        [slug, name, vendor, shortDescription, longDescription, purpose,
+         ragQueryTemplates, atoStatus, impactLevels, dataClassification, badges,
+         launchUrl, isActive]
       properties:
         slug: { type: string, minLength: 1 }
         name: { type: string, minLength: 1 }
         vendor: { type: string, minLength: 1 }
         shortDescription: { type: string, minLength: 1 }
         longDescription: { type: string, minLength: 1 }
+        purpose: { type: string }
+        ragQueryTemplates:
+          type: array
+          items: { type: string }
         categoryId: { type: [string, 'null'] }
         atoStatus: { type: string }
         impactLevels:
@@ -913,12 +961,38 @@ components:
 
     TextDocumentUploadRequest:
       type: object
-      required: [title, sourceFilename, content]
+      required: [title, sourceFilename]
       properties:
         title: { type: string, minLength: 1 }
         sourceFilename: { type: string, minLength: 1 }
         mimeType: { type: string }
-        content: { type: string, minLength: 1 }
+        content:
+          type: string
+          description: >
+            UTF-8 plain-text body. Set this for paste-text uploads. Either
+            content or contentBase64 must be provided.
+        contentBase64:
+          type: string
+          description: >
+            Base64-encoded binary body for PDF/DOCX/MD/TXT uploads. The server
+            picks the right extractor based on mimeType. Either content or
+            contentBase64 must be provided.
+
+    LibraryTestQueryRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1 }
+        limit: { type: integer }
+
+    LibraryTestQueryResponse:
+      type: object
+      required: [query, snippets]
+      properties:
+        query: { type: string }
+        snippets:
+          type: array
+          items: { $ref: '#/components/schemas/RagSnippet' }
 
     LaunchInitiateResponse:
       type: object
@@ -938,7 +1012,8 @@ components:
     ContextExchangeResponse:
       type: object
       required:
-        [sessionToken, sessionExpiresAt, tool, user, profile, primer]
+        [sessionToken, sessionExpiresAt, tool, user, profile, contextBlock,
+         primer]
       properties:
         sessionToken: { type: string }
         sessionExpiresAt: { type: string, format: date-time }
@@ -959,6 +1034,13 @@ components:
             displayName: { type: string }
             email: { type: [string, 'null'] }
         profile: { $ref: '#/components/schemas/UserProfile' }
+        contextBlock:
+          type: string
+          description: >
+            Pre-formatted Markdown block summarizing the user's identity,
+            mission, and assignment. Tool builders can drop this directly
+            into their model prompt without re-parsing the structured
+            profile.
         primer: { $ref: '#/components/schemas/RagPrimer' }
 
     RagPrimer:

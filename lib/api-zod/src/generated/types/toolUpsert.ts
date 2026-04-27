@@ -17,6 +17,8 @@ export interface ToolUpsert {
   shortDescription: string;
   /** @minLength 1 */
   longDescription: string;
+  purpose: string;
+  ragQueryTemplates: string[];
   /** @nullable */
   categoryId?: string | null;
   atoStatus: string;

@@ -19,6 +19,7 @@ import {
 } from "../lib/anthropic-helpers";
 import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
+  buildContextBlock,
   getOrCreateProfile,
   serializeProfile,
 } from "../lib/profile-helpers";
@@ -152,6 +153,8 @@ router.post("/tools/context-exchange", async (req, res) => {
       vendor: tool.vendor,
       shortDescription: tool.shortDescription,
       longDescription: tool.longDescription,
+      purpose: tool.purpose,
+      ragQueryTemplates: tool.ragQueryTemplates,
     });
     snippets = await searchChunksMultiQuery(user.id, queries, 4, 12);
   } catch (err) {
@@ -180,6 +183,12 @@ router.post("/tools/context-exchange", async (req, res) => {
     user.email ||
     user.id;
 
+  const userPayload = {
+    id: user.id,
+    displayName,
+    email: user.email,
+  };
+
   res.json({
     sessionToken,
     sessionExpiresAt: sessionExpiresAt.toISOString(),
@@ -190,12 +199,9 @@ router.post("/tools/context-exchange", async (req, res) => {
       vendor: tool.vendor,
       atoStatus: tool.atoStatus,
     },
-    user: {
-      id: user.id,
-      displayName,
-      email: user.email,
-    },
+    user: userPayload,
     profile: serializeProfile(profile),
+    contextBlock: buildContextBlock(userPayload, profile),
     primer: { queries, snippets },
   });
 });

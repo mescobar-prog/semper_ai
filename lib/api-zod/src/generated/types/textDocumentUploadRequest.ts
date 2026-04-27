@@ -12,6 +12,10 @@ export interface TextDocumentUploadRequest {
   /** @minLength 1 */
   sourceFilename: string;
   mimeType?: string;
-  /** @minLength 1 */
-  content: string;
+  /** UTF-8 plain-text body. Set this for paste-text uploads. Either content or contentBase64 must be provided.
+   */
+  content?: string;
+  /** Base64-encoded binary body for PDF/DOCX/MD/TXT uploads. The server picks the right extractor based on mimeType. Either content or contentBase64 must be provided.
+   */
+  contentBase64?: string;
 }

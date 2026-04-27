@@ -6,6 +6,7 @@ import {
   categoriesTable,
   favoritesTable,
   launchesTable,
+  type Tool,
 } from "@workspace/db";
 import {
   CreateToolBody,
@@ -15,21 +16,24 @@ import { requireAdmin } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
-function serializeToolDetail(row: any) {
+interface ToolDetailRow extends Tool {
+  categorySlug: string | null;
+  categoryName: string | null;
+  favoriteCount: number;
+  launchCount: number;
+}
+
+function serializeToolDetail(row: ToolDetailRow) {
   return {
     ...row,
-    isActive: row.isActive === "true" || row.isActive === true,
+    isActive: row.isActive === "true",
     favoriteCount: Number(row.favoriteCount ?? 0),
     launchCount: Number(row.launchCount ?? 0),
     isFavorite: false,
-    createdAt: (row.createdAt instanceof Date
-      ? row.createdAt
-      : new Date(row.createdAt)
-    ).toISOString(),
-    updatedAt: (row.updatedAt instanceof Date
-      ? row.updatedAt
-      : new Date(row.updatedAt)
-    ).toISOString(),
+    purpose: row.purpose ?? "",
+    ragQueryTemplates: row.ragQueryTemplates ?? [],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -42,6 +46,8 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
       vendor: toolsTable.vendor,
       shortDescription: toolsTable.shortDescription,
       longDescription: toolsTable.longDescription,
+      purpose: toolsTable.purpose,
+      ragQueryTemplates: toolsTable.ragQueryTemplates,
       atoStatus: toolsTable.atoStatus,
       impactLevels: toolsTable.impactLevels,
       dataClassification: toolsTable.dataClassification,
@@ -52,6 +58,7 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
       documentationUrl: toolsTable.documentationUrl,
       isActive: toolsTable.isActive,
       categoryId: toolsTable.categoryId,
+      createdBy: toolsTable.createdBy,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
       createdAt: toolsTable.createdAt,
@@ -63,7 +70,7 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
     .leftJoin(categoriesTable, eq(toolsTable.categoryId, categoriesTable.id))
     .orderBy(asc(toolsTable.name));
 
-  res.json(rows.map(serializeToolDetail));
+  res.json(rows.map((r) => serializeToolDetail(r as ToolDetailRow)));
 });
 
 router.post("/admin/tools", requireAdmin, async (req, res) => {
@@ -81,6 +88,8 @@ router.post("/admin/tools", requireAdmin, async (req, res) => {
       vendor: data.vendor,
       shortDescription: data.shortDescription,
       longDescription: data.longDescription,
+      purpose: data.purpose ?? "",
+      ragQueryTemplates: data.ragQueryTemplates ?? [],
       categoryId: data.categoryId ?? null,
       atoStatus: data.atoStatus,
       impactLevels: data.impactLevels,
@@ -129,6 +138,8 @@ router.put("/admin/tools/:id", requireAdmin, async (req, res) => {
       vendor: data.vendor,
       shortDescription: data.shortDescription,
       longDescription: data.longDescription,
+      purpose: data.purpose ?? "",
+      ragQueryTemplates: data.ragQueryTemplates ?? [],
       categoryId: data.categoryId ?? null,
       atoStatus: data.atoStatus,
       impactLevels: data.impactLevels,
