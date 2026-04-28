@@ -37,63 +37,36 @@ import {
   type ImportMessage,
 } from "@/lib/profileIo";
 
-// ---------- Doctrine picker — text-region helpers --------------------------
+// ---------- Doctrine picker — value helpers --------------------------------
 //
-// The Doctrine & Orders textarea is split into two regions:
-//   1. an auto-managed reference region at the top, one short reference
-//      line per ticked library doc, followed by
-//   2. a `--- Orders ---` divider, followed by
-//   3. the operator's free-form orders.
+// The doctrine field is now a pure auto-managed reference list — one
+// short reference line per ticked library doc, nothing else. Each line is
+// `- <doc title>` (no IDs, no markers, just the human-readable title).
+// Checkbox state is derived by scanning those lines and matching their
+// title against the operator's library.
 //
-// Each reference line is just `- <doc title>` — no IDs, no markers, just
-// the human-readable title. Checkbox state is derived by scanning those
-// lines and matching their title against the operator's library, which
-// keeps the checkboxes and the textarea in sync — a manual edit that
-// deletes a reference line also un-ticks its checkbox automatically.
+// We still tolerate older saved values that contained a `--- Orders ---`
+// divider followed by free-form text: the parser ignores anything from
+// the divider onward, so the ticked-state derivation still works. The
+// next save then overwrites the field with a clean picker-only value.
 
-const ORDERS_DIVIDER = "--- Orders ---";
+const LEGACY_ORDERS_DIVIDER = "--- Orders ---";
 const DOCTRINE_SNIPPET_MAX_BYTES = 25 * 1024 * 1024;
 const DOCTRINE_ACCEPTED_EXT = ".pdf,.docx,.md,.markdown,.txt";
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function findDividerIndex(content: string): number {
-  return content.indexOf(ORDERS_DIVIDER);
-}
-
-function getSnippetRegion(content: string): string {
-  const idx = findDividerIndex(content);
-  return idx === -1 ? "" : content.slice(0, idx);
-}
-
-function getOrdersRegion(content: string): string {
-  const idx = findDividerIndex(content);
-  if (idx === -1) return content;
-  return content.slice(idx + ORDERS_DIVIDER.length).replace(/^\n/, "");
-}
-
-function joinRegions(snippetRegion: string, ordersRegion: string): string {
-  // Trim whitespace from both ends of the reference region so the divider
-  // sits tight against the last reference line and we never end up with a
-  // stray blank line above the first reference. Only insert the divider
-  // when there are reference lines — a brand-new operator with zero ticks
-  // should see a plain textarea, no stray divider.
-  const trimmed = snippetRegion.trim();
-  if (!trimmed) return ordersRegion;
-  return `${trimmed}\n\n${ORDERS_DIVIDER}\n${ordersRegion}`;
+// Strip any legacy `--- Orders ---` divider (and the free-form trailing
+// text after it) so the rest of the helpers only have to think about
+// reference lines.
+function getReferenceRegion(content: string): string {
+  const idx = content.indexOf(LEGACY_ORDERS_DIVIDER);
+  return idx === -1 ? content : content.slice(0, idx);
 }
 
 // A managed reference line is just `- <doc title>` — clean, ID-free text.
-// We extract whatever sits after the leading `- ` on each line of the
-// reference region and treat it as a title; the picker then looks each
-// title up in the operator's library to derive the matching doc id and
-// drive checkbox state.
 const REFERENCE_LINE_RE = /^-\s+(.+?)\s*$/gm;
 
 function parseReferenceTitles(content: string): string[] {
-  const region = getSnippetRegion(content);
+  const region = getReferenceRegion(content);
   const titles: string[] = [];
   REFERENCE_LINE_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -115,34 +88,21 @@ function parseCheckedIds(
   return ids;
 }
 
-function buildBlock(doc: DocumentSummary): string {
-  return `- ${doc.title}`;
+function buildReferenceList(titles: readonly string[]): string {
+  if (titles.length === 0) return "";
+  return titles.map((t) => `- ${t}`).join("\n");
 }
 
 function addBlock(content: string, doc: DocumentSummary): string {
+  const titles = parseReferenceTitles(content);
   // Skip if a managed line for this exact title already exists.
-  if (parseReferenceTitles(content).includes(doc.title)) return content;
-  // Strip trailing whitespace from the existing reference region so two
-  // ticks in a row produce adjacent lines instead of a blank line between.
-  const snippetRegion = getSnippetRegion(content).replace(/\s+$/, "");
-  const ordersRegion = getOrdersRegion(content);
-  const sep = snippetRegion ? "\n" : "";
-  const nextSnippets = `${snippetRegion}${sep}${buildBlock(doc)}\n`;
-  return joinRegions(nextSnippets, ordersRegion);
+  if (titles.includes(doc.title)) return buildReferenceList(titles);
+  return buildReferenceList([...titles, doc.title]);
 }
 
 function removeBlock(content: string, doc: DocumentSummary): string {
-  const snippetRegion = getSnippetRegion(content);
-  const ordersRegion = getOrdersRegion(content);
-  // Remove only a line whose text matches `- <this exact title>`, so a
-  // similarly-named doc in the operator's library can never accidentally
-  // get its line stripped when an unrelated doc is unticked.
-  const re = new RegExp(
-    `^-\\s+${escapeRegExp(doc.title)}\\s*(?:\\r?\\n|$)`,
-    "gm",
-  );
-  const next = snippetRegion.replace(re, "");
-  return joinRegions(next, ordersRegion);
+  const titles = parseReferenceTitles(content).filter((t) => t !== doc.title);
+  return buildReferenceList(titles);
 }
 
 function sourceLabel(doc: DocumentSummary): string {
@@ -169,7 +129,7 @@ const ELEMENTS: Array<{
 }> = [
   {
     key: "doctrine",
-    label: "1. Doctrine & Orders",
+    label: "1. Doctrine, Orders, & Titles",
     hint: "Cite the specific open-source doctrine (e.g. MCDP-4) or unit SOPs that govern this task.",
   },
   {
@@ -550,22 +510,23 @@ export function Catalog() {
                 <p className="text-xs text-muted-foreground mb-2">
                   {el.hint}
                 </p>
-                {el.key === "doctrine" && (
+                {el.key === "doctrine" ? (
                   <DoctrinePicker value={value} setValue={setValue} />
+                ) : (
+                  <textarea
+                    data-testid={`textarea-${el.key}`}
+                    value={value}
+                    onChange={(e) =>
+                      setFields((prev) => ({
+                        ...prev,
+                        [el.key]: e.target.value,
+                      }))
+                    }
+                    rows={4}
+                    placeholder="Enter operational detail…"
+                    className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none font-mono"
+                  />
                 )}
-                <textarea
-                  data-testid={`textarea-${el.key}`}
-                  value={value}
-                  onChange={(e) =>
-                    setFields((prev) => ({
-                      ...prev,
-                      [el.key]: e.target.value,
-                    }))
-                  }
-                  rows={el.key === "doctrine" ? 8 : 4}
-                  placeholder="Enter operational detail…"
-                  className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none font-mono"
-                />
               </div>
             );
           })}
@@ -957,6 +918,7 @@ function DoctrinePicker({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -991,6 +953,27 @@ function DoctrinePicker({
     () => parseCheckedIds(value, sortedDocs),
     [value, sortedDocs],
   );
+
+  // Canonicalize the doctrine value whenever it isn't already in
+  // picker-only form. This guarantees that an operator with a legacy
+  // saved value (containing a `--- Orders ---` divider and free-form
+  // text) has the field rewritten the moment the picker mounts, so the
+  // next save persists a clean reference list even if they never tick
+  // or untick anything.
+  useEffect(() => {
+    const canonical = buildReferenceList(parseReferenceTitles(value));
+    if (canonical !== value) {
+      setValue(canonical);
+    }
+  }, [value, setValue]);
+
+  // Search filter is purely a view concern — the underlying ticked state,
+  // summary counts, and auto-tick behavior all use the full library.
+  const visibleDocs = useMemo<DocumentSummary[]>(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return sortedDocs;
+    return sortedDocs.filter((d) => d.title.toLowerCase().includes(q));
+  }, [sortedDocs, searchQuery]);
 
   const tickedCount = useMemo(() => {
     // Count every managed reference line so a stale title (e.g. a doc that
@@ -1175,11 +1158,32 @@ function DoctrinePicker({
           )}
 
           {sortedDocs.length > 0 && (
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by title…"
+              className="w-full px-3 py-1.5 rounded-md bg-background border border-border text-xs focus:border-primary focus:outline-none font-mono"
+              data-testid="doctrine-picker-search"
+              aria-label="Search doctrine library by title"
+            />
+          )}
+
+          {sortedDocs.length > 0 && visibleDocs.length === 0 && (
+            <div
+              className="text-xs text-muted-foreground italic"
+              data-testid="doctrine-picker-empty-search"
+            >
+              No docs match “{searchQuery}”.
+            </div>
+          )}
+
+          {visibleDocs.length > 0 && (
             <ul
               className="max-h-56 overflow-y-auto divide-y divide-border/60 rounded border border-border/60"
               data-testid="doctrine-picker-list"
             >
-              {sortedDocs.map((doc) => {
+              {visibleDocs.map((doc) => {
                 const checked = checkedIds.has(doc.id);
                 const isReady = doc.status === "ready";
                 const disabled = !isReady && !checked;

@@ -307,7 +307,7 @@ export function Profile() {
       <div className="mb-8 flex items-end justify-between gap-6">
         <div>
           <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
-            Operator Info
+            Operator Information
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">
             User Profile
