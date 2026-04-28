@@ -9,7 +9,7 @@ import {
   useTestLibraryQuery,
   useListMyPresets,
   useSetDocumentPresetTags,
-  useRetryAutoIngestedDocument,
+  useRetryFailedDocument,
   requestUploadUrl,
   getGetLibraryStatsQueryKey,
   getListDocumentsQueryKey,
@@ -105,7 +105,7 @@ export function Library() {
   const uploadMutation = useUploadTextDocument();
   const deleteMutation = useDeleteDocument();
   const testMutation = useTestLibraryQuery();
-  const retryMutation = useRetryAutoIngestedDocument();
+  const retryMutation = useRetryFailedDocument();
 
   const [showUpload, setShowUpload] = useState(false);
   const [uploadMode, setUploadMode] = useState<"file" | "paste">("file");
@@ -886,11 +886,22 @@ function FailedDocBanner({
   onSupersede: () => void;
 }) {
   const isAuto = !!doc.autoSource && !!doc.sourceUrl;
-  // Manual upload required: shown only after the user has tried Retry at
-  // least once and we still ended up failed.
-  const showManualUpload = isAuto && (doc.retryCount ?? 0) >= 1;
-  // Retry: shown for an auto-doc that has never been retried yet.
-  const showRetry = isAuto && (doc.retryCount ?? 0) === 0;
+  // Anything that's failed and isn't an auto-ingest row must be a
+  // user-uploaded file (paste-text uploads can't fail asynchronously —
+  // they 400 inline before a row is ever created).
+  const isUploaded = !isAuto;
+  const retryCount = doc.retryCount ?? 0;
+
+  // Auto-ingest banner (Task #52): one in-place retry, then prompt the
+  // user to upload the file manually.
+  const showAutoRetry = isAuto && retryCount === 0;
+  const showAutoSupersede = isAuto && retryCount >= 1;
+
+  // Uploaded-doc banner (this task): up to two in-place retries against
+  // the already-uploaded blob, then prompt the user to delete + re-upload
+  // the file from scratch (matches the server cap in MAX_UPLOAD_RETRIES).
+  const showUploadRetry = isUploaded && retryCount < 2;
+  const showUploadGiveUp = isUploaded && retryCount >= 2;
 
   return (
     <div
@@ -903,10 +914,20 @@ function FailedDocBanner({
         </span>
         {doc.errorMessage ?? "Unknown error"}
       </div>
-      {showManualUpload && (
+      {showAutoSupersede && (
         <div className="text-rose-200/90">
           The automatic fetch did not work twice. Open the source document
           and upload it manually below.
+        </div>
+      )}
+      {showUploadGiveUp && (
+        <div
+          className="text-rose-200/90"
+          data-testid={`doc-reupload-prompt-${doc.id}`}
+        >
+          We couldn't extract this file after two retries. Delete it and
+          upload the file again — it may be corrupt, password-protected, or
+          a scanned-image PDF.
         </div>
       )}
       {retryError && (
@@ -918,7 +939,7 @@ function FailedDocBanner({
         </div>
       )}
       <div className="flex flex-wrap gap-2 pt-1">
-        {showRetry && (
+        {(showAutoRetry || showUploadRetry) && (
           <button
             type="button"
             data-testid={`button-retry-${doc.id}`}
@@ -929,10 +950,14 @@ function FailedDocBanner({
             disabled={isRetrying}
             className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-rose-400/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25 disabled:opacity-50"
           >
-            {isRetrying ? "Retrying…" : "Retry"}
+            {isRetrying
+              ? "Retrying…"
+              : showUploadRetry && retryCount > 0
+                ? "Retry again"
+                : "Retry"}
           </button>
         )}
-        {showManualUpload && (
+        {showAutoSupersede && (
           <>
             {doc.sourceUrl && (
               <a

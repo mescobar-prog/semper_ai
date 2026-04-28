@@ -1480,15 +1480,18 @@ export const DeleteDocumentResponse = zod.object({
 });
 
 /**
- * Re-runs the same fetch + extract + chunk path that auto-ingest uses for a single document, updating the existing row in place. Only valid when the document is owned by the caller, currently in `failed` status, and has both `autoSource` and `sourceUrl` set. On success the row flips to `ready` with chunks; on failure it stays `failed` with a refreshed `errorMessage`. Either way the document's `retryCount` is incremented.
+ * Re-runs the extraction pipeline against an existing failed document without forcing the user to re-upload or re-discover the source. Two flavours, dispatched on the document's metadata:
+1. Auto-ingested docs (`autoSource` + `sourceUrl` set, no `storageObjectPath`): re-runs the same fetch + extract + chunk path that auto-ingest uses, updating the row in place.
+2. User-uploaded docs (`storageObjectPath` set, no `autoSource`): re-runs the async extraction pipeline against the already-uploaded blob in object storage, dropping any leftover chunks and replacing them.
+On success the row flips to `ready` with chunks; on failure it stays `failed` with a refreshed `errorMessage`. Either way the document's `retryCount` is incremented. For user-uploaded docs the endpoint refuses further retries after a small cap and returns `400` so the UI can prompt for a fresh upload.
 
- * @summary Retry the auto-ingest fetch + extract for a single failed document
+ * @summary Retry processing for a single failed document
  */
-export const RetryAutoIngestedDocumentParams = zod.object({
+export const RetryFailedDocumentParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const RetryAutoIngestedDocumentResponse = zod.object({
+export const RetryFailedDocumentResponse = zod.object({
   id: zod.string(),
   title: zod.string(),
   sourceFilename: zod.string(),

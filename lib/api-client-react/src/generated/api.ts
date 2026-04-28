@@ -3448,42 +3448,45 @@ export const useDeleteDocument = <
 };
 
 /**
- * Re-runs the same fetch + extract + chunk path that auto-ingest uses for a single document, updating the existing row in place. Only valid when the document is owned by the caller, currently in `failed` status, and has both `autoSource` and `sourceUrl` set. On success the row flips to `ready` with chunks; on failure it stays `failed` with a refreshed `errorMessage`. Either way the document's `retryCount` is incremented.
+ * Re-runs the extraction pipeline against an existing failed document without forcing the user to re-upload or re-discover the source. Two flavours, dispatched on the document's metadata:
+1. Auto-ingested docs (`autoSource` + `sourceUrl` set, no `storageObjectPath`): re-runs the same fetch + extract + chunk path that auto-ingest uses, updating the row in place.
+2. User-uploaded docs (`storageObjectPath` set, no `autoSource`): re-runs the async extraction pipeline against the already-uploaded blob in object storage, dropping any leftover chunks and replacing them.
+On success the row flips to `ready` with chunks; on failure it stays `failed` with a refreshed `errorMessage`. Either way the document's `retryCount` is incremented. For user-uploaded docs the endpoint refuses further retries after a small cap and returns `400` so the UI can prompt for a fresh upload.
 
- * @summary Retry the auto-ingest fetch + extract for a single failed document
+ * @summary Retry processing for a single failed document
  */
-export const getRetryAutoIngestedDocumentUrl = (id: string) => {
+export const getRetryFailedDocumentUrl = (id: string) => {
   return `/api/library/documents/${id}/retry`;
 };
 
-export const retryAutoIngestedDocument = async (
+export const retryFailedDocument = async (
   id: string,
   options?: RequestInit,
 ): Promise<DocumentSummary> => {
-  return customFetch<DocumentSummary>(getRetryAutoIngestedDocumentUrl(id), {
+  return customFetch<DocumentSummary>(getRetryFailedDocumentUrl(id), {
     ...options,
     method: "POST",
   });
 };
 
-export const getRetryAutoIngestedDocumentMutationOptions = <
+export const getRetryFailedDocumentMutationOptions = <
   TError = ErrorType<ErrorEnvelope>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+    Awaited<ReturnType<typeof retryFailedDocument>>,
     TError,
     { id: string },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+  Awaited<ReturnType<typeof retryFailedDocument>>,
   TError,
   { id: string },
   TContext
 > => {
-  const mutationKey = ["retryAutoIngestedDocument"];
+  const mutationKey = ["retryFailedDocument"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -3493,44 +3496,44 @@ export const getRetryAutoIngestedDocumentMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+    Awaited<ReturnType<typeof retryFailedDocument>>,
     { id: string }
   > = (props) => {
     const { id } = props ?? {};
 
-    return retryAutoIngestedDocument(id, requestOptions);
+    return retryFailedDocument(id, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type RetryAutoIngestedDocumentMutationResult = NonNullable<
-  Awaited<ReturnType<typeof retryAutoIngestedDocument>>
+export type RetryFailedDocumentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof retryFailedDocument>>
 >;
 
-export type RetryAutoIngestedDocumentMutationError = ErrorType<ErrorEnvelope>;
+export type RetryFailedDocumentMutationError = ErrorType<ErrorEnvelope>;
 
 /**
- * @summary Retry the auto-ingest fetch + extract for a single failed document
+ * @summary Retry processing for a single failed document
  */
-export const useRetryAutoIngestedDocument = <
+export const useRetryFailedDocument = <
   TError = ErrorType<ErrorEnvelope>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+    Awaited<ReturnType<typeof retryFailedDocument>>,
     TError,
     { id: string },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+  Awaited<ReturnType<typeof retryFailedDocument>>,
   TError,
   { id: string },
   TContext
 > => {
-  return useMutation(getRetryAutoIngestedDocumentMutationOptions(options));
+  return useMutation(getRetryFailedDocumentMutationOptions(options));
 };
 
 /**

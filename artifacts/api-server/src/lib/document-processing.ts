@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { db, documentsTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
+import { db, documentsTable, docChunksTable } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 import { extractDocumentText } from "./document-extract";
 import { chunkText } from "./rag";
@@ -130,4 +130,49 @@ export async function processStoredDocument(documentId: string): Promise<void> {
       processedAt: new Date(),
     })
     .where(eq(documentsTable.id, documentId));
+}
+
+/**
+ * Re-run extraction against an already-uploaded blob in object storage for
+ * a single failed document. Caller must have already verified the row is
+ * owned by the current user, currently `failed`, and has a usable
+ * `storageObjectPath`.
+ *
+ * Always increments `retryCount`, regardless of outcome, so the route
+ * handler / UI can decide when to stop offering Retry and ask the user to
+ * re-upload the file from scratch. Returns the post-retry document row.
+ */
+export async function retryFailedStoredDocument(
+  doc: typeof documentsTable.$inferSelect,
+): Promise<typeof documentsTable.$inferSelect> {
+  if (!doc.storageObjectPath) {
+    throw new Error("Document has no stored upload to retry against.");
+  }
+
+  // Bump retry count + flip status to processing in one update so polling
+  // clients immediately see the spinner. processStoredDocument will set
+  // status again (also to "processing") which is a harmless no-op.
+  await db
+    .update(documentsTable)
+    .set({
+      status: "processing",
+      errorMessage: null,
+      retryCount: sql`${documentsTable.retryCount} + 1`,
+    })
+    .where(eq(documentsTable.id, doc.id));
+
+  // Drop any chunks left over from a previous attempt before processing
+  // re-inserts. A failed row should never have chunks, but defend in depth.
+  await db
+    .delete(docChunksTable)
+    .where(eq(docChunksTable.documentId, doc.id));
+
+  await processStoredDocument(doc.id);
+
+  const [updated] = await db
+    .select()
+    .from(documentsTable)
+    .where(eq(documentsTable.id, doc.id))
+    .limit(1);
+  return updated;
 }

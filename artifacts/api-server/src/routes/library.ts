@@ -26,7 +26,10 @@ import {
 import { ensureActivePreset } from "../lib/profile-helpers";
 import { parseAutoSource } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
-import { processStoredDocument } from "../lib/document-processing";
+import {
+  processStoredDocument,
+  retryFailedStoredDocument,
+} from "../lib/document-processing";
 import {
   ObjectNotFoundError,
   ObjectStorageService,
@@ -569,6 +572,12 @@ router.put(
   },
 );
 
+// Cap how many times a user can retry an in-place upload extraction before
+// we force them to re-upload the file. Two attempts is enough to recover
+// from a transient extractor / embedding hiccup; beyond that the file is
+// almost certainly the problem (corrupt, password-protected, etc.).
+const MAX_UPLOAD_RETRIES = 2;
+
 router.post("/library/documents/:id/retry", requireAuth, async (req, res) => {
   const userId = req.user!.id;
   const docId = String(req.params.id);
@@ -593,27 +602,37 @@ router.post("/library/documents/:id/retry", requireAuth, async (req, res) => {
     });
     return;
   }
-  if (!doc.autoSource || !doc.sourceUrl) {
-    res.status(400).json({
-      error:
-        "Retry is only available for auto-ingested documents with a source URL",
-    });
-    return;
-  }
-  // Defend against retrying a manually-uploaded supersede row that happens
-  // to also carry an autoSource — those go through the regular upload-retry
-  // flow (Task #25) instead of the auto-ingest URL fetch.
+
+  // Path A — user-uploaded doc backed by an object-storage blob. Re-runs
+  // extraction against the existing GCS object. Capped so a user with a
+  // truly bad file isn't stuck retrying forever.
   if (doc.storageObjectPath) {
-    res.status(400).json({
-      error:
-        "This document was uploaded manually; use the upload-retry flow instead",
-    });
+    if ((doc.retryCount ?? 0) >= MAX_UPLOAD_RETRIES) {
+      res.status(400).json({
+        error:
+          "Already retried this upload twice without success. Please delete it and upload the file again.",
+      });
+      return;
+    }
+    const updated = await retryFailedStoredDocument(doc);
+    const presetMap = await loadDocPresetMap(userId, [updated.id]);
+    res.json(serializeDocument(updated, presetMap.get(updated.id) ?? []));
     return;
   }
 
-  const updated = await retryFailedAutoDocument(doc);
-  const presetMap = await loadDocPresetMap(userId, [updated.id]);
-  res.json(serializeDocument(updated, presetMap.get(updated.id) ?? []));
+  // Path B — auto-ingested doctrine doc. Re-runs the original URL fetch +
+  // extract pipeline.
+  if (doc.autoSource && doc.sourceUrl) {
+    const updated = await retryFailedAutoDocument(doc);
+    const presetMap = await loadDocPresetMap(userId, [updated.id]);
+    res.json(serializeDocument(updated, presetMap.get(updated.id) ?? []));
+    return;
+  }
+
+  res.status(400).json({
+    error:
+      "This document has no retryable source (no stored upload and no auto-ingest URL).",
+  });
 });
 
 router.delete("/library/documents/:id", requireAuth, async (req, res) => {

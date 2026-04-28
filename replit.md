@@ -2,7 +2,17 @@
 
 This project is an MVP for a DoD AI Tool Marketplace, akin to a TradeWinds-style platform. Its core purpose is to enable service members to securely access and utilize authorized AI tools. Users will create structured operator profiles and personal RAG libraries. When launching an AI tool, their relevant context and mission-specific document snippets are automatically provided via a one-time launch token.
 
-The marketplace aims to streamline the deployment and use of AI capabilities within the DoD, ensuring secure and context-aware interactions. Key capabilities include user authentication, profile management, a catalog of AI tools, personal RAG (Retrieval-Augmented Generation) document libraries, and a secure token-based launch mechanism for AI tools.
+The marketplace aims to streamline the deployment and use of AI capabilities within the DoD, ensuring secure and context-aware interactions. Key capabilities include:
+- Secure single sign-on for service members (Replit OIDC).
+- Creation and management of operator profiles and personal RAG (Retrieval-Augmented Generation) libraries.
+- A catalog of AI tools with a context block verification gate.
+- A launch token flow for secure and context-aware tool execution.
+- Advanced RAG implementation with semantic and keyword search capabilities.
+- Document upload and processing for various formats (PDF, DOCX, MD, TXT).
+- Admin tools for managing tools, including GitHub integration for source synchronization and AI-assisted content drafting.
+- Smart Mission Context auto-ingestion based on military data.
+- User-defined mission context presets for tailored RAG and profile snapshots.
+- Pre-launch context preview and redaction capabilities to control shared information.
 
 # User Preferences
 
@@ -10,7 +20,14 @@ I prefer iterative development with clear communication on major changes. Please
 
 # System Architecture
 
-The project is structured as a pnpm workspace monorepo utilizing TypeScript (v5.9). The backend is built with Express 5, using PostgreSQL and Drizzle ORM for data persistence. Zod is used for validation, and Orval handles API codegen from an OpenAPI specification. `esbuild` is used for CJS bundling.
+The project is structured as a pnpm workspace monorepo utilizing TypeScript (v5.9) targeting Node.js 24. The backend is built with Express 5, using PostgreSQL and Drizzle ORM for data persistence. Zod is used for validation, and Orval handles API codegen from an OpenAPI specification. `esbuild` is used for CJS bundling.
+
+## Monorepo Structure:
+- `artifacts/marketplace`: Frontend application built with React and Vite, handling user interfaces for landing, dashboard, catalog, profile, library, launches, and admin functionalities.
+- `artifacts/api-server`: Backend API built with Express 5 and Drizzle ORM, providing routes for authentication, profile management, catalog, library, launches, admin, and dashboard.
+- `artifacts/context-echo`: A demonstration tool for exchanging launch tokens and rendering received context.
+- `artifacts/brief-drafter`: An AI tool for drafting mission briefs using Claude (claude-sonnet-4-6) and profile-aware RAG.
+- `artifacts/mockup-sandbox`: A design canvas template.
 
 ## Core Features and Implementations
 
@@ -39,8 +56,8 @@ The project is structured as a pnpm workspace monorepo utilizing TypeScript (v5.
 - **Binary Uploads**: Uses presigned PUT URLs for object storage (App Storage / GCS). Client uploads directly, then notifies the server to create a document entry.
 - **Async Document Processing**: Documents are processed asynchronously: downloaded from object storage, text extracted (pdf-parse, mammoth, utf-8), chunked, embedded, and indexed. Status updates (`uploaded`, `processing`, `ready`, `failed`) are reflected in the UI.
 - **Ownership Enforcement**: Document ownership is enforced via object ACL custom-metadata, preventing IDOR.
-- **Auto-Ingest**: Curated military doctrine (PDFs) can be automatically ingested based on user's branch/MOS/unit. Ingestion status is tracked and displayed.
-- **Retry Mechanism**: Failed auto-ingested documents can be retried, with an option to manually upload a replacement.
+- **Smart Mission Context (Auto-ingest)**: Curated military doctrine (PDFs) can be automatically ingested based on user's branch/MOS/unit. Ingestion status is tracked and displayed.
+- **Retry Mechanism**: Failed documents can be retried with `POST /api/library/documents/:id/retry`. The endpoint dispatches on metadata: auto-ingested rows (`autoSource` + `sourceUrl`) re-fetch and re-extract from the source URL, while user-uploaded rows (`storageObjectPath`) re-run the async extraction pipeline against the existing GCS blob. User-upload retries are capped at 2 attempts; after that the UI prompts the user to delete and re-upload the file.
 
 ### Authentication and Administration
 - **Replit OIDC**: Authentication uses Replit OIDC via `@workspace/replit-auth-web`.
@@ -66,14 +83,22 @@ The project is structured as a pnpm workspace monorepo utilizing TypeScript (v5.
 
 # External Dependencies
 
-- **Database**: PostgreSQL (with `pgvector` extension)
-- **Object Storage**: App Storage / Google Cloud Storage (GCS)
-- **AI Models**:
-    - `Xenova/all-MiniLM-L6-v2` (for in-process embeddings)
-    - Replit Gemini AI integration (for `gemini-3-flash-preview` to generate RAG primer queries and power profile intake chat)
-    - Claude (`claude-sonnet-4-6`) (used by `brief-drafter` for generating briefs)
-- **GitHub**: Integrated via `@replit/connectors-sdk` for tool source management.
-- **Document Parsing Libraries**:
-    - `pdf-parse` (for PDF text extraction)
-    - `mammoth` (for DOCX text extraction)
-- **Authentication**: Replit OIDC via `@workspace/replit-auth-web`
+- **pnpm**: Monorepo management.
+- **Node.js**: Runtime environment (version 24).
+- **TypeScript**: Programming language (version 5.9).
+- **Express**: Web application framework (version 5).
+- **PostgreSQL**: Relational database (with `pgvector` extension).
+- **Drizzle ORM**: TypeScript ORM for PostgreSQL.
+- **Zod**: Schema declaration and validation library.
+- **drizzle-zod**: Integration between Drizzle ORM and Zod.
+- **Orval**: OpenAPI client code generator.
+- **esbuild**: JavaScript bundler.
+- **@xenova/transformers**: In-process embedding model (`Xenova/all-MiniLM-L6-v2`).
+- **Replit Gemini AI integration**: Used for Gemini models (`gemini-3-flash-preview` to generate RAG primer queries and power profile intake chat).
+- **App Storage / GCS (Google Cloud Storage)**: Object storage for binary uploads.
+- **pdf-parse**: PDF text extraction.
+- **mammoth**: DOCX to HTML converter (used for text extraction).
+- **@replit/connectors-sdk**: For GitHub integration and proxying authenticated requests.
+- **Claude**: AI model (`claude-sonnet-4-6`) used in `brief-drafter`.
+- **Authentication**: Replit OIDC via `@workspace/replit-auth-web`.
+
