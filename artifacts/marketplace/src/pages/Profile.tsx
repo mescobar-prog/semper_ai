@@ -49,20 +49,8 @@ import {
 } from "@/lib/profileIo";
 
 const BRANCHES = MIL_BRANCHES.map((b) => b.label);
-const CLEARANCES = [
-  "None",
-  "Public Trust",
-  "Secret",
-  "Top Secret",
-  "TS/SCI",
-];
-const DEPLOYMENT_STATUS = [
-  "Garrison",
-  "Train-up",
-  "Deployed",
-  "Reset",
-  "TDY",
-];
+const CLEARANCES = ["None", "Public Trust", "Secret", "Top Secret", "TS/SCI"];
+const DEPLOYMENT_STATUS = ["Garrison", "Train-up", "Deployed", "Reset", "TDY"];
 
 // Branch / MOS / Unit are handled separately so we can wire up the typeahead
 // pickers and the auto-ingest status panel. The remaining fields are still
@@ -112,11 +100,7 @@ const FIELDS: Array<{
 
 export function Profile() {
   const queryClient = useQueryClient();
-  const {
-    data: profileEnvelope,
-    isLoading,
-    error,
-  } = useGetMyProfile();
+  const { data: profileEnvelope, isLoading, error } = useGetMyProfile();
   const profile = profileEnvelope?.profile;
   const updateMutation = useUpdateMyProfile();
 
@@ -323,10 +307,10 @@ export function Profile() {
       <div className="mb-8 flex items-end justify-between gap-6">
         <div>
           <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
-            Operator Profile
+            Operator Info
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">
-            Mission context
+            User Profile
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Every tool you launch receives this context. Edit fields directly,
@@ -370,7 +354,11 @@ export function Profile() {
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-4">
-              <BranchMosUnitFields draft={draft} onChange={onChange} onChangeBranch={onChangeBranch} />
+              <BranchMosUnitFields
+                draft={draft}
+                onChange={onChange}
+                onChangeBranch={onChangeBranch}
+              />
               {FIELDS.map((f) => {
                 const colSpan =
                   f.span === 3
@@ -782,7 +770,9 @@ function PresetCard({
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <div className="text-base font-semibold truncate">{preset.name}</div>
+            <div className="text-base font-semibold truncate">
+              {preset.name}
+            </div>
             {preset.isActive && (
               <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary">
                 Active
@@ -1224,9 +1214,7 @@ function Combobox({
   // the dropdown bounded.
   const filtered = useMemo(() => {
     const q = (query ?? "").trim().toLowerCase();
-    const list = q
-      ? options.filter((o) => o.searchText.includes(q))
-      : options;
+    const list = q ? options.filter((o) => o.searchText.includes(q)) : options;
     return list.slice(0, 50);
   }, [query, options]);
 
@@ -1305,9 +1293,7 @@ function Combobox({
             // commit it; otherwise revert to the last committed value.
             if (!allowFreeText && query !== null) {
               const norm = query.trim().toLowerCase();
-              const exact = options.find(
-                (o) => o.value.toLowerCase() === norm,
-              );
+              const exact = options.find((o) => o.value.toLowerCase() === norm);
               if (exact) commit(exact.value);
               else setQuery(null);
             }
@@ -1365,7 +1351,8 @@ function IngestStatusPanel({ draft }: { draft: ProfileUpdate }) {
   }, [code, draft.unit]);
 
   const sources: string[] = [];
-  if (code && matchedMos) sources.push(buildMosAutoSource(code, matchedMos.code));
+  if (code && matchedMos)
+    sources.push(buildMosAutoSource(code, matchedMos.code));
   if (code && unitHasPackage && draft.unit)
     sources.push(buildUnitAutoSource(code, draft.unit.trim()));
 
@@ -1404,10 +1391,7 @@ function IngestStatusRow({ source }: { source: string }) {
   const lastStatus = useRef<string | null>(null);
   useEffect(() => {
     if (!job) return;
-    if (
-      lastStatus.current === "running" &&
-      job.status !== "running"
-    ) {
+    if (lastStatus.current === "running" && job.status !== "running") {
       queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
       queryClient.invalidateQueries({
         queryKey: getGetAutoIngestStatusQueryKey({ source }),
@@ -1527,11 +1511,7 @@ function profileToDraft(p: UserProfile): ProfileUpdate {
   };
 }
 
-function ChatPanel({
-  onApply,
-}: {
-  onApply: (s: ProfileUpdate) => void;
-}) {
+function ChatPanel({ onApply }: { onApply: (s: ProfileUpdate) => void }) {
   const queryClient = useQueryClient();
   const { data: history } = useGetProfileChatHistory();
   const sendMutation = useSendProfileChat();
@@ -1603,8 +1583,8 @@ function ChatPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-3">
         {messages.length === 0 && (
           <div className="text-sm text-muted-foreground py-8 text-center">
-            Tell me about your role and mission. I'll suggest profile fields
-            you can apply with one click.
+            Tell me about your role and mission. I'll suggest profile fields you
+            can apply with one click.
           </div>
         )}
         {messages.map((m) => (
@@ -1666,10 +1646,7 @@ function ChatPanel({
           <div className="text-xs text-muted-foreground">Thinking…</div>
         )}
       </div>
-      <form
-        onSubmit={onSend}
-        className="border-t border-border p-3 flex gap-2"
-      >
+      <form onSubmit={onSend} className="border-t border-border p-3 flex gap-2">
         <input
           type="text"
           value={input}
