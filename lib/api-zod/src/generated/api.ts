@@ -180,6 +180,11 @@ export const GetMyProfileResponse = zod
         }),
         zod.null(),
       ]),
+      version: zod
+        .number()
+        .describe(
+          "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
+        ),
     }),
   })
   .describe(
@@ -306,6 +311,11 @@ export const UpdateMyProfileResponse = zod
         }),
         zod.null(),
       ]),
+      version: zod
+        .number()
+        .describe(
+          "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
+        ),
     }),
   })
   .describe(
@@ -530,6 +540,11 @@ export const ConfirmContextBlockResponse = zod.object({
       }),
       zod.null(),
     ]),
+    version: zod
+      .number()
+      .describe(
+        "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
+      ),
   }),
   evaluation: zod.object({
     submissionId: zod.string(),
@@ -1621,6 +1636,8 @@ export const PreviewLaunchContextResponse = zod.object({
 });
 
 /**
+ * Server-side gate (Task #45): refuses to mint a token unless a valid, unexpired launch affirmation exists for (user, active preset, current context-block version). Returns 409 with structured `needs_affirmation` payload when the gate isn't satisfied so the client can render the affirmation modal.
+
  * @summary Initiate a tool launch (issues a single-use launch token, with optional redaction)
  */
 export const LaunchToolParams = zod.object({
@@ -1656,6 +1673,60 @@ export const LaunchToolResponse = zod.object({
   installerFilename: zod.string().nullable(),
   installInstructions: zod.string().nullable(),
 });
+
+/**
+ * Returns the current valid affirmation if one exists for the active preset + current context-block version, otherwise returns null. Used by the marketplace to decide whether to show the "preset confirmed for this session" indicator vs. open the modal.
+
+ * @summary Read the current launch-time affirmation for the active preset
+ */
+export const GetLaunchAffirmationResponse = zod
+  .object({
+    affirmation: zod.union([
+      zod
+        .object({
+          presetId: zod.string(),
+          contextBlockVersion: zod.number(),
+          affirmedAt: zod.coerce.date(),
+          expiresAt: zod.coerce.date(),
+        })
+        .describe(
+          "Server-side record of a user's launch-time affirmation. Valid for ~30 minutes; covers any tool launched while the active preset id and context-block version still match.\n",
+        ),
+      zod.null(),
+    ]),
+    presetId: zod.string().describe("The user's currently active preset id."),
+    contextBlockVersion: zod
+      .number()
+      .describe("Current monotonic version of the user's context block."),
+  })
+  .describe(
+    "Result of GET \/launches\/affirmation. `affirmation` is the current valid record (or null), and the sibling fields surface what the affirmation modal would render so callers can avoid a second fetch.\n",
+  );
+
+/**
+ * Creates / replaces the user's launch-time affirmation, valid for ~30 minutes. The body's presetId and contextBlockVersion must match the user's active preset and the current context-block version respectively, otherwise 409 is returned.
+
+ * @summary Affirm that the active preset's context block is still current
+ */
+export const CreateLaunchAffirmationBody = zod.object({
+  presetId: zod
+    .string()
+    .describe("Must equal the user's currently active preset id."),
+  contextBlockVersion: zod
+    .number()
+    .describe("Must equal the current context-block version."),
+});
+
+export const CreateLaunchAffirmationResponse = zod
+  .object({
+    presetId: zod.string(),
+    contextBlockVersion: zod.number(),
+    affirmedAt: zod.coerce.date(),
+    expiresAt: zod.coerce.date(),
+  })
+  .describe(
+    "Server-side record of a user's launch-time affirmation. Valid for ~30 minutes; covers any tool launched while the active preset id and context-block version still match.\n",
+  );
 
 /**
  * @summary Tool exchanges a launch token for the user's context bundle and a session token
@@ -1760,6 +1831,11 @@ export const ExchangeContextTokenResponse = zod.object({
       }),
       zod.null(),
     ]),
+    version: zod
+      .number()
+      .describe(
+        "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
+      ),
   }),
   contextMarkdown: zod
     .string()

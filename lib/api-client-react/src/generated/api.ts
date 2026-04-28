@@ -39,6 +39,7 @@ import type {
   ContextBlockFields,
   ContextExchangeRequest,
   ContextExchangeResponse,
+  CreateLaunchAffirmationRequest,
   DashboardSummary,
   DocumentDetail,
   DocumentPresetTagsUpdate,
@@ -56,8 +57,11 @@ import type {
   InstallerUploadSession,
   InstallerUploadUrlRequest,
   InstallerUploadUrlResponse,
+  LaunchAffirmation,
+  LaunchAffirmationStatus,
   LaunchHistoryItem,
   LaunchInitiateResponse,
+  LaunchNeedsAffirmation,
   LaunchPreviewResponse,
   LaunchToolRequest,
   LibraryQueryRequest,
@@ -3715,6 +3719,8 @@ export const usePreviewLaunchContext = <
 };
 
 /**
+ * Server-side gate (Task #45): refuses to mint a token unless a valid, unexpired launch affirmation exists for (user, active preset, current context-block version). Returns 409 with structured `needs_affirmation` payload when the gate isn't satisfied so the client can render the affirmation modal.
+
  * @summary Initiate a tool launch (issues a single-use launch token, with optional redaction)
  */
 export const getLaunchToolUrl = (toolId: string) => {
@@ -3735,7 +3741,7 @@ export const launchTool = async (
 };
 
 export const getLaunchToolMutationOptions = <
-  TError = ErrorType<ErrorEnvelope>,
+  TError = ErrorType<ErrorEnvelope | LaunchNeedsAffirmation>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -3776,13 +3782,15 @@ export type LaunchToolMutationResult = NonNullable<
   Awaited<ReturnType<typeof launchTool>>
 >;
 export type LaunchToolMutationBody = BodyType<LaunchToolRequest>;
-export type LaunchToolMutationError = ErrorType<ErrorEnvelope>;
+export type LaunchToolMutationError = ErrorType<
+  ErrorEnvelope | LaunchNeedsAffirmation
+>;
 
 /**
  * @summary Initiate a tool launch (issues a single-use launch token, with optional redaction)
  */
 export const useLaunchTool = <
-  TError = ErrorType<ErrorEnvelope>,
+  TError = ErrorType<ErrorEnvelope | LaunchNeedsAffirmation>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -3799,6 +3807,174 @@ export const useLaunchTool = <
   TContext
 > => {
   return useMutation(getLaunchToolMutationOptions(options));
+};
+
+/**
+ * Returns the current valid affirmation if one exists for the active preset + current context-block version, otherwise returns null. Used by the marketplace to decide whether to show the "preset confirmed for this session" indicator vs. open the modal.
+
+ * @summary Read the current launch-time affirmation for the active preset
+ */
+export const getGetLaunchAffirmationUrl = () => {
+  return `/api/launches/affirmation`;
+};
+
+export const getLaunchAffirmation = async (
+  options?: RequestInit,
+): Promise<LaunchAffirmationStatus> => {
+  return customFetch<LaunchAffirmationStatus>(getGetLaunchAffirmationUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetLaunchAffirmationQueryKey = () => {
+  return [`/api/launches/affirmation`] as const;
+};
+
+export const getGetLaunchAffirmationQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLaunchAffirmation>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLaunchAffirmation>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetLaunchAffirmationQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getLaunchAffirmation>>
+  > = ({ signal }) => getLaunchAffirmation({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLaunchAffirmation>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLaunchAffirmationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLaunchAffirmation>>
+>;
+export type GetLaunchAffirmationQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Read the current launch-time affirmation for the active preset
+ */
+
+export function useGetLaunchAffirmation<
+  TData = Awaited<ReturnType<typeof getLaunchAffirmation>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLaunchAffirmation>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLaunchAffirmationQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Creates / replaces the user's launch-time affirmation, valid for ~30 minutes. The body's presetId and contextBlockVersion must match the user's active preset and the current context-block version respectively, otherwise 409 is returned.
+
+ * @summary Affirm that the active preset's context block is still current
+ */
+export const getCreateLaunchAffirmationUrl = () => {
+  return `/api/launches/affirm`;
+};
+
+export const createLaunchAffirmation = async (
+  createLaunchAffirmationRequest: CreateLaunchAffirmationRequest,
+  options?: RequestInit,
+): Promise<LaunchAffirmation> => {
+  return customFetch<LaunchAffirmation>(getCreateLaunchAffirmationUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createLaunchAffirmationRequest),
+  });
+};
+
+export const getCreateLaunchAffirmationMutationOptions = <
+  TError = ErrorType<ErrorEnvelope | LaunchNeedsAffirmation>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createLaunchAffirmation>>,
+    TError,
+    { data: BodyType<CreateLaunchAffirmationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createLaunchAffirmation>>,
+  TError,
+  { data: BodyType<CreateLaunchAffirmationRequest> },
+  TContext
+> => {
+  const mutationKey = ["createLaunchAffirmation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createLaunchAffirmation>>,
+    { data: BodyType<CreateLaunchAffirmationRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createLaunchAffirmation(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateLaunchAffirmationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createLaunchAffirmation>>
+>;
+export type CreateLaunchAffirmationMutationBody =
+  BodyType<CreateLaunchAffirmationRequest>;
+export type CreateLaunchAffirmationMutationError = ErrorType<
+  ErrorEnvelope | LaunchNeedsAffirmation
+>;
+
+/**
+ * @summary Affirm that the active preset's context block is still current
+ */
+export const useCreateLaunchAffirmation = <
+  TError = ErrorType<ErrorEnvelope | LaunchNeedsAffirmation>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createLaunchAffirmation>>,
+    TError,
+    { data: BodyType<CreateLaunchAffirmationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createLaunchAffirmation>>,
+  TError,
+  { data: BodyType<CreateLaunchAffirmationRequest> },
+  TContext
+> => {
+  return useMutation(getCreateLaunchAffirmationMutationOptions(options));
 };
 
 /**

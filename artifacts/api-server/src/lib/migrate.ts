@@ -51,7 +51,8 @@ export async function runProfileSplitMigration(): Promise<void> {
       ADD COLUMN IF NOT EXISTS command varchar,
       ADD COLUMN IF NOT EXISTS billets jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS active_preset_id varchar,
-      ADD COLUMN IF NOT EXISTS launch_preference varchar NOT NULL DEFAULT 'preview'
+      ADD COLUMN IF NOT EXISTS launch_preference varchar NOT NULL DEFAULT 'preview',
+      ADD COLUMN IF NOT EXISTS view_mode varchar NOT NULL DEFAULT 'admin'
   `);
 
   // --- 3. Copy cb_* and evaluation fields into context_blocks -----------
@@ -155,12 +156,35 @@ export async function runProfileSplitMigration(): Promise<void> {
       ON tool_reviews (tool_id)
   `);
 
-  // --- 3d. Ensure new launches columns (upstream redaction feature) -----
+  // --- 3d. Ensure new launches columns (upstream redaction feature +
+  //         Task #45 launch-time affirmation audit) ---------------------
   await db.execute(sql`
     ALTER TABLE launches
       ADD COLUMN IF NOT EXISTS shared_field_keys jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS shared_snippets jsonb NOT NULL DEFAULT '[]'::jsonb,
-      ADD COLUMN IF NOT EXISTS additional_note text
+      ADD COLUMN IF NOT EXISTS additional_note text,
+      ADD COLUMN IF NOT EXISTS preset_id varchar,
+      ADD COLUMN IF NOT EXISTS context_block_version integer,
+      ADD COLUMN IF NOT EXISTS affirmed_at timestamp with time zone
+  `);
+
+  // --- 3d.1. Context-block monotonic version + launch_affirmations table
+  // (Task #45). The version column is bumped every time a context_blocks
+  // row is confirmed; the launch_affirmations row binds (user, preset,
+  // version) for a 30-min TTL so re-launching within that window skips
+  // the modal but any preset switch / cb edit / TTL elapse invalidates.
+  await db.execute(sql`
+    ALTER TABLE context_blocks
+      ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS launch_affirmations (
+      user_id varchar PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      preset_id varchar NOT NULL,
+      context_block_version integer NOT NULL,
+      affirmed_at timestamp with time zone NOT NULL DEFAULT now(),
+      expires_at timestamp with time zone NOT NULL
+    )
   `);
 
   // --- 3e. Ensure new documents column (upstream object-storage upload) -

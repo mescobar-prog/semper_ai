@@ -158,6 +158,10 @@ export interface SerializedContextBlockState {
   experience: string | null;
   confirmedAt: string | null;
   lastEvaluation: SerializedContextBlockEvaluation | null;
+  // Monotonic version (bumped on every edit / re-confirm). The launch-time
+  // affirmation gate (Task #45) keys on this so any change automatically
+  // invalidates an outstanding affirmation.
+  version: number;
 }
 
 export interface SerializedContextBlockEvaluation {
@@ -182,6 +186,7 @@ export function serializeContextBlock(
       experience: null,
       confirmedAt: null,
       lastEvaluation: null,
+      version: 1,
     };
   }
   const lastEvaluation: SerializedContextBlockEvaluation | null =
@@ -204,6 +209,7 @@ export function serializeContextBlock(
     experience: cb.experience,
     confirmedAt: cb.confirmedAt ? cb.confirmedAt.toISOString() : null,
     lastEvaluation,
+    version: cb.version ?? 1,
   };
 }
 

@@ -1,17 +1,21 @@
 import { Router, type IRouter, type Request } from "express";
-import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import {
   db,
   toolsTable,
   launchesTable,
   launchTokensTable,
+  launchAffirmationsTable,
+  presetDocumentsTable,
   sessionTokensTable,
   usersTable,
   docChunksTable,
   documentsTable,
+  type LaunchAffirmation,
   type LaunchSharedSnippet,
 } from "@workspace/db";
 import {
+  CreateLaunchAffirmationBody,
   DraftBriefBody,
   ExchangeContextTokenBody,
   LaunchToolBody,
@@ -33,6 +37,7 @@ import {
   getOrCreateProfile,
   hasConfirmedContextBlock,
   serializeContextBlock,
+  serializePreset,
   serializeProfile,
   snapshotAsProfile,
   redactProfileForLaunch,
@@ -45,6 +50,37 @@ const router: IRouter = Router();
 
 const LAUNCH_TOKEN_TTL_MS = 5 * 60 * 1000;
 const SESSION_TOKEN_TTL_MS = 60 * 60 * 1000;
+// Launch-time affirmation TTL (Task #45). Within this window the operator
+// can launch any tool that uses the same active preset + context-block
+// version without re-affirming; outside it the modal pops again.
+const LAUNCH_AFFIRMATION_TTL_MS = 30 * 60 * 1000;
+
+function serializeAffirmation(row: LaunchAffirmation) {
+  return {
+    presetId: row.presetId,
+    contextBlockVersion: row.contextBlockVersion,
+    affirmedAt: row.affirmedAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+  };
+}
+
+async function loadValidAffirmation(
+  userId: string,
+  presetId: string,
+  contextBlockVersion: number,
+  now: Date,
+): Promise<LaunchAffirmation | null> {
+  const [row] = await db
+    .select()
+    .from(launchAffirmationsTable)
+    .where(eq(launchAffirmationsTable.userId, userId))
+    .limit(1);
+  if (!row) return null;
+  if (row.presetId !== presetId) return null;
+  if (row.contextBlockVersion !== contextBlockVersion) return null;
+  if (row.expiresAt.getTime() <= now.getTime()) return null;
+  return row;
+}
 
 function getOrigin(req: Request): string {
   const proto = req.headers["x-forwarded-proto"] || "https";
@@ -153,6 +189,44 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
   const preset = ctx.activePreset;
 
+  // ----- Launch-time affirmation gate (Task #45) ------------------------
+  // We refuse to mint a token unless the user has a valid, unexpired
+  // affirmation for (active preset, current context-block version). The
+  // marketplace pre-checks via GET /launches/affirmation so this almost
+  // always passes silently; a 409 here means a stale client tried to skip
+  // the modal (or the affirmation expired between the pre-check and the
+  // POST). Either way the response carries everything the modal needs to
+  // render without a follow-up round trip.
+  const contextBlockRow = await getOrCreateContextBlock(req.user!.id);
+  const cbVersion = contextBlockRow.version ?? 1;
+  const gateNow = new Date();
+  const validAffirmation = await loadValidAffirmation(
+    req.user!.id,
+    preset.id,
+    cbVersion,
+    gateNow,
+  );
+  if (!validAffirmation) {
+    const presetDocIds = await db
+      .select({ id: presetDocumentsTable.documentId })
+      .from(presetDocumentsTable)
+      .where(eq(presetDocumentsTable.presetId, preset.id));
+    res.status(409).json({
+      error:
+        "Confirm your active preset's context block before launching this tool.",
+      code: "needs_affirmation",
+      presetId: preset.id,
+      contextBlockVersion: cbVersion,
+      preset: serializePreset(
+        preset,
+        presetDocIds.map((r) => r.id),
+        true,
+      ),
+      contextBlock: serializeContextBlock(contextBlockRow),
+    });
+    return;
+  }
+
   // Decide which profile field keys to share. Null/undefined => all populated.
   const allFieldKeys = SHAREABLE_PROFILE_FIELDS.map(({ key }) => key as string);
   let sharedFieldKeys: string[];
@@ -243,6 +317,8 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
       ? additionalNote.trim()
       : null;
 
+  // Persist the affirmation context on the launch row so audits can prove
+  // the operator confirmed their preset's CB version at this exact launch.
   const [launch] = await db
     .insert(launchesTable)
     .values({
@@ -252,6 +328,9 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
       sharedFieldKeys,
       sharedSnippets,
       additionalNote: note,
+      presetId: preset.id,
+      contextBlockVersion: cbVersion,
+      affirmedAt: validAffirmation.affirmedAt,
     })
     .returning();
 
@@ -309,6 +388,109 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     installerFilename: tool.installerFilename ?? null,
     installInstructions: tool.installInstructions ?? null,
   });
+});
+
+// ----- Launch-time affirmation endpoints (Task #45) ---------------------
+// Reads the user's current affirmation alongside the active preset id and
+// the live context-block version. The marketplace uses the comparison to
+// decide whether to launch directly or open the affirmation modal; we
+// return both halves in one call so the dashboard never has to stitch
+// data from /profile and /launches/affirmation just to render its
+// "preset confirmed for this session" indicator.
+router.get("/launches/affirmation", requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  const ctx = await getActiveContext(userId);
+  const cb = await getOrCreateContextBlock(userId);
+  const cbVersion = cb.version ?? 1;
+  const now = new Date();
+  const valid = await loadValidAffirmation(
+    userId,
+    ctx.activePreset.id,
+    cbVersion,
+    now,
+  );
+  res.json({
+    affirmation: valid ? serializeAffirmation(valid) : null,
+    presetId: ctx.activePreset.id,
+    contextBlockVersion: cbVersion,
+  });
+});
+
+router.post("/launches/affirm", requireAuth, async (req, res) => {
+  const parsed = CreateLaunchAffirmationBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request" });
+    return;
+  }
+  const userId = req.user!.id;
+  const ctx = await getActiveContext(userId);
+  const preset = ctx.activePreset;
+  const cb = await getOrCreateContextBlock(userId);
+  const cbVersion = cb.version ?? 1;
+
+  // Reject stale clicks — e.g. the user opened the modal, edited their
+  // context block in another tab, then submitted the old version. We
+  // return the same 409 shape as the launch gate so the modal can
+  // re-render against fresh data without special-casing the response.
+  if (
+    parsed.data.presetId !== preset.id ||
+    parsed.data.contextBlockVersion !== cbVersion
+  ) {
+    const presetDocIds = await db
+      .select({ id: presetDocumentsTable.documentId })
+      .from(presetDocumentsTable)
+      .where(eq(presetDocumentsTable.presetId, preset.id));
+    res.status(409).json({
+      error:
+        "Your active preset or context block changed. Re-confirm to continue.",
+      code: "needs_affirmation",
+      presetId: preset.id,
+      contextBlockVersion: cbVersion,
+      preset: serializePreset(
+        preset,
+        presetDocIds.map((r) => r.id),
+        true,
+      ),
+      contextBlock: serializeContextBlock(cb),
+    });
+    return;
+  }
+
+  // Upsert by userId — a single active affirmation per operator is enough,
+  // and replacing keeps the table append-light. Switching preset deletes
+  // the row entirely (see routes/presets.ts /activate handler), and a CB
+  // version bump invalidates by mismatch on the next gate check.
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + LAUNCH_AFFIRMATION_TTL_MS);
+  const [row] = await db
+    .insert(launchAffirmationsTable)
+    .values({
+      userId,
+      presetId: preset.id,
+      contextBlockVersion: cbVersion,
+      affirmedAt: now,
+      expiresAt,
+    })
+    .onConflictDoUpdate({
+      target: launchAffirmationsTable.userId,
+      set: {
+        presetId: preset.id,
+        contextBlockVersion: cbVersion,
+        affirmedAt: now,
+        expiresAt,
+      },
+    })
+    .returning();
+  logger.info(
+    {
+      userId,
+      presetId: preset.id,
+      cbVersion,
+      expiresAt: expiresAt.toISOString(),
+    },
+    "launch affirmation created",
+  );
+  res.json(serializeAffirmation(row));
 });
 
 router.post("/tools/context-exchange", async (req, res) => {

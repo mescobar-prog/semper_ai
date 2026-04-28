@@ -26,4 +26,7 @@ export interface ContextBlockState {
    */
   confirmedAt: Date | null;
   lastEvaluation: ContextBlockEvaluation | null;
+  /** Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit/re-confirm auto-invalidates an outstanding affirmation.
+   */
+  version: number;
 }

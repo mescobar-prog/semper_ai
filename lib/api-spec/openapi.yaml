@@ -1073,6 +1073,12 @@ paths:
       tags: [Launch]
       operationId: launchTool
       summary: Initiate a tool launch (issues a single-use launch token, with optional redaction)
+      description: >
+        Server-side gate (Task #45): refuses to mint a token unless a valid,
+        unexpired launch affirmation exists for (user, active preset,
+        current context-block version). Returns 409 with structured
+        `needs_affirmation` payload when the gate isn't satisfied so the
+        client can render the affirmation modal.
       parameters:
         - name: toolId
           in: path
@@ -1099,6 +1105,71 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: >
+            Launch-time affirmation gate not satisfied. The client should
+            render the affirmation modal using the returned preset and
+            context block, then POST /launches/affirm and retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchNeedsAffirmation' }
+  /launches/affirmation:
+    get:
+      tags: [Launch]
+      operationId: getLaunchAffirmation
+      summary: Read the current launch-time affirmation for the active preset
+      description: >
+        Returns the current valid affirmation if one exists for the active
+        preset + current context-block version, otherwise returns null.
+        Used by the marketplace to decide whether to show the
+        "preset confirmed for this session" indicator vs. open the modal.
+      responses:
+        '200':
+          description: Current affirmation status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchAffirmationStatus' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /launches/affirm:
+    post:
+      tags: [Launch]
+      operationId: createLaunchAffirmation
+      summary: Affirm that the active preset's context block is still current
+      description: >
+        Creates / replaces the user's launch-time affirmation, valid for
+        ~30 minutes. The body's presetId and contextBlockVersion must match
+        the user's active preset and the current context-block version
+        respectively, otherwise 409 is returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLaunchAffirmationRequest' }
+      responses:
+        '200':
+          description: Affirmation created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchAffirmation' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: Stale affirmation request (preset or context-block version mismatch)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchNeedsAffirmation' }
   /tools/context-exchange:
     post:
       tags: [Launch]
@@ -1954,7 +2025,7 @@ components:
       type: object
       required:
         [doctrine, intent, environment, constraints, risk, experience,
-         confirmedAt, lastEvaluation]
+         confirmedAt, lastEvaluation, version]
       properties:
         doctrine: { type: [string, 'null'] }
         intent: { type: [string, 'null'] }
@@ -1970,6 +2041,14 @@ components:
           oneOf:
             - $ref: '#/components/schemas/ContextBlockEvaluation'
             - type: 'null'
+        version:
+          type: integer
+          description: >
+            Monotonic version of this context block. Bumps every time any of
+            the 6 fields are edited or the block is re-confirmed. The
+            launch-time affirmation gate (Task #45) pairs (user, active
+            preset, this version) so any edit/re-confirm auto-invalidates
+            an outstanding affirmation.
 
     ContextBlockConfirmation:
       type: object
@@ -2630,6 +2709,73 @@ components:
           description: Stable download URL for the installer (local_install only).
         installerFilename: { type: [string, 'null'] }
         installInstructions: { type: [string, 'null'] }
+
+    LaunchAffirmation:
+      type: object
+      description: >
+        Server-side record of a user's launch-time affirmation. Valid for
+        ~30 minutes; covers any tool launched while the active preset id
+        and context-block version still match.
+      required: [presetId, contextBlockVersion, affirmedAt, expiresAt]
+      properties:
+        presetId: { type: string }
+        contextBlockVersion: { type: integer }
+        affirmedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+
+    LaunchAffirmationStatus:
+      type: object
+      description: >
+        Result of GET /launches/affirmation. `affirmation` is the current
+        valid record (or null), and the sibling fields surface what the
+        affirmation modal would render so callers can avoid a second fetch.
+      required: [affirmation, presetId, contextBlockVersion]
+      properties:
+        affirmation:
+          oneOf:
+            - $ref: '#/components/schemas/LaunchAffirmation'
+            - type: 'null'
+        presetId:
+          type: string
+          description: The user's currently active preset id.
+        contextBlockVersion:
+          type: integer
+          description: Current monotonic version of the user's context block.
+
+    CreateLaunchAffirmationRequest:
+      type: object
+      required: [presetId, contextBlockVersion]
+      properties:
+        presetId:
+          type: string
+          description: Must equal the user's currently active preset id.
+        contextBlockVersion:
+          type: integer
+          description: Must equal the current context-block version.
+
+    LaunchNeedsAffirmation:
+      type: object
+      description: >
+        409 payload returned when the launch endpoint refuses to mint a
+        token because the user has no valid affirmation, or when the
+        affirm endpoint refuses because the request is stale. Includes
+        the data the affirmation modal needs to render without a follow-
+        up round trip.
+      required:
+        [error, code, presetId, contextBlockVersion, preset, contextBlock]
+      properties:
+        error: { type: string }
+        code:
+          type: string
+          enum: [needs_affirmation]
+        presetId:
+          type: string
+          description: Active preset id at the time of the gate check.
+        contextBlockVersion:
+          type: integer
+          description: Current context-block version at the time of the gate check.
+        preset: { $ref: '#/components/schemas/MissionPreset' }
+        contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
 
     ContextExchangeRequest:
       type: object

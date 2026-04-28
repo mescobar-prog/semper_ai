@@ -161,6 +161,9 @@ export interface ContextBlockState {
    */
   confirmedAt: string | null;
   lastEvaluation: ContextBlockEvaluation | null;
+  /** Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit/re-confirm auto-invalidates an outstanding affirmation.
+   */
+  version: number;
 }
 
 /**
@@ -854,6 +857,99 @@ export interface LaunchInitiateResponse {
   installInstructions: string | null;
 }
 
+/**
+ * Server-side record of a user's launch-time affirmation. Valid for ~30 minutes; covers any tool launched while the active preset id and context-block version still match.
+
+ */
+export interface LaunchAffirmation {
+  presetId: string;
+  contextBlockVersion: number;
+  affirmedAt: string;
+  expiresAt: string;
+}
+
+/**
+ * Result of GET /launches/affirmation. `affirmation` is the current valid record (or null), and the sibling fields surface what the affirmation modal would render so callers can avoid a second fetch.
+
+ */
+export interface LaunchAffirmationStatus {
+  affirmation: LaunchAffirmation | null;
+  /** The user's currently active preset id. */
+  presetId: string;
+  /** Current monotonic version of the user's context block. */
+  contextBlockVersion: number;
+}
+
+export interface CreateLaunchAffirmationRequest {
+  /** Must equal the user's currently active preset id. */
+  presetId: string;
+  /** Must equal the current context-block version. */
+  contextBlockVersion: number;
+}
+
+export type LaunchNeedsAffirmationCode =
+  (typeof LaunchNeedsAffirmationCode)[keyof typeof LaunchNeedsAffirmationCode];
+
+export const LaunchNeedsAffirmationCode = {
+  needs_affirmation: "needs_affirmation",
+} as const;
+
+export interface PresetProfileSnapshot {
+  /** @nullable */
+  branch: string | null;
+  /** @nullable */
+  rank: string | null;
+  /** @nullable */
+  mosCode: string | null;
+  /** @nullable */
+  dutyTitle: string | null;
+  /** @nullable */
+  unit: string | null;
+  /** @nullable */
+  baseLocation: string | null;
+  /** @nullable */
+  securityClearance: string | null;
+  /** @nullable */
+  deploymentStatus: string | null;
+  /**
+   * Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+
+   * @nullable
+   */
+  command: string | null;
+  /** Billet titles the operator currently holds. */
+  billets: string[];
+  /** @nullable */
+  freeFormContext: string | null;
+}
+
+export interface MissionPreset {
+  id: string;
+  name: string;
+  /** @nullable */
+  description: string | null;
+  profileSnapshot: PresetProfileSnapshot;
+  documentIds: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 409 payload returned when the launch endpoint refuses to mint a token because the user has no valid affirmation, or when the affirm endpoint refuses because the request is stale. Includes the data the affirmation modal needs to render without a follow- up round trip.
+
+ */
+export interface LaunchNeedsAffirmation {
+  error: string;
+  code: LaunchNeedsAffirmationCode;
+  /** Active preset id at the time of the gate check. */
+  presetId: string;
+  /** Current context-block version at the time of the gate check. */
+  contextBlockVersion: number;
+  preset: MissionPreset;
+  contextBlock: ContextBlockState;
+}
+
 export interface ContextExchangeRequest {
   /** @minLength 1 */
   launchToken: string;
@@ -1037,47 +1133,6 @@ export interface DashboardSummary {
   recentLaunches: LaunchHistoryItem[];
   atoStatusBreakdown: DashboardSummaryAtoStatusBreakdownItem[];
   topTools: ToolSummary[];
-}
-
-export interface PresetProfileSnapshot {
-  /** @nullable */
-  branch: string | null;
-  /** @nullable */
-  rank: string | null;
-  /** @nullable */
-  mosCode: string | null;
-  /** @nullable */
-  dutyTitle: string | null;
-  /** @nullable */
-  unit: string | null;
-  /** @nullable */
-  baseLocation: string | null;
-  /** @nullable */
-  securityClearance: string | null;
-  /** @nullable */
-  deploymentStatus: string | null;
-  /**
-   * Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
-
-   * @nullable
-   */
-  command: string | null;
-  /** Billet titles the operator currently holds. */
-  billets: string[];
-  /** @nullable */
-  freeFormContext: string | null;
-}
-
-export interface MissionPreset {
-  id: string;
-  name: string;
-  /** @nullable */
-  description: string | null;
-  profileSnapshot: PresetProfileSnapshot;
-  documentIds: string[];
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface MissionPresetCreate {

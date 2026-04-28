@@ -32,6 +32,11 @@ export const contextBlocksTable = pgTable("context_blocks", {
   constraints: text("constraints"),
   risk: text("risk"),
   experience: text("experience"),
+  // Monotonic version that bumps every time any of the 6 fields are edited
+  // or the block is re-confirmed. The launch-time affirmation gate (Task #45)
+  // pairs (user, active preset, this version) so affirmations auto-expire
+  // the moment the underlying block changes.
+  version: integer("version").notNull().default(1),
   // ----- Latest evaluator metadata --------------------------------------
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   scoreTotal: integer("score_total"),

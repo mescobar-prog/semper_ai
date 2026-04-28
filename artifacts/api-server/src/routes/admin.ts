@@ -10,6 +10,7 @@ import {
   usersTable,
   profilesTable,
   installerUploadsTable,
+  contextBlocksTable,
   type Tool,
 } from "@workspace/db";
 import {
@@ -599,18 +600,22 @@ router.get(
         branch: profilesTable.branch,
         rank: profilesTable.rank,
         isAdmin: profilesTable.isAdmin,
-        cbConfirmedAt: profilesTable.cbConfirmedAt,
-        cbScoreTotal: profilesTable.cbScoreTotal,
-        cbStatus: profilesTable.cbStatus,
-        cbOpsecFlag: profilesTable.cbOpsecFlag,
-        cbSubmissionId: profilesTable.cbSubmissionId,
+        cbConfirmedAt: contextBlocksTable.confirmedAt,
+        cbScoreTotal: contextBlocksTable.scoreTotal,
+        cbStatus: contextBlocksTable.status,
+        cbOpsecFlag: contextBlocksTable.opsecFlag,
+        cbSubmissionId: contextBlocksTable.submissionId,
       })
       .from(usersTable)
       .leftJoin(profilesTable, eq(profilesTable.userId, usersTable.id))
+      .leftJoin(
+        contextBlocksTable,
+        eq(contextBlocksTable.userId, usersTable.id),
+      )
       // Confirmed users first (most recent first), then never-confirmed users
       // alphabetically by email so the "missing" list is stable.
       .orderBy(
-        sql`${profilesTable.cbConfirmedAt} DESC NULLS LAST`,
+        sql`${contextBlocksTable.confirmedAt} DESC NULLS LAST`,
         asc(usersTable.email),
       );
 

@@ -11,6 +11,7 @@ import {
   getListMyPresetsQueryKey,
   getListDocumentsQueryKey,
   getGetDashboardSummaryQueryKey,
+  getGetLaunchAffirmationQueryKey,
 } from "@workspace/api-client-react";
 import type { MissionPreset } from "@workspace/api-client-react";
 
@@ -231,6 +232,12 @@ function PresetSwitcher() {
     queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
     queryClient.invalidateQueries({
       queryKey: getGetDashboardSummaryQueryKey(),
+    });
+    // Switching the active preset invalidates the launch-time affirmation
+    // server-side (Task #45). Invalidate the query so the marketplace's
+    // CatalogDetail re-prompts the affirmation modal on the next launch.
+    queryClient.invalidateQueries({
+      queryKey: getGetLaunchAffirmationQueryKey(),
     });
   };
 

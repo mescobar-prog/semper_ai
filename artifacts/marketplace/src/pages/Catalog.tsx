@@ -6,6 +6,7 @@ import {
   useEvaluateContextBlock,
   useConfirmContextBlock,
   getGetMyProfileQueryKey,
+  getGetLaunchAffirmationQueryKey,
 } from "@workspace/api-client-react";
 import type {
   ContextBlockEvaluation,
@@ -141,6 +142,12 @@ export function Catalog() {
       setEvaluation(result.evaluation);
       setEvaluatedSnapshot(snapshot);
       queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+      // Confirming bumps the context-block version on the server, which
+      // invalidates any cached launch affirmation (Task #45). Refetch so
+      // the marketplace re-prompts the modal on the next launch.
+      queryClient.invalidateQueries({
+        queryKey: getGetLaunchAffirmationQueryKey(),
+      });
     } catch (err) {
       // Surface server-side rejection (NO-GO / OPSEC) which arrives as 422
       // with { error, evaluation }.

@@ -10,11 +10,15 @@ import {
   useListToolReviews,
   useUpsertMyToolReview,
   useDeleteMyToolReview,
+  useGetLaunchAffirmation,
+  useListMyPresets,
   getGetToolBySlugQueryKey,
   getListRecentLaunchesQueryKey,
   getGetDashboardSummaryQueryKey,
   getListToolReviewsQueryKey,
   getListToolsQueryKey,
+  getGetLaunchAffirmationQueryKey,
+  getListMyPresetsQueryKey,
 } from "@workspace/api-client-react";
 import type { ToolReview } from "@workspace/api-client-react";
 import {
@@ -31,6 +35,10 @@ import {
   LaunchPreviewDialog,
   type LaunchTrigger,
 } from "@/components/LaunchPreviewDialog";
+import {
+  LaunchAffirmationDialog,
+  type AffirmationPrompt,
+} from "@/components/LaunchAffirmationDialog";
 
 export function CatalogDetail() {
   const params = useParams<{ slug: string }>();
@@ -46,10 +54,44 @@ export function CatalogDetail() {
   const removeFav = useRemoveFavorite();
   const { data: profileEnvelope } = useGetMyProfile();
   const profile = profileEnvelope?.profile;
+  const contextBlock = profileEnvelope?.contextBlock ?? null;
+
+  // Launch-time affirmation status (Task #45). Drives the "preset confirmed
+  // for this session" indicator and short-circuits the modal when the
+  // operator already affirmed within the 30-min TTL.
+  const { data: affirmationStatus } = useGetLaunchAffirmation({
+    query: {
+      queryKey: getGetLaunchAffirmationQueryKey(),
+      // Server returns plain JSON; default cache is fine. Refetch on
+      // window focus so a new tab editing the CB doesn't leave a stale
+      // "confirmed" pill behind.
+      refetchOnWindowFocus: true,
+    },
+  });
+  const { data: presets } = useListMyPresets({
+    query: { queryKey: getListMyPresetsQueryKey(), retry: false },
+  });
+  const activePreset = (presets ?? []).find((p) => p.isActive) ?? null;
+
+  const hasValidAffirmation =
+    !!affirmationStatus?.affirmation &&
+    !!activePreset &&
+    affirmationStatus.presetId === activePreset.id &&
+    !!contextBlock &&
+    affirmationStatus.contextBlockVersion === contextBlock.version;
 
   const [launchTrigger, setLaunchTrigger] = useState<LaunchTrigger | null>(
     null,
   );
+  // Holds the snapshot the affirmation modal should render. Set by the
+  // server's 409 response or assembled locally for a manual re-confirm.
+  const [affirmationPrompt, setAffirmationPrompt] =
+    useState<AffirmationPrompt | null>(null);
+  // When the affirmation modal closes after a successful confirm, we
+  // automatically re-fire the launch the operator originally clicked.
+  const [pendingLaunch, setPendingLaunch] = useState<{
+    forcePreview: boolean;
+  } | null>(null);
   // When the user clicks "Edit before launch", we explicitly force preview mode
   // for that single click even if their saved preference is "direct".
   const [forcePreview, setForcePreview] = useState(false);
@@ -101,17 +143,51 @@ export function CatalogDetail() {
     });
   };
 
+  // Triggered by the launch button. If the affirmation gate is already
+  // satisfied we proceed straight into the existing preview/direct flow;
+  // otherwise we open the affirmation modal first and stash the launch
+  // intent so it auto-resumes once the operator confirms.
   const launch = (opts?: { forcePreview?: boolean }) => {
     setLaunchState({ status: "idle" });
-    setForcePreview(!!opts?.forcePreview);
+    const fp = !!opts?.forcePreview;
+    if (!hasValidAffirmation) {
+      // Build the prompt locally from the data we already have. If we're
+      // missing anything (rare; would mean profile or presets haven't
+      // loaded yet), we let the launch attempt fall through and surface
+      // the server's 409 below.
+      if (activePreset && contextBlock) {
+        setAffirmationPrompt({
+          presetId: activePreset.id,
+          contextBlockVersion: contextBlock.version,
+          preset: activePreset,
+          contextBlock,
+        });
+        setPendingLaunch({ forcePreview: fp });
+        return;
+      }
+    }
+    setForcePreview(fp);
     setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
+  };
+
+  // Click handler for the "Re-confirm preset for this session" link. Just
+  // opens the modal without queuing a launch — the operator wants to
+  // freshen the affirmation, not launch anything yet.
+  const reaffirm = () => {
+    if (!activePreset || !contextBlock) return;
+    setPendingLaunch(null);
+    setAffirmationPrompt({
+      presetId: activePreset.id,
+      contextBlockVersion: contextBlock.version,
+      preset: activePreset,
+      contextBlock,
+    });
   };
 
   const launchPref = profile?.launchPreference ?? "preview";
   const showPreview = forcePreview || launchPref !== "direct";
   const isLocal = tool.hostingType === "local_install";
-  const cb = profile?.contextBlock;
-  const cbConfirmed = !!cb?.confirmedAt;
+  const cbConfirmed = !!contextBlock?.confirmedAt;
 
   return (
     <PageContainer>
@@ -236,6 +312,12 @@ export function CatalogDetail() {
                 </p>
               </div>
             )}
+            <AffirmationIndicator
+              valid={hasValidAffirmation}
+              expiresAt={affirmationStatus?.affirmation?.expiresAt ?? null}
+              onReaffirm={reaffirm}
+              canReaffirm={!!activePreset && !!contextBlock}
+            />
             <button
               onClick={() => launch()}
               disabled={!!launchTrigger || !tool.isActive || !cbConfirmed}
@@ -382,8 +464,73 @@ export function CatalogDetail() {
         }}
       />
 
+      <LaunchAffirmationDialog
+        prompt={affirmationPrompt}
+        onClose={() => {
+          setAffirmationPrompt(null);
+          setPendingLaunch(null);
+        }}
+        onAffirmed={() => {
+          // The cached affirmation status was invalidated inside the
+          // dialog; close ourselves and resume the queued launch (if any).
+          const next = pendingLaunch;
+          setAffirmationPrompt(null);
+          setPendingLaunch(null);
+          if (next) {
+            setForcePreview(next.forcePreview);
+            setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
+          }
+        }}
+      />
+
       <ReviewsSection toolId={tool.id} toolSlug={tool.slug} />
     </PageContainer>
+  );
+}
+
+/**
+ * Status pill rendered above the launch button. When the operator has a
+ * valid affirmation we show an "expires at" timestamp and a re-confirm
+ * link; otherwise we surface that the modal will appear on launch.
+ */
+function AffirmationIndicator({
+  valid,
+  expiresAt,
+  onReaffirm,
+  canReaffirm,
+}: {
+  valid: boolean;
+  expiresAt: string | null;
+  onReaffirm: () => void;
+  canReaffirm: boolean;
+}) {
+  if (valid && expiresAt) {
+    const minutesLeft = Math.max(
+      0,
+      Math.round((new Date(expiresAt).getTime() - Date.now()) / 60000),
+    );
+    return (
+      <div className="mb-3 flex items-center justify-between gap-2 rounded border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs">
+        <span className="text-emerald-300">
+          Preset confirmed for this session
+          {minutesLeft > 0 ? ` · ${minutesLeft}m left` : ""}
+        </span>
+        {canReaffirm && (
+          <button
+            type="button"
+            onClick={onReaffirm}
+            className="text-emerald-200 hover:text-emerald-100 underline underline-offset-2"
+          >
+            Re-confirm
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="mb-3 rounded border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+      You'll confirm your active preset before launching.
+    </div>
   );
 }
 

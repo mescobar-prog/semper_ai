@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -44,6 +45,15 @@ export const launchesTable = pgTable(
       .default(sql`'[]'::jsonb`),
     // Optional freeform note the user appended at preview time.
     additionalNote: text("additional_note"),
+    // ----- Launch-time affirmation audit (Task #45) -----------------------
+    // The active mission preset and the context-block version that the user
+    // affirmed-current at the moment we minted this launch token. Persisted
+    // so admin / auditor views (Task #10) can show "launched with preset X,
+    // context-block v7, affirmed N minutes prior". Nullable because legacy
+    // rows minted before this gate landed do not have the metadata.
+    presetId: varchar("preset_id"),
+    contextBlockVersion: integer("context_block_version"),
+    affirmedAt: timestamp("affirmed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -89,6 +99,29 @@ export const sessionTokensTable = pgTable(
   (t) => [index("tool_session_tokens_launch_id_idx").on(t.launchId)],
 );
 
+// Per-user "I have affirmed that this preset's context block is still
+// current for what I'm about to do" record (Task #45). At most one row per
+// user — the launch flow upserts this row whenever the user clicks the
+// affirmation modal. The (presetId, contextBlockVersion) pair on the row
+// is what binds the affirmation: switching active preset, editing the
+// context block (which bumps its version), or letting the TTL elapse all
+// invalidate the affirmation without us having to delete anything.
+export const launchAffirmationsTable = pgTable(
+  "launch_affirmations",
+  {
+    userId: varchar("user_id")
+      .primaryKey()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    presetId: varchar("preset_id").notNull(),
+    contextBlockVersion: integer("context_block_version").notNull(),
+    affirmedAt: timestamp("affirmed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+);
+
 export type Launch = typeof launchesTable.$inferSelect;
 export type LaunchToken = typeof launchTokensTable.$inferSelect;
 export type SessionToken = typeof sessionTokensTable.$inferSelect;
+export type LaunchAffirmation = typeof launchAffirmationsTable.$inferSelect;

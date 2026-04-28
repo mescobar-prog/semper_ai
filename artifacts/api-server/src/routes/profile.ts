@@ -5,6 +5,7 @@ import {
   profilesTable,
   contextBlocksTable,
   profileChatMessagesTable,
+  launchAffirmationsTable,
 } from "@workspace/db";
 import {
   UpdateMyProfileBody,
@@ -160,6 +161,17 @@ router.put("/profile", requireAuth, async (req, res) => {
     .set(update)
     .where(eq(profilesTable.userId, req.user!.id))
     .returning();
+
+  // If this PUT switched the active preset, drop any cached launch
+  // affirmation (Task #45) so the gate re-prompts under the new preset.
+  if (
+    "activePresetId" in update &&
+    update.activePresetId !== previous.activePresetId
+  ) {
+    await db
+      .delete(launchAffirmationsTable)
+      .where(eq(launchAffirmationsTable.userId, req.user!.id));
+  }
 
   // Auto-ingest curated doctrine when the user picks a new branch+MOS or
   // changes their unit to one we have a curated package for. We compare the
@@ -331,8 +343,11 @@ router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
     return;
   }
 
-  // Make sure a context_blocks row exists, then upsert.
-  await getOrCreateContextBlock(userId);
+  // Make sure a context_blocks row exists, then upsert. Bump the monotonic
+  // `version` on every confirm — Task #45's launch-time affirmation gate
+  // pairs (user, preset, this version) so any edit / re-confirm
+  // automatically invalidates a still-cached affirmation.
+  const existingCb = await getOrCreateContextBlock(userId);
 
   const now = new Date();
   const [updatedCb] = await db
@@ -351,6 +366,7 @@ router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
       flags: evaluation.flags,
       submissionId: evaluation.submissionId,
       opsecFlag: evaluation.opsecFlag ? "true" : "false",
+      version: (existingCb.version ?? 1) + 1,
       updatedAt: now,
     })
     .where(eq(contextBlocksTable.userId, userId))

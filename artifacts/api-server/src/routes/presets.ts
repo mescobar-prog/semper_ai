@@ -6,6 +6,7 @@ import {
   presetDocumentsTable,
   documentsTable,
   profilesTable,
+  launchAffirmationsTable,
 } from "@workspace/db";
 import {
   CreateMyPresetBody,
@@ -136,6 +137,11 @@ router.post("/profile/presets", requireAuth, async (req, res) => {
       .update(profilesTable)
       .set({ activePresetId: created.id })
       .where(eq(profilesTable.userId, userId));
+    // Active preset just changed — invalidate any cached launch
+    // affirmation (Task #45). No-op if there wasn't one.
+    await db
+      .delete(launchAffirmationsTable)
+      .where(eq(launchAffirmationsTable.userId, userId));
     isActive = true;
   } else {
     // If the user had no active preset yet (newly minted account), make this
@@ -249,6 +255,11 @@ router.delete("/profile/presets/:id", requireAuth, async (req, res) => {
       .update(profilesTable)
       .set({ activePresetId: newActiveId })
       .where(eq(profilesTable.userId, userId));
+    // Active preset switched implicitly — drop any cached affirmation
+    // (Task #45) so the next launch re-prompts under the new preset.
+    await db
+      .delete(launchAffirmationsTable)
+      .where(eq(launchAffirmationsTable.userId, userId));
   }
 
   await db.delete(presetsTable).where(eq(presetsTable.id, id));
@@ -332,6 +343,14 @@ router.post(
       .update(profilesTable)
       .set({ activePresetId: id })
       .where(eq(profilesTable.userId, userId));
+
+    // Switching the active preset must invalidate any outstanding launch
+    // affirmation (Task #45) — the cached affirmation is bound to the
+    // previously active preset. Deleting the row forces the modal on the
+    // next launch attempt under the new preset.
+    await db
+      .delete(launchAffirmationsTable)
+      .where(eq(launchAffirmationsTable.userId, userId));
 
     const docIds = await loadDocLinks(id);
     res.json(serializePreset(existing, docIds, true));
