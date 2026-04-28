@@ -28,6 +28,7 @@ import {
   draftMissionBrief,
   generateRagQueries,
   type BriefType,
+  type ContextBlockSituation,
 } from "../lib/gemini-helpers";
 import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
@@ -100,17 +101,19 @@ async function loadActiveTool(toolId: string) {
   return tool;
 }
 
-// ----- Launch-time RAG plumbing (Task #88) -----------------------------
-// Intent-led, doctrine-scoped RAG used by both /launch-preview and /launch
-// so the preview the operator sees and the snippets we actually persist
-// stay in lockstep.
+// ----- Launch-time RAG plumbing (Tasks #88, #106) -----------------------
+// Doctrine-scoped RAG used by both /launch-preview and /launch so the
+// preview the operator sees and the snippets we actually persist stay
+// in lockstep.
 //
-// Per-document cap and minimum post-merge relevance score keep one chatty
-// document or a long tail of weak hits from drowning out the snippets the
-// operator actually wants when they typed an intent.
+// Task #106: query generation is now driven off the operator's profile,
+// the last five Context Block elements (Doctrine & Orders excluded),
+// and the operator's free-form "Additional detail" text. Retrieval
+// returns up to LAUNCH_RAG_PER_DOC_CAP chunks per scoped document so
+// the operator can review/redact a balanced sample from each doctrine
+// doc they ticked, instead of one chatty doc dominating the list.
 const LAUNCH_RAG_MIN_SCORE = 0.15;
-const LAUNCH_RAG_PER_DOC_CAP = 3;
-const LAUNCH_RAG_TOTAL_LIMIT = 12;
+const LAUNCH_RAG_PER_DOC_CAP = 5;
 
 interface LaunchRagScope {
   /** Doc IDs we'll actually search over (post intersection / fallback). */
@@ -129,9 +132,15 @@ interface LaunchRagScope {
 
 function resolveLaunchRagScope(
   contextBlockDoctrine: string | null,
-  presetDocumentIds: string[],
+  presetDocs: readonly { id: string; title: string }[],
 ): LaunchRagScope {
-  const selected = parseSelectedDoctrineDocIds(contextBlockDoctrine);
+  // The doctrine textarea stores ticks as `- <doc title>` reference
+  // lines (the marketplace owns the textarea — see Catalog.tsx).
+  // parseSelectedDoctrineDocIds matches those titles back to ids
+  // against the operator's preset docs, so a title collision in some
+  // unrelated library doc can't slip a wrong id into the scope here.
+  const presetDocumentIds = presetDocs.map((d) => d.id);
+  const selected = parseSelectedDoctrineDocIds(contextBlockDoctrine, presetDocs);
   if (selected.length === 0) {
     return {
       scopedDocumentIds: presetDocumentIds,
@@ -139,14 +148,13 @@ function resolveLaunchRagScope(
       scopedToSelectedDoctrine: false,
     };
   }
+  // Because we already restricted the title→id lookup to preset
+  // docs, `selected` is by construction a subset of preset doc ids.
+  // The legacy intersection step below is kept as a defensive
+  // no-op in case a future change widens the lookup.
   const presetSet = new Set(presetDocumentIds);
   const intersection = selected.filter((id) => presetSet.has(id));
   if (intersection.length === 0) {
-    // Operator ticked doctrine that isn't in their active preset's doc set
-    // — most likely the preset was switched after the CB was edited.
-    // Falling back to the preset scope keeps the launch flow working
-    // instead of returning zero snippets, but we still report
-    // scopedToSelectedDoctrine=false so the UI can show "fallback".
     return {
       scopedDocumentIds: presetDocumentIds,
       selectedDoctrineDocIds: selected,
@@ -158,6 +166,24 @@ function resolveLaunchRagScope(
     selectedDoctrineDocIds: selected,
     scopedToSelectedDoctrine: true,
   };
+}
+
+/**
+ * Load (id, title) for the operator's active preset documents.
+ * Needed by resolveLaunchRagScope so it can match the doctrine
+ * textarea's `- <title>` reference lines back to doc ids without
+ * letting a title from outside the active preset slip into the
+ * scope.
+ */
+async function loadPresetDocLookup(
+  presetDocumentIds: string[],
+): Promise<{ id: string; title: string }[]> {
+  if (presetDocumentIds.length === 0) return [];
+  const rows = await db
+    .select({ id: documentsTable.id, title: documentsTable.title })
+    .from(documentsTable)
+    .where(inArray(documentsTable.id, presetDocumentIds));
+  return rows;
 }
 
 interface RunLaunchRagInput {
@@ -172,7 +198,19 @@ interface RunLaunchRagInput {
   };
   snapshotProfile: ReturnType<typeof snapshotAsProfile>;
   scope: LaunchRagScope;
-  intent: string | null;
+  /**
+   * Operator's free-form "Additional detail" text for this launch
+   * (Task #106). Mixed with the Context Block elements as a primary
+   * input to the query generator.
+   */
+  additionalDetail: string | null;
+  /**
+   * Last five Context Block elements (Doctrine & Orders excluded —
+   * that's the corpus we're searching, not a query input). Drives the
+   * query generator's understanding of the operator's mission
+   * situation.
+   */
+  contextElements: ContextBlockSituation;
 }
 
 interface RunLaunchRagResult {
@@ -183,7 +221,14 @@ interface RunLaunchRagResult {
 async function runLaunchRag(
   input: RunLaunchRagInput,
 ): Promise<RunLaunchRagResult> {
-  const { userId, tool, snapshotProfile, scope, intent } = input;
+  const {
+    userId,
+    tool,
+    snapshotProfile,
+    scope,
+    additionalDetail,
+    contextElements,
+  } = input;
   const queries = await generateRagQueries(
     snapshotProfile,
     {
@@ -199,25 +244,79 @@ async function runLaunchRag(
       purpose: tool.purpose ?? undefined,
       ragQueryTemplates: tool.ragQueryTemplates ?? undefined,
     },
-    { intent },
+    { additionalDetail, contextElements },
   );
-  const rawSnippets = await searchChunksMultiQuery(
-    userId,
-    queries,
-    4,
-    LAUNCH_RAG_TOTAL_LIMIT,
-    {
-      documentIds: scope.scopedDocumentIds,
-      minScore: LAUNCH_RAG_MIN_SCORE,
-      perDocumentCap: LAUNCH_RAG_PER_DOC_CAP,
-    },
+
+  // Task #106: TRUE per-document top-K retrieval. Loop each scoped doc
+  // and run the full multi-query search restricted to that single doc,
+  // capping at LAUNCH_RAG_PER_DOC_CAP snippets *per doc*. This
+  // guarantees every selected doctrine doc gets its own top-5 ranking
+  // and a strong-hitting doc cannot starve sibling docs out of the
+  // candidate set (the previous global-then-cap approach allowed
+  // exactly that). Per-doc results are independent, so we run the
+  // doc-scoped searches in parallel.
+  //
+  // When the scope is empty (operator hasn't built a preset / no
+  // doctrine resolves), `scopedDocumentIds` is empty — there's
+  // nothing to search and we return an empty list rather than
+  // searching the whole user library, matching prior behavior.
+  const docResults = await Promise.all(
+    scope.scopedDocumentIds.map((docId) =>
+      searchChunksMultiQuery(
+        userId,
+        queries,
+        LAUNCH_RAG_PER_DOC_CAP,
+        LAUNCH_RAG_PER_DOC_CAP,
+        {
+          documentIds: [docId],
+          minScore: LAUNCH_RAG_MIN_SCORE,
+        },
+      ),
+    ),
   );
+
+  // Concatenate so each doc's top-K stays grouped, but order docs by
+  // their strongest snippet's score so the most-relevant doc's chunks
+  // appear first in the operator's review list. This preserves the
+  // "best hits first" UX without trading away per-doc fairness.
+  const docOrdered = docResults
+    .map((hits) => ({
+      hits,
+      bestScore: hits.length > 0 ? hits[0].score : -Infinity,
+    }))
+    .sort((a, b) => b.bestScore - a.bestScore);
+
   const selectedDocSet = new Set(scope.selectedDoctrineDocIds);
-  const snippets = rawSnippets.map((s) => ({
-    ...s,
-    fromSelectedDoctrine: selectedDocSet.has(s.documentId),
-  }));
+  const snippets = docOrdered
+    .flatMap(({ hits }) => hits)
+    .map((s) => ({
+      ...s,
+      fromSelectedDoctrine: selectedDocSet.has(s.documentId),
+    }));
   return { queries, snippets };
+}
+
+/**
+ * Pull the five non-doctrine Context Block elements off the
+ * persistent CB row in the shape the launch-time RAG generator
+ * expects. Doctrine & Orders is intentionally excluded — it tells us
+ * which docs to search, not what to search for.
+ */
+function pickContextBlockSituation(
+  cb: { intent: string | null; environment: string | null;
+        constraints: string | null; risk: string | null;
+        experience: string | null } | null,
+): ContextBlockSituation {
+  if (!cb) {
+    return { intent: null, environment: null, constraints: null, risk: null, experience: null };
+  }
+  return {
+    intent: cb.intent,
+    environment: cb.environment,
+    constraints: cb.constraints,
+    risk: cb.risk,
+    experience: cb.experience,
+  };
 }
 
 // POST /tools/:toolId/launch-preview
@@ -225,10 +324,12 @@ async function runLaunchRag(
 // user is about to send, *without* minting a launch token. The marketplace
 // frontend uses this to render the pre-launch preview / redaction panel.
 //
-// Optional body: { launchIntent?: string | null } — when present, the
-// operator's free-form "what will you ask this tool?" sentence becomes
-// the primary RAG query (Task #88). The frontend debounces this so we
-// only re-run the search when the operator stops typing.
+// Optional body: { additionalDetail?: string | null } — the operator's
+// free-form note from the consolidated bottom-of-dialog box (Task #106).
+// When present it's mixed with the operator's profile and the last five
+// Context Block elements as the input to the RAG query generator. The
+// frontend debounces this so we only re-run the search once the
+// operator pauses typing.
 router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
   const tool = await loadActiveTool(String(req.params.toolId));
   if (!tool) {
@@ -240,16 +341,18 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
     return;
   }
 
-  // Validate launchIntent off the body. Body is optional — auto-launch /
-  // direct-launch flows POST {} and expect a profile-led preview — so we
-  // pass an empty object through the schema when the body is missing.
+  // Validate additionalDetail off the body. Body is optional —
+  // auto-launch / direct-launch flows POST {} and expect a baseline
+  // CB-and-profile-led preview — so we pass an empty object through
+  // the schema when the body is missing.
   const previewBody = PreviewLaunchContextBody.safeParse(req.body ?? {});
   if (!previewBody.success) {
     res.status(400).json({ error: "Invalid launch preview body" });
     return;
   }
-  const rawIntent = previewBody.data.launchIntent ?? null;
-  const intent = rawIntent && rawIntent.trim() ? rawIntent.trim() : null;
+  const rawDetail = previewBody.data.additionalDetail ?? null;
+  const additionalDetail =
+    rawDetail && rawDetail.trim() ? rawDetail.trim() : null;
 
   // Resolve the user's active mission preset; the snapshot drives identity
   // for the preview (so the candidate list reflects what would actually be
@@ -260,10 +363,12 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
     getOrCreateContextBlock(req.user!.id),
   ]);
   const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
+  const presetDocLookup = await loadPresetDocLookup(ctx.documentIds);
   const scope = resolveLaunchRagScope(
     contextBlockRow.doctrine,
-    ctx.documentIds,
+    presetDocLookup,
   );
+  const contextElements = pickContextBlockSituation(contextBlockRow);
 
   let queries: string[] = [];
   let snippets: Awaited<ReturnType<typeof searchChunksMultiQuery>> = [];
@@ -273,7 +378,8 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
       tool,
       snapshotProfile,
       scope,
-      intent,
+      additionalDetail,
+      contextElements,
     });
     queries = result.queries;
     snippets = result.snippets;
@@ -298,11 +404,14 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
     queries,
     launchPreference:
       ctx.profile.launchPreference === "direct" ? "direct" : "preview",
+    // Task #106: echo the trimmed Additional detail back so the UI can
+    // confirm the search ran against what the operator currently sees
+    // in the input.
+    additionalDetail,
     // Task #88: tell the UI which doctrine the operator's CB ticked and
     // whether the search was actually narrowed to it (vs falling back
     // to the whole preset because nothing was ticked or the
     // intersection was empty).
-    launchIntent: intent,
     selectedDoctrineDocIds: scope.selectedDoctrineDocIds,
     scopedToSelectedDoctrine: scope.scopedToSelectedDoctrine,
   });
@@ -334,12 +443,16 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   const {
     selectedFieldKeys,
     selectedSnippetIds,
-    additionalNote,
-    launchIntent: rawLaunchIntent,
+    additionalDetail: rawAdditionalDetail,
   } = parsed.data;
-  const launchIntent =
-    typeof rawLaunchIntent === "string" && rawLaunchIntent.trim().length > 0
-      ? rawLaunchIntent.trim()
+  // Task #106: the consolidated "Additional detail" box replaces both
+  // the old separate intent box and the old "additional context" note.
+  // We trim and persist into the existing `additionalNote` column so we
+  // don't need a schema migration; the legacy `launchIntent` column is
+  // left null on new launches and treated as read-only legacy data.
+  const additionalDetail =
+    typeof rawAdditionalDetail === "string" && rawAdditionalDetail.trim().length > 0
+      ? rawAdditionalDetail.trim()
       : null;
 
   // Ensure an active preset exists and use its snapshot as the profile basis;
@@ -362,9 +475,10 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   // client didn't send selectedSnippetIds) and for badging the persisted
   // snippets (so the audit row records which hits came from selected
   // doctrine vs the preset fallback).
+  const presetDocLookup = await loadPresetDocLookup(ctx.documentIds);
   const ragScope = resolveLaunchRagScope(
     contextBlockRow.doctrine,
-    ctx.documentIds,
+    presetDocLookup,
   );
   const selectedDoctrineSet = new Set(ragScope.selectedDoctrineDocIds);
   const gateNow = new Date();
@@ -418,9 +532,10 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   // this user + preset doc set so a caller can't peek at someone else's
   // library or snippets outside the active mission).
   //
-  // Task #88: when the client sent a launchIntent with selectedSnippetIds=null,
-  // we use the same intent-led, doctrine-scoped RAG path as the preview so the
-  // operator gets back exactly what they were shown.
+  // Task #106: when the client sent additionalDetail with
+  // selectedSnippetIds=null, we use the same CB-and-detail-led,
+  // doctrine-scoped RAG path as the preview so the operator gets back
+  // exactly what they were shown.
   let sharedSnippets: LaunchSharedSnippet[] = [];
   try {
     if (selectedSnippetIds == null) {
@@ -429,7 +544,8 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
         tool,
         snapshotProfile,
         scope: ragScope,
-        intent: launchIntent,
+        additionalDetail,
+        contextElements: pickContextBlockSituation(contextBlockRow),
       });
       sharedSnippets = result.snippets;
     } else if (selectedSnippetIds.length > 0) {
@@ -478,13 +594,14 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     );
   }
 
-  const note =
-    typeof additionalNote === "string" && additionalNote.trim().length > 0
-      ? additionalNote.trim()
-      : null;
-
   // Persist the affirmation context on the launch row so audits can prove
   // the operator confirmed their preset's CB version at this exact launch.
+  //
+  // Task #106: the consolidated "Additional detail" text is stored on
+  // the existing `additionalNote` column to avoid a schema migration.
+  // The legacy `launchIntent` column is left null on new launches and
+  // is treated as read-only legacy data (older audit rows may still
+  // surface it to historians).
   const [launch] = await db
     .insert(launchesTable)
     .values({
@@ -493,10 +610,8 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
       status: "token_issued",
       sharedFieldKeys,
       sharedSnippets,
-      additionalNote: note,
-      // Task #88: persist the operator's intent so audits / dashboards
-      // can show what task drove this launch's RAG.
-      launchIntent,
+      additionalNote: additionalDetail,
+      launchIntent: null,
       presetId: preset.id,
       contextBlockVersion: cbVersion,
       affirmedAt: validAffirmation.affirmedAt,

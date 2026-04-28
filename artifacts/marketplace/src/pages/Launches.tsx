@@ -100,10 +100,14 @@ function LaunchRow({ launch: l }: { launch: LaunchHistoryItem }) {
       </div>
 
       <div className="px-5 py-3 space-y-3 text-xs">
+        {/* Legacy column: pre-Task-#106 launches stored the operator's
+            "what will you ask this tool?" sentence here. New launches
+            leave this null and use the consolidated Additional detail
+            box at the bottom of the row instead. */}
         {l.launchIntent && (
           <div>
             <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-              Operator's question
+              Operator's question (legacy)
             </div>
             <div className="text-foreground whitespace-pre-wrap">
               {l.launchIntent}
@@ -163,7 +167,7 @@ function LaunchRow({ launch: l }: { launch: LaunchHistoryItem }) {
         {l.additionalNote && (
           <div>
             <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-              Additional note
+              Additional detail
             </div>
             <div className="text-foreground whitespace-pre-wrap">
               {l.additionalNote}

@@ -2744,19 +2744,21 @@ components:
     LaunchPreviewRequest:
       type: object
       description: >
-        Optional body for /launch-preview (Task #88). When `launchIntent`
-        is present the operator's free-form sentence becomes the primary
-        RAG query and steers which snippets are surfaced; the marketplace
-        debounces the typing so we only re-run the search once the
-        operator pauses.
+        Optional body for /launch-preview (Task #106). `additionalDetail`
+        carries the operator's free-form note from the consolidated
+        "Additional detail" box at the bottom of the launch preview
+        dialog. When present it's mixed with the operator's profile and
+        the last five Context Block elements to seed the RAG query
+        generator. The marketplace debounces typing so we only re-run
+        the search once the operator pauses.
       properties:
-        launchIntent: { type: [string, 'null'] }
+        additionalDetail: { type: [string, 'null'] }
 
     LaunchPreviewResponse:
       type: object
       required:
         [tool, profileFields, candidateSnippets, queries, launchPreference,
-         launchIntent, selectedDoctrineDocIds, scopedToSelectedDoctrine]
+         additionalDetail, selectedDoctrineDocIds, scopedToSelectedDoctrine]
       properties:
         tool:
           type: object
@@ -2776,10 +2778,11 @@ components:
           type: array
           items: { type: string }
         launchPreference: { type: string, enum: [preview, direct] }
-        # Echo of the launchIntent the server actually used (trimmed; null
-        # when the operator hasn't typed anything yet) — lets the UI
-        # confirm it ran the intent the operator sees in the input.
-        launchIntent: { type: [string, 'null'] }
+        # Echo of the additionalDetail the server actually used (trimmed;
+        # null when the operator hasn't typed anything yet) — lets the
+        # UI confirm it ran the detail text the operator sees in the
+        # input.
+        additionalDetail: { type: [string, 'null'] }
         # Doc IDs the operator ticked in the Context Block. Lets the UI
         # render "your selected doctrine: N docs" without re-parsing the
         # CB textarea client-side.
@@ -2808,15 +2811,15 @@ components:
             - type: array
               items: { type: string }
             - type: 'null'
-        # Optional freeform text the user wants appended to the bundle.
-        additionalNote: { type: [string, 'null'] }
-        # Task #88: operator's "what will you ask this tool?" sentence.
-        # When present and selectedSnippetIds is null, the server re-runs
-        # the same intent-led, doctrine-scoped RAG path used by the preview.
-        # Persisted on the launch row so audits can show what task drove
-        # this launch's snippets, and forwarded to the tool via context-
-        # exchange so it can lead its UX with the operator's question.
-        launchIntent: { type: [string, 'null'] }
+        # Task #106: operator's free-form "Additional detail" text from
+        # the consolidated bottom-of-dialog box. When present and
+        # selectedSnippetIds is null, the server re-runs the same RAG
+        # path used by the preview (profile + last-5 Context Block
+        # elements + this detail). Persisted on the launch row so the
+        # audit log can show what extra detail drove this launch's
+        # snippets, and forwarded to the tool via context-exchange so it
+        # can lead its UX with the operator's note.
+        additionalDetail: { type: [string, 'null'] }
 
     LaunchInitiateResponse:
       type: object

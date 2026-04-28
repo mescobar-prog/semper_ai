@@ -504,15 +504,57 @@ Output rules:
   return { field, text: raw, list: null };
 }
 
+/**
+ * Five non-doctrine elements of the operator's Context Block. The
+ * launch-time RAG query generator (Task #106) takes these as the primary
+ * signal of what mission the operator is currently working — Doctrine &
+ * Orders is intentionally excluded because that's the corpus we're
+ * about to search, not a query input.
+ */
+export interface ContextBlockSituation {
+  intent?: string | null;
+  environment?: string | null;
+  constraints?: string | null;
+  risk?: string | null;
+  experience?: string | null;
+}
+
 export interface GenerateRagQueriesOptions {
   /**
-   * Operator's "What will you ask this tool?" sentence captured on the
-   * launch screen (Task #88). When present it becomes the PRIMARY verbatim
-   * RAG query and steers the LLM-generated supplementary queries; profile
-   * and admin-template queries fall to the back of the list as recall
-   * insurance instead of leading the search.
+   * Operator's free-form "Additional detail" text from the consolidated
+   * launch preview box (Task #106). Mixed with the Context Block
+   * elements as a primary input to the query generator.
    */
-  intent?: string | null;
+  additionalDetail?: string | null;
+  /**
+   * Last five Context Block elements (Doctrine & Orders excluded, since
+   * that's the corpus we're about to search). The query generator uses
+   * these to describe the operator's mission situation when picking
+   * doctrine-flavored search terms.
+   */
+  contextElements?: ContextBlockSituation | null;
+}
+
+function summarizeContextElements(
+  cb: ContextBlockSituation | null | undefined,
+): string {
+  if (!cb) return "(operator has not filled in their Context Block yet)";
+  const lines: string[] = [];
+  const push = (label: string, v: string | null | undefined) => {
+    const t = (v ?? "").trim();
+    if (!t) return;
+    // Cap each element so a verbose CB doesn't blow the prompt budget.
+    lines.push(`${label}:\n${t.length > 800 ? t.slice(0, 800) + "…" : t}`);
+  };
+  push("Commander's Intent", cb.intent);
+  push("Environment", cb.environment);
+  push("Constraints & Limitations", cb.constraints);
+  push("Risk", cb.risk);
+  push("Experience & Judgment", cb.experience);
+  if (lines.length === 0) {
+    return "(operator's Context Block elements are empty)";
+  }
+  return lines.join("\n\n");
 }
 
 export async function generateRagQueries(
@@ -520,7 +562,8 @@ export async function generateRagQueries(
   toolDesc: RagToolDescriptor,
   opts: GenerateRagQueriesOptions = {},
 ): Promise<string[]> {
-  const intent = opts.intent?.trim() || null;
+  const additionalDetail = opts.additionalDetail?.trim() || null;
+  const contextElements = opts.contextElements ?? null;
 
   const profileQueries: string[] = [];
   if (profile?.command) {
@@ -551,50 +594,36 @@ export async function generateRagQueries(
     ? `Tool's actual purpose (admin-authored): ${toolDesc.purpose.trim()}`
     : "";
 
-  // Intent-led mode (Task #88) and profile-led mode share the same JSON
-  // contract but use different system prompts. Intent mode tells the LLM
-  // to expand the operator's question into 2-3 keyword variants instead of
-  // role-fishing across their whole library.
-  const systemPrompt = intent
-    ? `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
+  // Task #106: single mode driven by (profile + last-5 Context Block
+  // elements + Additional detail). The launch preview no longer asks
+  // the operator to re-state their intent in a separate box — the CB
+  // is already the canonical record of what mission they're on.
+  const systemPrompt = `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
 
-The operator has just typed a SPECIFIC QUESTION they want this tool to help them with. Your job is to expand that question into search-friendly keyword queries so we surface the right snippets from their library — NOT to fish across their whole role.
-
-Rules:
-- Output 2-3 distinct queries.
-- Each query must be 2-6 keywords — no full sentences, no stop words like "the" or "a".
-- Every query MUST come directly from the operator's question; do not pivot to generic role/MOS terms.
-- Use synonyms or doctrine terminology a DoW document would actually use for the operator's question.
-- Output ONLY a JSON object: {"queries": ["...", "..."]}. No prose, no markdown fences.`
-    : `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
+The operator has already described their mission situation in a 5-element Context Block (Commander's Intent, Environment, Constraints & Limitations, Risk, Experience & Judgment). They may also have added free-form "Additional detail" specific to this launch. Your job is to derive search-friendly keyword queries that would surface the right snippets from their library for THIS situation — NOT to fish across their whole role.
 
 Rules:
 - Output 3-5 distinct queries.
 - Each query must be 2-6 keywords — no full sentences, no stop words like "the" or "a".
-- Each query should target a different angle (mission context, tactics, regulations, equipment, role-specific terminology, etc.).
-- At least one query MUST reuse keywords directly from the user's profile (mission, duty title, MOS, unit) so we retrieve their personal SOPs/docs.
-- Heavily prioritize the admin-authored "tool purpose" if provided — that describes what the tool actually does with the user's context.
-- Bias toward terminology that would actually appear in DoW documents the user might have uploaded.
+- Drive the queries primarily off the operator's Context Block situation and any Additional detail. Use the operator's profile (duty title, MOS, unit, command) only as a secondary signal for recall insurance.
+- Bias toward terminology that would actually appear in DoW doctrine, SOPs, and reference material the operator might have uploaded — use doctrine synonyms and acronyms where natural.
+- Each query should target a different angle (mission task, environment, constraint/limitation, risk consideration, doctrine/SOP terminology, etc.).
+- Heavily weight the admin-authored "tool purpose" when provided — that describes what the tool actually does with the operator's context.
 - Output ONLY a JSON object: {"queries": ["...", "..."]}. No prose, no markdown fences.`;
 
-  const userPrompt = intent
-    ? `Operator's question (this is the primary signal — expand THIS):
-"${intent}"
+  const detailLine = additionalDetail
+    ? `Additional detail (operator-supplied for this launch — weight this alongside the Context Block):\n"${additionalDetail}"`
+    : "Additional detail: (none — the operator did not add anything for this launch)";
 
-Operator profile (for context only — do not pivot the queries to these):
+  const userPrompt = `Operator's Context Block situation (primary signal):
+${summarizeContextElements(contextElements)}
+
+${detailLine}
+
+Operator profile (secondary signal — recall insurance only):
 ${profileSummary(profile)}
 
 Tool the operator is launching:
-Name: ${toolDesc.name}
-Vendor: ${toolDesc.vendor}
-Short description: ${toolDesc.shortDescription}
-${purposeLine}
-
-Generate the JSON object now.`
-    : `User profile:
-${profileSummary(profile)}
-
-Tool the user is launching:
 Name: ${toolDesc.name}
 Vendor: ${toolDesc.vendor}
 Short description: ${toolDesc.shortDescription}
@@ -635,16 +664,11 @@ Generate the JSON object now.`;
   // sort hits by score, so leading with the strongest signal raises
   // recall on the snippets the operator actually wants.
   //
-  // Intent mode (Task #88): the verbatim operator question leads, then
-  // the LLM's keyword expansions of it, then the admin templates and
-  // profile queries as recall insurance.
-  //
-  // Legacy mode (no intent provided yet — auto-launches, brief drafter,
-  // back-compat callers): admin templates + profile queries lead so the
-  // operator's personal SOPs always get a fair shot.
-  const ordered = intent
-    ? [intent, ...llmQueries, ...templateQueries, ...profileQueries]
-    : [...templateQueries, ...profileQueries, ...llmQueries];
+  // Task #106: with the consolidated launch preview, the LLM's
+  // CB-derived queries lead. Admin templates and profile queries follow
+  // as recall insurance so the operator's personal SOPs still get a
+  // fair shot when the CB is sparse.
+  const ordered = [...llmQueries, ...templateQueries, ...profileQueries];
 
   const merged: string[] = [];
   const seen = new Set<string>();

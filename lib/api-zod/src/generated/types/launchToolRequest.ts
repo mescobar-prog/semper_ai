@@ -10,7 +10,5 @@ export interface LaunchToolRequest {
   selectedFieldKeys?: string[] | null;
   selectedSnippetIds?: string[] | null;
   /** @nullable */
-  additionalNote?: string | null;
-  /** @nullable */
-  launchIntent?: string | null;
+  additionalDetail?: string | null;
 }

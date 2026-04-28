@@ -70,11 +70,11 @@ export function LaunchPreviewDialog({
   const [excludedSnippets, setExcludedSnippets] = useState<Set<string>>(
     new Set(),
   );
-  const [note, setNote] = useState("");
-  // Task #88: operator's "what will you ask this tool?" intent. The text
-  // box lives above the snippets; we debounce typing so we only re-run
-  // the preview RAG once the operator pauses.
-  const [intent, setIntent] = useState("");
+  // Task #106: a single consolidated "Additional detail" box. The
+  // operator's mission situation comes from their Context Block; this
+  // text is mixed in as a per-launch nudge to RAG and forwarded to
+  // the receiving tool. Debounced typing re-runs the preview RAG.
+  const [additionalDetail, setAdditionalDetail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [savingPreference, setSavingPreference] = useState(false);
@@ -87,14 +87,14 @@ export function LaunchPreviewDialog({
     setSubmitError(null);
     setExcludedFields(new Set());
     setExcludedSnippets(new Set());
-    setNote("");
-    setIntent("");
+    setAdditionalDetail("");
   }, [trigger?.toolId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initial fetch of the candidate payload OR direct mint depending on
-  // showPreview. We don't include `intent` in the dep list because the
-  // intent-driven re-fetches are handled in a separate debounced effect
-  // below — this effect only fires once per (toolId, showPreview).
+  // showPreview. We don't include `additionalDetail` in the dep list
+  // because the detail-driven re-fetches are handled in a separate
+  // debounced effect below — this effect only fires once per
+  // (toolId, showPreview).
   useEffect(() => {
     if (!trigger) return;
     let cancelled = false;
@@ -133,7 +133,7 @@ export function LaunchPreviewDialog({
       try {
         setLoadingPreview(true);
         const data = await previewLaunchContext(trigger.toolId, {
-          launchIntent: null,
+          additionalDetail: null,
         });
         if (cancelled) return;
         setPreview(data);
@@ -151,24 +151,23 @@ export function LaunchPreviewDialog({
     };
   }, [trigger?.toolId, showPreview]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced intent → re-fetch preview. We wait ~500ms after the
-  // operator stops typing so we don't spam the LLM-backed query
-  // generator on every keystroke. Skips while the initial fetch is
-  // still running and only fires for non-empty intents that actually
-  // differ from the last preview's intent (the latter prevents a
-  // double-fetch on first paint when the input is empty anyway).
+  // Debounced additionalDetail → re-fetch preview. We wait ~500ms
+  // after the operator stops typing so we don't spam the LLM-backed
+  // query generator on every keystroke. Skips while the initial
+  // fetch is still running and only fires when the trimmed text
+  // actually differs from what the last preview ran with.
   useEffect(() => {
     if (!trigger || !showPreview) return;
     if (loadingPreview) return;
-    const trimmed = intent.trim();
-    const lastIntent = preview?.launchIntent ?? "";
-    if (trimmed === lastIntent) return;
+    const trimmed = additionalDetail.trim();
+    const lastDetail = preview?.additionalDetail ?? "";
+    if (trimmed === lastDetail) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
         setRefreshingPreview(true);
         const data = await previewLaunchContext(trigger.toolId, {
-          launchIntent: trimmed.length > 0 ? trimmed : null,
+          additionalDetail: trimmed.length > 0 ? trimmed : null,
         });
         if (cancelled) return;
         setPreview(data);
@@ -188,7 +187,7 @@ export function LaunchPreviewDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [intent, trigger?.toolId, showPreview, loadingPreview, preview?.launchIntent]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [additionalDetail, trigger?.toolId, showPreview, loadingPreview, preview?.additionalDetail]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fieldsWithValues = useMemo(
     () => preview?.profileFields.filter((f) => f.hasValue) ?? [],
@@ -234,18 +233,16 @@ export function LaunchPreviewDialog({
       const selectedSnippetIds = preview.candidateSnippets
         .filter((s) => !excludedSnippets.has(s.chunkId))
         .map((s) => s.chunkId);
-      const additionalNote = note.trim() ? note.trim() : null;
-      // Task #88: forward the intent the operator typed so the launch row
-      // persists it and the receiving tool sees it via context-exchange.
-      const launchIntent = intent.trim() ? intent.trim() : null;
-
+      // Task #106: forward the operator's "Additional detail" text so
+      // the launch row persists it and the receiving tool sees it via
+      // context-exchange.
+      const trimmedDetail = additionalDetail.trim();
       const resp = await launchMutation.mutateAsync({
         toolId: trigger.toolId,
         data: {
           selectedFieldKeys,
           selectedSnippetIds,
-          additionalNote,
-          launchIntent,
+          additionalDetail: trimmedDetail.length > 0 ? trimmedDetail : null,
         },
       });
       if (resp.hostingType !== "local_install") {
@@ -367,24 +364,6 @@ export function LaunchPreviewDialog({
             </section>
 
             <section>
-              <SectionLabel title="What will you ask this tool?" />
-              <textarea
-                value={intent}
-                onChange={(e) => setIntent(e.target.value)}
-                rows={2}
-                placeholder="e.g. Draft a SITREP on convoy security in our current AO."
-                className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {refreshingPreview
-                  ? "Refreshing snippets for your question…"
-                  : intent.trim()
-                    ? "We'll search your selected doctrine using this question first."
-                    : "Optional. If left blank, we'll search using your role and the tool's purpose."}
-              </p>
-            </section>
-
-            <section>
               <SectionLabel
                 title="Library snippets"
                 hint={`${includedSnippetCount} of ${preview.candidateSnippets.length} selected`}
@@ -444,14 +423,21 @@ export function LaunchPreviewDialog({
             </section>
 
             <section>
-              <SectionLabel title="Additional context (optional)" />
+              <SectionLabel title="Additional detail (optional)" />
               <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
+                value={additionalDetail}
+                onChange={(e) => setAdditionalDetail(e.target.value)}
                 rows={3}
-                placeholder="Anything specific you want this tool to know for this session…"
+                placeholder="Anything specific to this launch you want the tool to know — refines the snippets we pull and is forwarded along…"
                 className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
               />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {refreshingPreview
+                  ? "Refreshing snippets for your detail…"
+                  : additionalDetail.trim()
+                    ? "We'll mix this with your Context Block to refine the search."
+                    : "Optional. We'll search using your profile and the last five Context Block elements (Doctrine & Orders excluded)."}
+              </p>
             </section>
 
             {submitError && (

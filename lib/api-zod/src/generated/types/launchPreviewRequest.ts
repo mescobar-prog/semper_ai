@@ -7,10 +7,10 @@
  */
 
 /**
- * Optional body for /launch-preview (Task #88). When `launchIntent` is present the operator's free-form sentence becomes the primary RAG query and steers which snippets are surfaced; the marketplace debounces the typing so we only re-run the search once the operator pauses.
+ * Optional body for /launch-preview (Task #106). `additionalDetail` carries the operator's free-form note from the consolidated "Additional detail" box at the bottom of the launch preview dialog. When present it's mixed with the operator's profile and the last five Context Block elements to seed the RAG query generator. The marketplace debounces typing so we only re-run the search once the operator pauses.
 
  */
 export interface LaunchPreviewRequest {
   /** @nullable */
-  launchIntent?: string | null;
+  additionalDetail?: string | null;
 }

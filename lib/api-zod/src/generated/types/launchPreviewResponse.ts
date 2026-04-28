@@ -17,7 +17,7 @@ export interface LaunchPreviewResponse {
   queries: string[];
   launchPreference: LaunchPreviewResponseLaunchPreference;
   /** @nullable */
-  launchIntent: string | null;
+  additionalDetail: string | null;
   selectedDoctrineDocIds: string[];
   scopedToSelectedDoctrine: boolean;
 }

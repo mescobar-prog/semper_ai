@@ -132,27 +132,57 @@ export async function getOrCreateProfile(userId: string): Promise<Profile> {
   return created;
 }
 
-// The Context Block's "Doctrine & Orders" textarea (Task #85) embeds one
-// `<<< doc:<id> >>> … <<< /doc >>>` block per document the operator ticked
-// in the doctrine picker. This regex pulls those ids back out so we can
-// scope launch-time RAG (Task #88) to the doctrine the operator already
-// affirmed as relevant for this tasking.
-const DOCTRINE_DOC_ID_RE = /<<<\s*doc:([^\s>]+)\s*>>>/g;
+// The Context Block's "Doctrine & Orders" textarea stores ticks from
+// the doctrine picker as plain Markdown reference lines — one
+// `- <doc title>` per ticked doc. The marketplace owns the textarea
+// and writes that exact format (artifacts/marketplace/src/pages/
+// Catalog.tsx:addBlock / buildReferenceList); this parser must stay
+// aligned with it. We pull each reference title out and map it back
+// to a doc id by exact-title lookup against the operator's known
+// docs (preset-scoped, so a title collision in some unrelated doc
+// can't surface as a false "ticked" doc here).
+const DOCTRINE_REFERENCE_LINE_RE = /^-\s+(.+?)\s*$/gm;
+// Legacy values saved before the picker-only redesign embedded an
+// `--- Orders ---` divider followed by free-form operator prose.
+// Strip everything from the divider onward so a stray `- foo` line
+// in old Orders prose can't be misread as a ticked doc. New saves
+// no longer write this divider, but old rows still carry it. Keep
+// this constant in sync with Catalog.tsx's LEGACY_ORDERS_DIVIDER.
+const DOCTRINE_ORDERS_DIVIDER = "--- Orders ---";
+
+export interface DoctrineDocLookup {
+  id: string;
+  title: string;
+}
 
 export function parseSelectedDoctrineDocIds(
   doctrine: string | null | undefined,
+  knownDocs: readonly DoctrineDocLookup[],
 ): string[] {
   if (!doctrine) return [];
+  // Only look at the reference region (above the divider). When no
+  // divider is present yet, treat the whole textarea as references —
+  // matches the marketplace's joinRegions() behavior for a
+  // brand-new operator with no Orders prose yet.
+  const dividerAt = doctrine.indexOf(DOCTRINE_ORDERS_DIVIDER);
+  const region = dividerAt === -1 ? doctrine : doctrine.slice(0, dividerAt);
+
+  const titles: string[] = [];
+  DOCTRINE_REFERENCE_LINE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = DOCTRINE_REFERENCE_LINE_RE.exec(region))) {
+    titles.push(m[1].trim());
+  }
+  if (titles.length === 0) return [];
+
+  const titleSet = new Set(titles);
   const out: string[] = [];
   const seen = new Set<string>();
-  // Reset lastIndex defensively — the regex literal is module-scoped.
-  DOCTRINE_DOC_ID_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = DOCTRINE_DOC_ID_RE.exec(doctrine))) {
-    const id = m[1];
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
+  for (const doc of knownDocs) {
+    if (!titleSet.has(doc.title)) continue;
+    if (seen.has(doc.id)) continue;
+    seen.add(doc.id);
+    out.push(doc.id);
   }
   return out;
 }

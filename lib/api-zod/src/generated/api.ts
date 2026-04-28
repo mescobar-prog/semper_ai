@@ -1657,10 +1657,10 @@ export const PreviewLaunchContextParams = zod.object({
 
 export const PreviewLaunchContextBody = zod
   .object({
-    launchIntent: zod.string().nullish(),
+    additionalDetail: zod.string().nullish(),
   })
   .describe(
-    "Optional body for \/launch-preview (Task #88). When `launchIntent` is present the operator's free-form sentence becomes the primary RAG query and steers which snippets are surfaced; the marketplace debounces the typing so we only re-run the search once the operator pauses.\n",
+    "Optional body for \/launch-preview (Task #106). `additionalDetail` carries the operator's free-form note from the consolidated \"Additional detail\" box at the bottom of the launch preview dialog. When present it's mixed with the operator's profile and the last five Context Block elements to seed the RAG query generator. The marketplace debounces typing so we only re-run the search once the operator pauses.\n",
   );
 
 export const PreviewLaunchContextResponse = zod.object({
@@ -1691,7 +1691,7 @@ export const PreviewLaunchContextResponse = zod.object({
   ),
   queries: zod.array(zod.string()),
   launchPreference: zod.enum(["preview", "direct"]),
-  launchIntent: zod.string().nullable(),
+  additionalDetail: zod.string().nullable(),
   selectedDoctrineDocIds: zod.array(zod.string()),
   scopedToSelectedDoctrine: zod.boolean(),
 });
@@ -1712,8 +1712,7 @@ export const LaunchToolBody = zod.object({
   selectedSnippetIds: zod
     .union([zod.array(zod.string()), zod.null()])
     .optional(),
-  additionalNote: zod.string().nullish(),
-  launchIntent: zod.string().nullish(),
+  additionalDetail: zod.string().nullish(),
 });
 
 export const LaunchToolResponse = zod.object({
