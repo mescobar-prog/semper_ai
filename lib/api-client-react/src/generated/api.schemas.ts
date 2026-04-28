@@ -496,6 +496,10 @@ export type DraftToolTextRequestSourceMaterial = {
 export interface DraftToolTextRequest {
   field: DraftToolTextRequestField;
   sourceMaterial: DraftToolTextRequestSourceMaterial;
+  /** Optional short note from the admin to steer a regenerate
+(e.g. "shorter", "more technical", "lead with the workflow").
+ */
+  steering?: string;
 }
 
 export type DraftToolTextResultField =

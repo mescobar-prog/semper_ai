@@ -2314,6 +2314,12 @@ export const DraftToolTextBody = zod.object({
     githubReadme: zod.string().optional(),
     existingText: zod.string().optional(),
   }),
+  steering: zod
+    .string()
+    .optional()
+    .describe(
+      'Optional short note from the admin to steer a regenerate\n(e.g. \"shorter\", \"more technical\", \"lead with the workflow\").\n',
+    ),
 });
 
 export const DraftToolTextResponse = zod.object({

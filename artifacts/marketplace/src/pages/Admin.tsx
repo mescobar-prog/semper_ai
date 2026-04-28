@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetMyProfile,
@@ -1361,33 +1361,16 @@ function DescriptionFields({
   set: <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) => void;
   importedReadme: string | null;
 }) {
-  const draftMutation = useDraftToolText();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [openField, setOpenField] =
+    useState<"shortDescription" | "longDescription" | null>(null);
 
-  async function draft(field: "shortDescription" | "longDescription") {
-    setBusy(field);
-    setError(null);
-    try {
-      const result = await draftMutation.mutateAsync({
-        data: {
-          field,
-          sourceMaterial: {
-            name: data.name,
-            vendor: data.vendor,
-            homepageUrl: data.homepageUrl ?? undefined,
-            githubReadme: importedReadme ?? undefined,
-            existingText: data[field] || undefined,
-          },
-        },
-      });
-      if (result.text) set(field, result.text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Draft failed");
-    } finally {
-      setBusy(null);
-    }
-  }
+  const sourceFor = (field: "shortDescription" | "longDescription") => ({
+    name: data.name,
+    vendor: data.vendor,
+    homepageUrl: data.homepageUrl ?? undefined,
+    githubReadme: importedReadme ?? undefined,
+    existingText: data[field] || undefined,
+  });
 
   return (
     <div className="space-y-3">
@@ -1395,8 +1378,8 @@ function DescriptionFields({
         label="Short description"
         action={
           <DraftBtn
-            busy={busy === "shortDescription"}
-            onClick={() => draft("shortDescription")}
+            busy={openField === "shortDescription"}
+            onClick={() => setOpenField("shortDescription")}
           />
         }
       >
@@ -1411,8 +1394,8 @@ function DescriptionFields({
         label="Long description"
         action={
           <DraftBtn
-            busy={busy === "longDescription"}
-            onClick={() => draft("longDescription")}
+            busy={openField === "longDescription"}
+            onClick={() => setOpenField("longDescription")}
           />
         }
       >
@@ -1424,7 +1407,32 @@ function DescriptionFields({
           className={`${inputCls} font-mono`}
         />
       </Field>
-      {error && <ErrorBox>{error}</ErrorBox>}
+      {openField && (
+        <DraftPreviewDrawer
+          field={openField}
+          kind="text"
+          fieldLabel={
+            openField === "shortDescription"
+              ? "Short description"
+              : "Long description"
+          }
+          currentText={data[openField] ?? ""}
+          sourceMaterial={sourceFor(openField)}
+          onAccept={(text) => {
+            set(openField, text);
+            setOpenField(null);
+          }}
+          onAppend={(text) => {
+            const existing = data[openField] ?? "";
+            const joined = existing.trim()
+              ? `${existing.trim()}\n\n${text}`
+              : text;
+            set(openField, joined);
+            setOpenField(null);
+          }}
+          onClose={() => setOpenField(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1718,47 +1726,29 @@ function ContextSection({
   set: <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) => void;
   importedReadme: string | null;
 }) {
-  const draftMutation = useDraftToolText();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [openField, setOpenField] =
+    useState<"purpose" | "ragQueryTemplates" | null>(null);
 
-  async function draft(field: "purpose" | "ragQueryTemplates") {
-    setBusy(field);
-    setError(null);
-    try {
-      const result = await draftMutation.mutateAsync({
-        data: {
-          field,
-          sourceMaterial: {
-            name: data.name,
-            vendor: data.vendor,
-            homepageUrl: data.homepageUrl ?? undefined,
-            githubReadme: importedReadme ?? undefined,
-            existingText:
-              field === "purpose"
-                ? data.purpose ?? undefined
-                : (data.ragQueryTemplates ?? []).join("\n") || undefined,
-          },
-        },
-      });
-      if (field === "purpose" && result.text) {
-        set("purpose", result.text);
-      } else if (field === "ragQueryTemplates" && result.list) {
-        set("ragQueryTemplates", result.list);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Draft failed");
-    } finally {
-      setBusy(null);
-    }
-  }
+  const sourceFor = (field: "purpose" | "ragQueryTemplates") => ({
+    name: data.name,
+    vendor: data.vendor,
+    homepageUrl: data.homepageUrl ?? undefined,
+    githubReadme: importedReadme ?? undefined,
+    existingText:
+      field === "purpose"
+        ? data.purpose ?? undefined
+        : (data.ragQueryTemplates ?? []).join("\n") || undefined,
+  });
 
   return (
     <div className="space-y-3">
       <Field
         label="Tool purpose (fed to RAG query generator)"
         action={
-          <DraftBtn busy={busy === "purpose"} onClick={() => draft("purpose")} />
+          <DraftBtn
+            busy={openField === "purpose"}
+            onClick={() => setOpenField("purpose")}
+          />
         }
       >
         <textarea
@@ -1774,8 +1764,8 @@ function ContextSection({
         label="RAG query templates (one per line; {curlies} = profile vars)"
         action={
           <DraftBtn
-            busy={busy === "ragQueryTemplates"}
-            onClick={() => draft("ragQueryTemplates")}
+            busy={openField === "ragQueryTemplates"}
+            onClick={() => setOpenField("ragQueryTemplates")}
           />
         }
       >
@@ -1800,7 +1790,55 @@ function ContextSection({
           Templates with vars the operator hasn't filled in are skipped.
         </div>
       </Field>
-      {error && <ErrorBox>{error}</ErrorBox>}
+      {openField === "purpose" && (
+        <DraftPreviewDrawer
+          field="purpose"
+          kind="text"
+          fieldLabel="Tool purpose"
+          currentText={data.purpose ?? ""}
+          sourceMaterial={sourceFor("purpose")}
+          onAccept={(text) => {
+            set("purpose", text);
+            setOpenField(null);
+          }}
+          onAppend={(text) => {
+            const existing = data.purpose ?? "";
+            const joined = existing.trim()
+              ? `${existing.trim()}\n\n${text}`
+              : text;
+            set("purpose", joined);
+            setOpenField(null);
+          }}
+          onClose={() => setOpenField(null)}
+        />
+      )}
+      {openField === "ragQueryTemplates" && (
+        <DraftPreviewDrawer
+          field="ragQueryTemplates"
+          kind="list"
+          fieldLabel="RAG query templates"
+          currentList={data.ragQueryTemplates ?? []}
+          sourceMaterial={sourceFor("ragQueryTemplates")}
+          onAcceptList={(list) => {
+            set("ragQueryTemplates", list);
+            setOpenField(null);
+          }}
+          onAppendList={(list) => {
+            const merged = [...(data.ragQueryTemplates ?? []), ...list];
+            const seen = new Set<string>();
+            const deduped: string[] = [];
+            for (const q of merged) {
+              const key = q.trim();
+              if (!key || seen.has(key)) continue;
+              seen.add(key);
+              deduped.push(key);
+            }
+            set("ragQueryTemplates", deduped);
+            setOpenField(null);
+          }}
+          onClose={() => setOpenField(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1809,12 +1847,296 @@ function DraftBtn({ busy, onClick }: { busy: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
-      disabled={busy}
       onClick={onClick}
-      className="text-[10px] font-mono uppercase tracking-wider text-primary hover:underline disabled:opacity-50"
+      data-testid="button-draft"
+      className={`text-[10px] font-mono uppercase tracking-wider hover:underline ${
+        busy ? "text-primary/70" : "text-primary"
+      }`}
     >
-      {busy ? "Drafting…" : "Generate with AI"}
+      {busy ? "Preview open…" : "Generate with AI"}
     </button>
+  );
+}
+
+// ─── Shared draft preview drawer ─────────────────────────────────────────
+type DraftField =
+  | "shortDescription"
+  | "longDescription"
+  | "purpose"
+  | "ragQueryTemplates";
+
+type DraftSourceMaterial = {
+  name?: string;
+  vendor?: string;
+  homepageUrl?: string;
+  githubReadme?: string;
+  existingText?: string;
+};
+
+type DraftPreviewDrawerProps =
+  | {
+      field: Exclude<DraftField, "ragQueryTemplates">;
+      kind: "text";
+      fieldLabel: string;
+      currentText: string;
+      sourceMaterial: DraftSourceMaterial;
+      onAccept: (text: string) => void;
+      onAppend: (text: string) => void;
+      onClose: () => void;
+    }
+  | {
+      field: "ragQueryTemplates";
+      kind: "list";
+      fieldLabel: string;
+      currentList: string[];
+      sourceMaterial: DraftSourceMaterial;
+      onAcceptList: (list: string[]) => void;
+      onAppendList: (list: string[]) => void;
+      onClose: () => void;
+    };
+
+function DraftPreviewDrawer(props: DraftPreviewDrawerProps) {
+  const draftMutation = useDraftToolText();
+  const [proposedText, setProposedText] = useState<string | null>(null);
+  const [proposedList, setProposedList] = useState<string[] | null>(null);
+  const [steering, setSteering] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const lastTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Capture the element that had focus before the drawer opened so we can
+  // restore it on close — preserves keyboard flow in the surrounding form.
+  useEffect(() => {
+    lastTriggerRef.current = document.activeElement as HTMLElement | null;
+    return () => {
+      const el = lastTriggerRef.current;
+      if (el && typeof el.focus === "function") {
+        // Defer so the drawer is fully unmounted before refocus.
+        setTimeout(() => el.focus(), 0);
+      }
+    };
+  }, []);
+
+  const runDraft = async (steeringNote?: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await draftMutation.mutateAsync({
+        data: {
+          field: props.field,
+          sourceMaterial: props.sourceMaterial,
+          ...(steeringNote && steeringNote.trim()
+            ? { steering: steeringNote.trim() }
+            : {}),
+        },
+      });
+      if (props.kind === "text") {
+        setProposedText(result.text ?? "");
+        setProposedList(null);
+      } else {
+        setProposedList(result.list ?? []);
+        setProposedText(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Draft failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Trigger initial draft on mount.
+  useEffect(() => {
+    void runDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleRegenerate = () => {
+    void runDraft(steering);
+  };
+
+  const currentDisplay =
+    props.kind === "text"
+      ? props.currentText
+      : (props.currentList ?? []).join("\n");
+  const proposedDisplay =
+    props.kind === "text"
+      ? proposedText ?? ""
+      : (proposedList ?? []).join("\n");
+
+  const hasProposal =
+    !busy &&
+    !error &&
+    (props.kind === "text"
+      ? proposedText !== null && proposedText.trim().length > 0
+      : proposedList !== null && proposedList.length > 0);
+
+  const handleAccept = () => {
+    if (props.kind === "text" && proposedText !== null) {
+      props.onAccept(proposedText);
+    } else if (props.kind === "list" && proposedList !== null) {
+      props.onAcceptList(proposedList);
+    }
+  };
+
+  const handleAppend = () => {
+    if (props.kind === "text" && proposedText !== null) {
+      props.onAppend(proposedText);
+    } else if (props.kind === "list" && proposedList !== null) {
+      props.onAppendList(proposedList);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/50"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-label={`AI draft preview for ${props.fieldLabel}`}
+        data-testid="draft-preview-drawer"
+        className="w-full max-w-3xl bg-card border-l border-border overflow-y-auto"
+      >
+        <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-wider font-mono text-primary font-semibold">
+              AI draft preview
+            </div>
+            <div className="text-lg font-semibold truncate">
+              {props.fieldLabel}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={props.onClose}
+            className="text-sm text-muted-foreground hover:text-foreground px-2"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground mb-1.5">
+                Current
+                {props.kind === "list" && (
+                  <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
+                    ({props.currentList?.length ?? 0} entries)
+                  </span>
+                )}
+              </div>
+              <div
+                data-testid="draft-current"
+                className="rounded-md border border-border bg-background/40 p-3 text-sm whitespace-pre-wrap font-mono min-h-[8rem] max-h-72 overflow-y-auto"
+              >
+                {currentDisplay.trim() ? (
+                  currentDisplay
+                ) : (
+                  <span className="text-muted-foreground italic">
+                    (empty)
+                  </span>
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider font-mono text-primary mb-1.5">
+                Drafted
+                {props.kind === "list" && proposedList && (
+                  <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
+                    ({proposedList.length} entries)
+                  </span>
+                )}
+              </div>
+              <div
+                data-testid="draft-proposed"
+                className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm whitespace-pre-wrap font-mono min-h-[8rem] max-h-72 overflow-y-auto"
+              >
+                {busy ? (
+                  <span className="text-muted-foreground italic">
+                    Drafting…
+                  </span>
+                ) : error ? (
+                  <span className="text-rose-300">Draft failed.</span>
+                ) : proposedDisplay.trim() ? (
+                  proposedDisplay
+                ) : (
+                  <span className="text-muted-foreground italic">
+                    Model returned no text. Try Regenerate with a steering
+                    note.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {error && <ErrorBox>{error}</ErrorBox>}
+
+          <div className="rounded-md border border-border bg-background/40 p-3 space-y-2">
+            <label className="block text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
+              Steering note (optional, used on Regenerate)
+            </label>
+            <input
+              data-testid="input-steering"
+              value={steering}
+              onChange={(e) => setSteering(e.target.value)}
+              placeholder="e.g. shorter, more technical, lead with the operator workflow"
+              className={inputCls}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (!busy) handleRegenerate();
+                }
+              }}
+            />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                disabled={busy}
+                data-testid="button-regenerate"
+                className="h-9 px-4 rounded-md border border-primary/50 text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-50"
+              >
+                {busy ? "Regenerating…" : "Regenerate"}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-border">
+            <button
+              type="button"
+              onClick={props.onClose}
+              data-testid="button-discard"
+              className="h-9 px-4 rounded-md border border-border text-sm hover:bg-accent"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={handleAppend}
+              disabled={!hasProposal}
+              data-testid="button-append"
+              className="h-9 px-4 rounded-md border border-primary/50 text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-50"
+            >
+              Append
+            </button>
+            <button
+              type="button"
+              onClick={handleAccept}
+              disabled={!hasProposal}
+              data-testid="button-accept"
+              className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+            >
+              {props.kind === "text"
+                ? "Accept (replace)"
+                : "Accept (replace list)"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

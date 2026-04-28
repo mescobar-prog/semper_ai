@@ -529,9 +529,13 @@ router.post("/admin/tools/draft-text", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "Invalid draft request" });
     return;
   }
-  const { field, sourceMaterial } = parsed.data;
+  const { field, sourceMaterial, steering } = parsed.data;
   try {
-    const result = await draftToolText(field, sourceMaterial ?? {});
+    const result = await draftToolText(
+      field,
+      sourceMaterial ?? {},
+      steering ?? null,
+    );
     res.json(result);
   } catch (err) {
     req.log.error({ err, field }, "Draft generation failed");

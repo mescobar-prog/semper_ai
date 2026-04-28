@@ -2151,6 +2151,11 @@ components:
             homepageUrl: { type: string }
             githubReadme: { type: string }
             existingText: { type: string }
+        steering:
+          type: string
+          description: |
+            Optional short note from the admin to steer a regenerate
+            (e.g. "shorter", "more technical", "lead with the workflow").
 
     DraftToolTextResult:
       type: object

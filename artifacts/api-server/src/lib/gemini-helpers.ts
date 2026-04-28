@@ -427,6 +427,7 @@ function trimSource(s: string | null | undefined, max: number): string {
 export async function draftToolText(
   field: DraftField,
   source: DraftSourceMaterial,
+  steering?: string | null,
 ): Promise<DraftToolTextResult> {
   const sourceLines: string[] = [];
   if (source.name) sourceLines.push(`Name: ${source.name}`);
@@ -444,13 +445,18 @@ export async function draftToolText(
     sourceLines.push("(no source material provided — draft from the field name alone)");
   }
 
+  const trimmedSteering = (steering ?? "").trim();
+  const steeringLine = trimmedSteering
+    ? `\n\nAdmin steering note (apply this in the rewrite):\n${trimSource(trimmedSteering, 500)}`
+    : "";
+
   const systemPrompt = `You are helping a marketplace admin draft catalog copy for a DoD AI tool.
 Output rules:
 - Be factual. Do not invent capabilities the source material doesn't support.
 - Use plain text. No markdown headings, no emoji, no marketing superlatives.
 - ${DRAFT_INSTRUCTIONS[field]}`;
 
-  const userPrompt = `Field: ${field}\n\nSource material:\n${sourceLines.join("\n\n")}`;
+  const userPrompt = `Field: ${field}\n\nSource material:\n${sourceLines.join("\n\n")}${steeringLine}`;
 
   let raw = "";
   try {
