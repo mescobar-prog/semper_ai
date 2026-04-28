@@ -15,6 +15,19 @@ export interface DocumentSummary {
   charCount: number;
   chunkCount: number;
   status: string;
+  /**
+   * Stable identifier of the auto-ingest source that produced this doc, e.g. "mos:army:11B" or "unit:marines:MALS-12". Null for documents the user uploaded by hand.
+
+   * @nullable
+   */
+  autoSource: string | null;
+  /**
+   * Original public URL the doc was downloaded from (auto-ingest only).
+   * @nullable
+   */
+  sourceUrl: string | null;
+  /** @nullable */
+  errorMessage: string | null;
   uploadedAt: Date;
   /** @nullable */
   processedAt: Date | null;

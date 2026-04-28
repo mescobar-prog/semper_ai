@@ -52,3 +52,10 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 
 ### Profile autosave
 - Profile edits are debounced (400ms) and use a version counter to discard out-of-order responses, so rapid typing can't cause a stale PUT response to clobber newer input.
+
+### Smart Mission Context (Auto-ingest)
+- `lib/mil-data` is the curated source of truth for branches, MOS/rate/AFSC catalogs, units, and per-(branch, MOS|unit) doctrine package URLs (public DoD doctrine PDFs).
+- The Profile page's Branch dropdown drives MOS and Unit typeaheads; clearing or changing the branch resets the dependent fields.
+- When `PUT /api/profile` resolves the branch+MOS or unit to a curated package, the server fires `startIngestPackage` (fire-and-forget) which downloads each PDF with bounded concurrency, dedups against existing `documents.source_url`, and records progress in `ingest_jobs`.
+- Documents created this way carry `auto_source` (e.g. `mos:army:11B`, `unit:army:1id`) and `source_url`. The Library page renders an `AutoSourceBadge` next to such docs and a filter chip row (All / Uploaded / Auto-ingested) for quick triage.
+- Endpoints: `POST /api/library/auto-ingest` (synchronous trigger by source string) and `GET /api/library/auto-ingest/status?source=...` (poll job state). The Profile page's `IngestStatusPanel` polls the latter every 1.5s while a job is running.

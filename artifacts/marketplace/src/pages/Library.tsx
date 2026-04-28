@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetLibraryStats,
@@ -11,6 +11,8 @@ import {
   getListDocumentsQueryKey,
   getGetDocumentQueryKey,
 } from "@workspace/api-client-react";
+import type { DocumentSummary } from "@workspace/api-client-react";
+import { parseAutoSource, BRANCHES as MIL_BRANCHES } from "@workspace/mil-data";
 import {
   PageContainer,
   StatCard,
@@ -56,6 +58,23 @@ export function Library() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploadMode, setUploadMode] = useState<"file" | "paste">("file");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] =
+    useState<"all" | "uploaded" | "auto">("all");
+
+  // Filter the docs list locally — the user-facing buckets are uploaded vs.
+  // auto-ingested. Counts drive the filter buttons so the UI is honest about
+  // which sources actually exist.
+  const filteredDocs = useMemo<DocumentSummary[]>(() => {
+    if (!docs) return [];
+    if (sourceFilter === "uploaded") return docs.filter((d) => !d.autoSource);
+    if (sourceFilter === "auto") return docs.filter((d) => !!d.autoSource);
+    return docs;
+  }, [docs, sourceFilter]);
+  const counts = useMemo(() => {
+    const total = docs?.length ?? 0;
+    const auto = docs?.filter((d) => !!d.autoSource).length ?? 0;
+    return { total, auto, uploaded: total - auto };
+  }, [docs]);
   const [form, setForm] = useState({
     title: "",
     sourceFilename: "",
@@ -358,46 +377,90 @@ export function Library() {
         />
       ) : (
         <>
+          <div className="flex items-center gap-2 mb-3">
+            <FilterChip
+              active={sourceFilter === "all"}
+              onClick={() => setSourceFilter("all")}
+              label={`All (${counts.total})`}
+              testId="filter-all"
+            />
+            <FilterChip
+              active={sourceFilter === "uploaded"}
+              onClick={() => setSourceFilter("uploaded")}
+              label={`Uploaded (${counts.uploaded})`}
+              testId="filter-uploaded"
+            />
+            <FilterChip
+              active={sourceFilter === "auto"}
+              onClick={() => setSourceFilter("auto")}
+              label={`Auto-ingested (${counts.auto})`}
+              testId="filter-auto"
+            />
+          </div>
           <div className="space-y-2">
-            {docs.map((d) => (
-              <div
-                key={d.id}
-                className="bg-card border border-border rounded-md overflow-hidden"
-              >
+            {filteredDocs.length === 0 ? (
+              <div className="text-sm text-muted-foreground italic px-1 py-4">
+                No documents match this filter.
+              </div>
+            ) : (
+              filteredDocs.map((d) => (
                 <div
-                  className="px-5 py-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-accent/30"
-                  onClick={() =>
-                    setExpandedId(expandedId === d.id ? null : d.id)
-                  }
+                  key={d.id}
+                  data-testid={`doc-row-${d.id}`}
+                  className="bg-card border border-border rounded-md overflow-hidden"
                 >
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm">{d.title}</div>
-                    <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                      {d.sourceFilename} · uploaded {formatDate(d.uploadedAt)}
+                  <div
+                    className="px-5 py-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-accent/30"
+                    onClick={() =>
+                      setExpandedId(expandedId === d.id ? null : d.id)
+                    }
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                        <span>{d.title}</span>
+                        <AutoSourceBadge autoSource={d.autoSource} />
+                      </div>
+                      <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                        {d.sourceFilename} · uploaded {formatDate(d.uploadedAt)}
+                        {d.sourceUrl && (
+                          <>
+                            {" · "}
+                            <a
+                              href={d.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="underline hover:text-foreground"
+                            >
+                              source
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Pill tone="neutral">{d.chunkCount} chunks</Pill>
+                      <span className="text-[11px] font-mono text-muted-foreground">
+                        {formatBytes(d.charCount)}
+                      </span>
+                      <Pill tone={d.status === "ready" ? "good" : "warn"}>
+                        {d.status}
+                      </Pill>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(d.id);
+                        }}
+                        className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground hover:text-rose-400"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <Pill tone="neutral">{d.chunkCount} chunks</Pill>
-                    <span className="text-[11px] font-mono text-muted-foreground">
-                      {formatBytes(d.charCount)}
-                    </span>
-                    <Pill tone={d.status === "ready" ? "good" : "warn"}>
-                      {d.status}
-                    </Pill>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(d.id);
-                      }}
-                      className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground hover:text-rose-400"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  {expandedId === d.id && <DocChunks documentId={d.id} />}
                 </div>
-                {expandedId === d.id && <DocChunks documentId={d.id} />}
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
           <div className="mt-10 bg-card border border-border rounded-md p-5">
@@ -465,6 +528,65 @@ export function Library() {
         </>
       )}
     </PageContainer>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  label,
+  testId,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  testId?: string;
+}) {
+  return (
+    <button
+      data-testid={testId}
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded text-[11px] font-mono uppercase tracking-wider border ${
+        active
+          ? "bg-primary/20 text-primary border-primary/50"
+          : "bg-background text-muted-foreground border-border hover:border-primary/30"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function AutoSourceBadge({
+  autoSource,
+}: {
+  autoSource: string | null | undefined;
+}) {
+  if (!autoSource) return null;
+  const parsed = parseAutoSource(autoSource);
+  if (!parsed) {
+    return (
+      <span
+        data-testid="badge-auto"
+        className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+        title={autoSource}
+      >
+        Auto
+      </span>
+    );
+  }
+  const branchLabel =
+    MIL_BRANCHES.find((b) => b.code === parsed.branchCode)?.label ??
+    parsed.branchCode;
+  const kindLabel = parsed.kind === "mos" ? "MOS" : "Unit";
+  return (
+    <span
+      data-testid="badge-auto"
+      className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+      title={autoSource}
+    >
+      Auto · {branchLabel} {kindLabel} {parsed.identifier}
+    </span>
   );
 }
 

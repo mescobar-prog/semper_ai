@@ -178,6 +178,9 @@ importers:
       '@workspace/integrations-gemini-ai':
         specifier: workspace:*
         version: link:../../lib/integrations-gemini-ai
+      '@workspace/mil-data':
+        specifier: workspace:*
+        version: link:../../lib/mil-data
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -551,6 +554,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/mil-data':
+        specifier: workspace:*
+        version: link:../../lib/mil-data
       '@workspace/replit-auth-web':
         specifier: workspace:*
         version: link:../../lib/replit-auth-web
@@ -868,6 +874,8 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.3.5
+
+  lib/mil-data: {}
 
   lib/replit-auth-web:
     dependencies:

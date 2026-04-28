@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetMyProfile,
@@ -6,24 +6,30 @@ import {
   useGetProfileChatHistory,
   useSendProfileChat,
   useResetProfileChat,
+  useGetAutoIngestStatus,
   getGetMyProfileQueryKey,
   getGetProfileChatHistoryQueryKey,
+  getGetAutoIngestStatusQueryKey,
+  getListDocumentsQueryKey,
 } from "@workspace/api-client-react";
 import type {
   ProfileUpdate,
   UserProfile,
   ChatMessage,
 } from "@workspace/api-client-react";
+import {
+  BRANCHES as MIL_BRANCHES,
+  branchCode,
+  buildMosAutoSource,
+  buildUnitAutoSource,
+  findMosEntry,
+  hasUnitDoctrinePackage,
+  listMosForBranch,
+  listUnitsForBranch,
+} from "@workspace/mil-data";
 import { PageContainer, ErrorBox, formatDate } from "@/lib/format";
 
-const BRANCHES = [
-  "Army",
-  "Navy",
-  "Marine Corps",
-  "Air Force",
-  "Space Force",
-  "Coast Guard",
-];
+const BRANCHES = MIL_BRANCHES.map((b) => b.label);
 const CLEARANCES = [
   "None",
   "Public Trust",
@@ -39,6 +45,9 @@ const DEPLOYMENT_STATUS = [
   "TDY",
 ];
 
+// Branch / MOS / Unit are handled separately so we can wire up the typeahead
+// pickers and the auto-ingest status panel. The remaining fields are still
+// rendered through the generic FIELDS table.
 const FIELDS: Array<{
   key: keyof ProfileUpdate;
   label: string;
@@ -47,25 +56,12 @@ const FIELDS: Array<{
   span?: 1 | 2 | 3;
   placeholder?: string;
 }> = [
-  { key: "branch", label: "Branch", type: "select", options: BRANCHES },
   { key: "rank", label: "Rank", type: "text", placeholder: "e.g. SSG, O-3" },
-  {
-    key: "mosCode",
-    label: "MOS / Rate / AFSC",
-    type: "text",
-    placeholder: "e.g. 11B, IT2, 1N3X1",
-  },
   {
     key: "dutyTitle",
     label: "Duty title",
     type: "text",
     placeholder: "e.g. Platoon Sergeant",
-  },
-  {
-    key: "unit",
-    label: "Unit",
-    type: "text",
-    placeholder: "e.g. 3-187 IN, 1st BCT",
   },
   {
     key: "baseLocation",
@@ -173,6 +169,19 @@ export function Profile() {
     queueSave({ ...draft, [key]: value || null });
   };
 
+  // Picking a new branch should reset the MOS+unit fields, since their valid
+  // values depend on branch. Without this the user can end up with an
+  // "Army:5933" combination that doesn't match any curated MOS.
+  const onChangeBranch = (value: string) => {
+    if (!draft) return;
+    const next: ProfileUpdate = { ...draft, branch: value || null };
+    if (value !== draft.branch) {
+      next.mosCode = null;
+      next.unit = null;
+    }
+    queueSave(next);
+  };
+
   const onAiUseCases = (value: string) => {
     if (!draft) return;
     const arr = value
@@ -278,6 +287,7 @@ export function Profile() {
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-4">
+              <BranchMosUnitFields draft={draft} onChange={onChange} onChangeBranch={onChangeBranch} />
               {FIELDS.map((f) => {
                 const colSpan =
                   f.span === 3
@@ -348,6 +358,9 @@ export function Profile() {
                       : "Changes save automatically"}
                 </div>
                 {saveError && <ErrorBox>Save failed: {saveError}</ErrorBox>}
+              </div>
+              <div className="col-span-3">
+                <IngestStatusPanel draft={draft} />
               </div>
             </div>
           )}
@@ -440,6 +453,386 @@ function ExportMenu({
               .json
             </span>
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BranchMosUnitFields({
+  draft,
+  onChange,
+  onChangeBranch,
+}: {
+  draft: ProfileUpdate;
+  onChange: (key: keyof ProfileUpdate, value: string) => void;
+  onChangeBranch: (value: string) => void;
+}) {
+  // Resolve the user's branch to a code so we can scope the typeahead lists.
+  const code = useMemo(() => branchCode(draft.branch ?? ""), [draft.branch]);
+  const mosOptions = useMemo(
+    () =>
+      code
+        ? listMosForBranch(code).map((m) => ({
+            value: m.code,
+            label: `${m.code} — ${m.title}`,
+            searchText: `${m.code} ${m.title}`.toLowerCase(),
+          }))
+        : [],
+    [code],
+  );
+  const unitOptions = useMemo(
+    () =>
+      code
+        ? listUnitsForBranch(code).map((u) => ({
+            value: u.identifier,
+            label: `${u.identifier} — ${u.name}`,
+            searchText: `${u.identifier} ${u.name}`.toLowerCase(),
+          }))
+        : [],
+    [code],
+  );
+  const matchedMos = useMemo(() => {
+    if (!code || !draft.mosCode) return null;
+    return findMosEntry(code, draft.mosCode);
+  }, [code, draft.mosCode]);
+  const unitHasPackage = useMemo(() => {
+    if (!code || !draft.unit) return false;
+    return hasUnitDoctrinePackage(code, draft.unit);
+  }, [code, draft.unit]);
+
+  return (
+    <>
+      <div className="col-span-3 sm:col-span-1">
+        <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+          Branch
+        </label>
+        <select
+          value={draft.branch ?? ""}
+          onChange={(e) => onChangeBranch(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+          data-testid="branch-select"
+        >
+          <option value="">— unset —</option>
+          {BRANCHES.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="col-span-3 sm:col-span-1">
+        <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+          MOS / Rate / AFSC
+        </label>
+        <Combobox
+          value={draft.mosCode ?? ""}
+          options={mosOptions}
+          disabled={!code}
+          placeholder={code ? "Type code or title…" : "Pick a branch first"}
+          onChange={(v) => onChange("mosCode", v)}
+          testId="mos-combobox"
+        />
+        {matchedMos && (
+          <div
+            className="text-[10px] text-emerald-400 mt-1 font-mono"
+            data-testid="mos-matched-hint"
+          >
+            ✓ {matchedMos.title} — doctrine will auto-load
+          </div>
+        )}
+      </div>
+      <div className="col-span-3 sm:col-span-1">
+        <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+          Unit
+        </label>
+        <Combobox
+          value={draft.unit ?? ""}
+          options={unitOptions}
+          disabled={!code}
+          allowFreeText
+          placeholder={code ? "e.g. 3-187 IN" : "Pick a branch first"}
+          onChange={(v) => onChange("unit", v)}
+          testId="unit-combobox"
+        />
+        {unitHasPackage && (
+          <div
+            className="text-[10px] text-emerald-400 mt-1 font-mono"
+            data-testid="unit-matched-hint"
+          >
+            ✓ Curated unit package — doctrine will auto-load
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+interface ComboboxOption {
+  value: string;
+  label: string;
+  searchText: string;
+}
+
+function Combobox({
+  value,
+  options,
+  onChange,
+  placeholder,
+  disabled,
+  allowFreeText,
+  testId,
+}: {
+  value: string;
+  options: ComboboxOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  /** When true, accepts free-text values not in the options list (units). */
+  allowFreeText?: boolean;
+  testId?: string;
+}) {
+  const [query, setQuery] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // The displayed text is the user's in-progress query when typing, otherwise
+  // the canonical value. We don't show the long " — title" suffix in the input
+  // so it stays compact; the dropdown row provides the fuller label.
+  const displayValue = query ?? value;
+
+  // Filter options by code AND title. Empty query shows the first 50 to keep
+  // the dropdown bounded.
+  const filtered = useMemo(() => {
+    const q = (query ?? "").trim().toLowerCase();
+    const list = q
+      ? options.filter((o) => o.searchText.includes(q))
+      : options;
+    return list.slice(0, 50);
+  }, [query, options]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+        setQuery(null);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  // Reset active row whenever the filter set changes so arrow-key nav doesn't
+  // point at an out-of-range index after the user types another character.
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [query]);
+
+  const commit = (next: string) => {
+    onChange(next);
+    setQuery(null);
+    setOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setOpen(true);
+      setActiveIdx((i) => Math.min(filtered.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(0, i - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const pick = filtered[activeIdx];
+      if (pick) {
+        commit(pick.value);
+      } else if (allowFreeText) {
+        commit((query ?? value).trim());
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setQuery(null);
+    }
+  };
+
+  return (
+    <div className="relative" ref={containerRef} data-testid={testId}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={displayValue}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          // For free-text fields (units) we propagate every keystroke so the
+          // value persists even when the user doesn't pick a row. For
+          // catalog-only fields (MOS) we wait for a row click or Enter to
+          // commit, so partial typing doesn't write a junk MOS code.
+          if (allowFreeText) onChange(e.target.value);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          // Defer so click-on-row fires first.
+          setTimeout(() => {
+            setOpen(false);
+            // For MOS we may have typed something that doesn't match any
+            // option. If the input is non-empty AND it exact-matches a code,
+            // commit it; otherwise revert to the last committed value.
+            if (!allowFreeText && query !== null) {
+              const norm = query.trim().toLowerCase();
+              const exact = options.find(
+                (o) => o.value.toLowerCase() === norm,
+              );
+              if (exact) commit(exact.value);
+              else setQuery(null);
+            }
+          }, 120);
+        }}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none disabled:opacity-50"
+        data-testid={testId ? `${testId}-input` : undefined}
+        autoComplete="off"
+      />
+      {open && filtered.length > 0 && (
+        <ul
+          className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-lg"
+          role="listbox"
+          data-testid={testId ? `${testId}-list` : undefined}
+        >
+          {filtered.map((o, i) => (
+            <li
+              key={o.value}
+              role="option"
+              aria-selected={i === activeIdx}
+              onMouseEnter={() => setActiveIdx(i)}
+              onMouseDown={(e) => {
+                // mousedown so we beat the input's onBlur
+                e.preventDefault();
+                commit(o.value);
+              }}
+              className={`px-3 py-1.5 text-xs cursor-pointer ${
+                i === activeIdx
+                  ? "bg-primary/15 text-foreground"
+                  : "text-foreground/90"
+              }`}
+              data-testid={testId ? `${testId}-option-${o.value}` : undefined}
+            >
+              {o.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function IngestStatusPanel({ draft }: { draft: ProfileUpdate }) {
+  const code = useMemo(() => branchCode(draft.branch ?? ""), [draft.branch]);
+  const matchedMos = useMemo(() => {
+    if (!code || !draft.mosCode) return null;
+    return findMosEntry(code, draft.mosCode);
+  }, [code, draft.mosCode]);
+  const unitHasPackage = useMemo(() => {
+    if (!code || !draft.unit) return false;
+    return hasUnitDoctrinePackage(code, draft.unit);
+  }, [code, draft.unit]);
+
+  const sources: string[] = [];
+  if (code && matchedMos) sources.push(buildMosAutoSource(code, matchedMos.code));
+  if (code && unitHasPackage && draft.unit)
+    sources.push(buildUnitAutoSource(code, draft.unit.trim()));
+
+  if (sources.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-primary/30 bg-primary/5 p-4 space-y-3">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-primary">
+        Auto-loaded doctrine
+      </div>
+      {sources.map((src) => (
+        <IngestStatusRow key={src} source={src} />
+      ))}
+    </div>
+  );
+}
+
+function IngestStatusRow({ source }: { source: string }) {
+  const queryClient = useQueryClient();
+  const { data } = useGetAutoIngestStatus(
+    { source },
+    {
+      query: {
+        queryKey: getGetAutoIngestStatusQueryKey({ source }),
+        refetchInterval: (q) => {
+          const j = q.state.data?.job;
+          return j && j.status === "running" ? 1500 : false;
+        },
+      },
+    },
+  );
+  const job = data?.job ?? null;
+
+  // When a running job finishes, invalidate the documents list so the user
+  // sees the new docs flow into their library without a manual refresh.
+  const lastStatus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!job) return;
+    if (
+      lastStatus.current === "running" &&
+      job.status !== "running"
+    ) {
+      queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
+      queryClient.invalidateQueries({
+        queryKey: getGetAutoIngestStatusQueryKey({ source }),
+      });
+    }
+    lastStatus.current = job.status;
+  }, [job, queryClient, source]);
+
+  if (!job) {
+    return (
+      <div className="text-xs text-muted-foreground font-mono">
+        {source} — queued
+      </div>
+    );
+  }
+
+  const verb =
+    job.status === "running"
+      ? "Pulling doctrine…"
+      : job.status === "done"
+        ? "Doctrine loaded"
+        : "Failed";
+  const verbColor =
+    job.status === "running"
+      ? "text-primary"
+      : job.status === "done"
+        ? "text-emerald-400"
+        : "text-red-400";
+
+  return (
+    <div className="text-xs">
+      <div className="flex items-center gap-2">
+        <span className={`font-mono ${verbColor}`}>{verb}</span>
+        <span className="text-muted-foreground font-mono">{source}</span>
+      </div>
+      <div className="text-muted-foreground mt-0.5">
+        {job.addedCount} added · {job.existingCount} already in library ·{" "}
+        {job.failedCount} failed · {job.totalCount} total
+      </div>
+      {job.errorMessage && (
+        <div className="text-red-400 text-[11px] mt-0.5">
+          {job.errorMessage}
         </div>
       )}
     </div>

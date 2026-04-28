@@ -4,11 +4,21 @@ import {
   db,
   documentsTable,
   docChunksTable,
+  ingestJobsTable,
 } from "@workspace/db";
-import { UploadTextDocumentBody, TestLibraryQueryBody } from "@workspace/api-zod";
+import {
+  UploadTextDocumentBody,
+  TestLibraryQueryBody,
+  TriggerAutoIngestBody,
+} from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { chunkText, searchChunks } from "../lib/rag";
 import { extractDocumentText } from "../lib/document-extract";
+import {
+  ingestMosPackage,
+  ingestUnitPackage,
+} from "../lib/auto-ingest";
+import { parseAutoSource } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -44,8 +54,26 @@ function serializeDocument(d: typeof documentsTable.$inferSelect) {
     charCount: d.charCount,
     chunkCount: d.chunkCount,
     status: d.status,
+    autoSource: d.autoSource ?? null,
+    sourceUrl: d.sourceUrl ?? null,
+    errorMessage: d.errorMessage ?? null,
     uploadedAt: d.uploadedAt.toISOString(),
     processedAt: d.processedAt ? d.processedAt.toISOString() : null,
+  };
+}
+
+function serializeJob(j: typeof ingestJobsTable.$inferSelect) {
+  return {
+    id: j.id,
+    source: j.source,
+    status: j.status,
+    totalCount: j.totalCount,
+    addedCount: j.addedCount,
+    existingCount: j.existingCount,
+    failedCount: j.failedCount,
+    errorMessage: j.errorMessage ?? null,
+    createdAt: j.createdAt.toISOString(),
+    updatedAt: j.updatedAt.toISOString(),
   };
 }
 
@@ -223,6 +251,56 @@ router.delete("/library/documents/:id", requireAuth, async (req, res) => {
     return;
   }
   res.json({ success: true });
+});
+
+router.post("/library/auto-ingest", requireAuth, async (req, res) => {
+  const parsed = TriggerAutoIngestBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid auto-ingest request" });
+    return;
+  }
+  const { source } = parsed.data;
+  const parsedSource = parseAutoSource(source);
+  if (!parsedSource) {
+    res.status(400).json({ error: "Unrecognized source identifier" });
+    return;
+  }
+
+  // Resolve labels for ingest helpers, which expect the user-facing branch
+  // string. Both helpers return null when the curated package is empty.
+  const branchLabel = parsedSource.branchCode;
+  const result =
+    parsedSource.kind === "mos"
+      ? await ingestMosPackage(req.user!.id, branchLabel, parsedSource.identifier)
+      : await ingestUnitPackage(req.user!.id, branchLabel, parsedSource.identifier);
+
+  if (!result) {
+    res.status(400).json({
+      error: "No curated doctrine package available for that source",
+    });
+    return;
+  }
+  res.json(result.summary);
+});
+
+router.get("/library/auto-ingest/status", requireAuth, async (req, res) => {
+  const source = String(req.query.source ?? "").trim();
+  if (!source) {
+    res.status(400).json({ error: "source query param is required" });
+    return;
+  }
+  const [job] = await db
+    .select()
+    .from(ingestJobsTable)
+    .where(
+      and(
+        eq(ingestJobsTable.userId, req.user!.id),
+        eq(ingestJobsTable.source, source),
+      ),
+    )
+    .orderBy(desc(ingestJobsTable.createdAt))
+    .limit(1);
+  res.json({ source, job: job ? serializeJob(job) : null });
 });
 
 router.post("/library/test-query", requireAuth, async (req, res) => {

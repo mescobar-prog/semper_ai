@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../lib/db" },
     { "path": "../../lib/api-zod" },
-    { "path": "../../lib/integrations-gemini-ai" }
+    { "path": "../../lib/integrations-gemini-ai" },
+    { "path": "../../lib/mil-data" }
   ]
 }

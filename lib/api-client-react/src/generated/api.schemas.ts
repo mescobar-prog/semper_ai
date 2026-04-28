@@ -229,6 +229,19 @@ export interface DocumentSummary {
   charCount: number;
   chunkCount: number;
   status: string;
+  /**
+   * Stable identifier of the auto-ingest source that produced this doc, e.g. "mos:army:11B" or "unit:marines:MALS-12". Null for documents the user uploaded by hand.
+
+   * @nullable
+   */
+  autoSource: string | null;
+  /**
+   * Original public URL the doc was downloaded from (auto-ingest only).
+   * @nullable
+   */
+  sourceUrl: string | null;
+  /** @nullable */
+  errorMessage: string | null;
   uploadedAt: string;
   /** @nullable */
   processedAt: string | null;
@@ -336,6 +349,42 @@ export interface LibraryQueryResponse {
   snippets: RagSnippet[];
 }
 
+export interface AutoIngestRequest {
+  /** Source identifier, e.g. "mos:army:11B" or "unit:marines:MALS-12". */
+  source: string;
+}
+
+export interface AutoIngestSummary {
+  source: string;
+  /** Number of curated docs in the package. */
+  total: number;
+  /** Newly downloaded and ingested. */
+  added: number;
+  /** Already present */
+  existing: number;
+  failed: number;
+}
+
+export interface AutoIngestJob {
+  id: string;
+  source: string;
+  /** "running" | "done" | "failed" */
+  status: string;
+  totalCount: number;
+  addedCount: number;
+  existingCount: number;
+  failedCount: number;
+  /** @nullable */
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutoIngestStatusResponse {
+  source: string;
+  job: AutoIngestJob | null;
+}
+
 export interface LaunchHistoryItem {
   id: string;
   toolId: string;
@@ -382,4 +431,8 @@ export type ListToolsParams = {
   ato_status?: string;
   impact_level?: string;
   favorites_only?: boolean;
+};
+
+export type GetAutoIngestStatusParams = {
+  source: string;
 };

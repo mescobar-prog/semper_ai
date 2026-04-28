@@ -18,6 +18,9 @@ import type {
 
 import type {
   AuthUserEnvelope,
+  AutoIngestRequest,
+  AutoIngestStatusResponse,
+  AutoIngestSummary,
   BeginBrowserLoginParams,
   Category,
   ChatMessage,
@@ -27,6 +30,7 @@ import type {
   DocumentDetail,
   DocumentSummary,
   ErrorEnvelope,
+  GetAutoIngestStatusParams,
   HandleBrowserLoginCallbackParams,
   HealthStatus,
   LaunchHistoryItem,
@@ -1722,6 +1726,200 @@ export const useUploadTextDocument = <
 > => {
   return useMutation(getUploadTextDocumentMutationOptions(options));
 };
+
+/**
+ * Looks up the curated doctrine package for the given source ("mos:<branch>:<code>" or "unit:<branch>:<id>"), downloads each public-doctrine URL server-side, extracts and chunks it, and inserts the new docs into the user's library. Existing docs with the same source URL are skipped, so re-running this is safe and idempotent.
+
+ * @summary Trigger auto-ingest of a curated MOS or Unit doctrine package
+ */
+export const getTriggerAutoIngestUrl = () => {
+  return `/api/library/auto-ingest`;
+};
+
+export const triggerAutoIngest = async (
+  autoIngestRequest: AutoIngestRequest,
+  options?: RequestInit,
+): Promise<AutoIngestSummary> => {
+  return customFetch<AutoIngestSummary>(getTriggerAutoIngestUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(autoIngestRequest),
+  });
+};
+
+export const getTriggerAutoIngestMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerAutoIngest>>,
+    TError,
+    { data: BodyType<AutoIngestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof triggerAutoIngest>>,
+  TError,
+  { data: BodyType<AutoIngestRequest> },
+  TContext
+> => {
+  const mutationKey = ["triggerAutoIngest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof triggerAutoIngest>>,
+    { data: BodyType<AutoIngestRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return triggerAutoIngest(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TriggerAutoIngestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof triggerAutoIngest>>
+>;
+export type TriggerAutoIngestMutationBody = BodyType<AutoIngestRequest>;
+export type TriggerAutoIngestMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Trigger auto-ingest of a curated MOS or Unit doctrine package
+ */
+export const useTriggerAutoIngest = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerAutoIngest>>,
+    TError,
+    { data: BodyType<AutoIngestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof triggerAutoIngest>>,
+  TError,
+  { data: BodyType<AutoIngestRequest> },
+  TContext
+> => {
+  return useMutation(getTriggerAutoIngestMutationOptions(options));
+};
+
+/**
+ * @summary Poll the most recent auto-ingest job for a source
+ */
+export const getGetAutoIngestStatusUrl = (
+  params: GetAutoIngestStatusParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/library/auto-ingest/status?${stringifiedParams}`
+    : `/api/library/auto-ingest/status`;
+};
+
+export const getAutoIngestStatus = async (
+  params: GetAutoIngestStatusParams,
+  options?: RequestInit,
+): Promise<AutoIngestStatusResponse> => {
+  return customFetch<AutoIngestStatusResponse>(
+    getGetAutoIngestStatusUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAutoIngestStatusQueryKey = (
+  params?: GetAutoIngestStatusParams,
+) => {
+  return [
+    `/api/library/auto-ingest/status`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAutoIngestStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAutoIngestStatus>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: GetAutoIngestStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutoIngestStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAutoIngestStatusQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAutoIngestStatus>>
+  > = ({ signal }) =>
+    getAutoIngestStatus(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAutoIngestStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAutoIngestStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAutoIngestStatus>>
+>;
+export type GetAutoIngestStatusQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Poll the most recent auto-ingest job for a source
+ */
+
+export function useGetAutoIngestStatus<
+  TData = Awaited<ReturnType<typeof getAutoIngestStatus>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: GetAutoIngestStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutoIngestStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAutoIngestStatusQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Lets the signed-in user verify their library is returning useful snippets BEFORE trusting it with a tool launch. Identical retrieval path to the launch-token-scoped /tools/library-query endpoint, but scoped to the current authenticated user instead of a session token.

@@ -15,6 +15,12 @@ import {
   serializeProfile,
 } from "../lib/profile-helpers";
 import { runProfileChat } from "../lib/gemini-helpers";
+import {
+  ingestMosPackage,
+  ingestUnitPackage,
+  startIngestPackage,
+} from "../lib/auto-ingest";
+import { branchCode, hasUnitDoctrinePackage, findMosEntry } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -31,7 +37,7 @@ router.put("/profile", requireAuth, async (req, res) => {
     return;
   }
 
-  await getOrCreateProfile(req.user!.id);
+  const previous = await getOrCreateProfile(req.user!.id);
 
   const data = parsed.data;
   const update: Record<string, unknown> = {};
@@ -51,11 +57,74 @@ router.put("/profile", requireAuth, async (req, res) => {
   }
   if (Array.isArray(data.aiUseCases)) update.aiUseCases = data.aiUseCases;
 
+  // Server-side branch+MOS validity enforcement. The catalog is the source of
+  // truth: if a client (current UI, stale UI, or direct API call) tries to
+  // persist a MOS that doesn't belong to the resolved branch, drop the MOS
+  // rather than allow the cross-branch combination. We only enforce when both
+  // branch and MOS are present in this update OR already on the row, so a
+  // partial update touching only one field is still validated against the
+  // effective post-write state.
+  const effectiveBranch =
+    "branch" in update ? (update.branch as string | null) : previous.branch;
+  const effectiveMos =
+    "mosCode" in update
+      ? (update.mosCode as string | null)
+      : previous.mosCode;
+  if (effectiveBranch && effectiveMos) {
+    const bc = branchCode(effectiveBranch);
+    if (!bc || !findMosEntry(bc, effectiveMos)) {
+      update.mosCode = null;
+    }
+  }
+
   const [updated] = await db
     .update(profilesTable)
     .set(update)
     .where(eq(profilesTable.userId, req.user!.id))
     .returning();
+
+  // Auto-ingest curated doctrine when the user picks a new branch+MOS or
+  // changes their unit to one we have a curated package for. We compare the
+  // *resolved* branch+MOS pair so that re-ordering branch and MOS edits
+  // doesn't trigger duplicate fetches.
+  const userId = req.user!.id;
+  const prevBranchCode = branchCode(previous.branch);
+  const newBranchCode = branchCode(updated.branch);
+  const prevMosKey = prevBranchCode && previous.mosCode
+    ? `${prevBranchCode}:${previous.mosCode.trim().toUpperCase()}`
+    : null;
+  const newMosKey = newBranchCode && updated.mosCode
+    ? `${newBranchCode}:${updated.mosCode.trim().toUpperCase()}`
+    : null;
+  if (
+    newBranchCode &&
+    updated.mosCode &&
+    newMosKey !== prevMosKey &&
+    findMosEntry(newBranchCode, updated.mosCode)
+  ) {
+    startIngestPackage(
+      () => ingestMosPackage(userId, updated.branch, updated.mosCode),
+      { userId, source: `mos:${newMosKey}` },
+    );
+  }
+
+  const prevUnitKey = prevBranchCode && previous.unit
+    ? `${prevBranchCode}:${previous.unit.trim()}`
+    : null;
+  const newUnitKey = newBranchCode && updated.unit
+    ? `${newBranchCode}:${updated.unit.trim()}`
+    : null;
+  if (
+    newBranchCode &&
+    updated.unit &&
+    newUnitKey !== prevUnitKey &&
+    hasUnitDoctrinePackage(newBranchCode, updated.unit)
+  ) {
+    startIngestPackage(
+      () => ingestUnitPackage(userId, updated.branch, updated.unit),
+      { userId, source: `unit:${newUnitKey}` },
+    );
+  }
 
   res.json(serializeProfile(updated));
 });

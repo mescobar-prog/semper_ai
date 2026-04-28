@@ -401,6 +401,60 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /library/auto-ingest:
+    post:
+      tags: [Library]
+      operationId: triggerAutoIngest
+      summary: Trigger auto-ingest of a curated MOS or Unit doctrine package
+      description: >
+        Looks up the curated doctrine package for the given source
+        ("mos:<branch>:<code>" or "unit:<branch>:<id>"), downloads each
+        public-doctrine URL server-side, extracts and chunks it, and
+        inserts the new docs into the user's library. Existing docs with
+        the same source URL are skipped, so re-running this is safe and
+        idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AutoIngestRequest' }
+      responses:
+        '200':
+          description: Ingest finished synchronously
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoIngestSummary' }
+        '400':
+          description: Bad request (no curated package for source)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /library/auto-ingest/status:
+    get:
+      tags: [Library]
+      operationId: getAutoIngestStatus
+      summary: Poll the most recent auto-ingest job for a source
+      parameters:
+        - name: source
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Status (or null when no job exists)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoIngestStatusResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /library/test-query:
     post:
       tags: [Library]
@@ -927,7 +981,8 @@ components:
       type: object
       required:
         [id, title, sourceFilename, mimeType, sizeBytes, charCount,
-         chunkCount, status, uploadedAt, processedAt]
+         chunkCount, status, autoSource, sourceUrl, errorMessage,
+         uploadedAt, processedAt]
       properties:
         id: { type: string }
         title: { type: string }
@@ -937,6 +992,16 @@ components:
         charCount: { type: integer }
         chunkCount: { type: integer }
         status: { type: string }
+        autoSource:
+          type: [string, 'null']
+          description: >
+            Stable identifier of the auto-ingest source that produced this
+            doc, e.g. "mos:army:11B" or "unit:marines:MALS-12". Null for
+            documents the user uploaded by hand.
+        sourceUrl:
+          type: [string, 'null']
+          description: Original public URL the doc was downloaded from (auto-ingest only).
+        errorMessage: { type: [string, 'null'] }
         uploadedAt: { type: string, format: date-time }
         processedAt: { type: [string, 'null'], format: date-time }
 
@@ -1082,6 +1147,51 @@ components:
         snippets:
           type: array
           items: { $ref: '#/components/schemas/RagSnippet' }
+
+    AutoIngestRequest:
+      type: object
+      required: [source]
+      properties:
+        source:
+          type: string
+          description: 'Source identifier, e.g. "mos:army:11B" or "unit:marines:MALS-12".'
+
+    AutoIngestSummary:
+      type: object
+      required: [source, total, added, existing, failed]
+      properties:
+        source: { type: string }
+        total: { type: integer, description: Number of curated docs in the package. }
+        added: { type: integer, description: Newly downloaded and ingested. }
+        existing: { type: integer, description: Already present, skipped. }
+        failed: { type: integer }
+
+    AutoIngestJob:
+      type: object
+      required:
+        [id, source, status, totalCount, addedCount, existingCount,
+         failedCount, errorMessage, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        source: { type: string }
+        status: { type: string, description: '"running" | "done" | "failed"' }
+        totalCount: { type: integer }
+        addedCount: { type: integer }
+        existingCount: { type: integer }
+        failedCount: { type: integer }
+        errorMessage: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AutoIngestStatusResponse:
+      type: object
+      required: [source, job]
+      properties:
+        source: { type: string }
+        job:
+          oneOf:
+            - $ref: '#/components/schemas/AutoIngestJob'
+            - type: 'null'
 
     LaunchHistoryItem:
       type: object

@@ -330,6 +330,19 @@ export const ListDocumentsResponseItem = zod.object({
   charCount: zod.number(),
   chunkCount: zod.number(),
   status: zod.string(),
+  autoSource: zod
+    .string()
+    .nullable()
+    .describe(
+      'Stable identifier of the auto-ingest source that produced this doc, e.g. \"mos:army:11B\" or \"unit:marines:MALS-12\". Null for documents the user uploaded by hand.\n',
+    ),
+  sourceUrl: zod
+    .string()
+    .nullable()
+    .describe(
+      "Original public URL the doc was downloaded from (auto-ingest only).",
+    ),
+  errorMessage: zod.string().nullable(),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
 });
@@ -366,8 +379,68 @@ export const UploadTextDocumentResponse = zod.object({
   charCount: zod.number(),
   chunkCount: zod.number(),
   status: zod.string(),
+  autoSource: zod
+    .string()
+    .nullable()
+    .describe(
+      'Stable identifier of the auto-ingest source that produced this doc, e.g. \"mos:army:11B\" or \"unit:marines:MALS-12\". Null for documents the user uploaded by hand.\n',
+    ),
+  sourceUrl: zod
+    .string()
+    .nullable()
+    .describe(
+      "Original public URL the doc was downloaded from (auto-ingest only).",
+    ),
+  errorMessage: zod.string().nullable(),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
+});
+
+/**
+ * Looks up the curated doctrine package for the given source ("mos:<branch>:<code>" or "unit:<branch>:<id>"), downloads each public-doctrine URL server-side, extracts and chunks it, and inserts the new docs into the user's library. Existing docs with the same source URL are skipped, so re-running this is safe and idempotent.
+
+ * @summary Trigger auto-ingest of a curated MOS or Unit doctrine package
+ */
+export const TriggerAutoIngestBody = zod.object({
+  source: zod
+    .string()
+    .describe(
+      'Source identifier, e.g. \"mos:army:11B\" or \"unit:marines:MALS-12\".',
+    ),
+});
+
+export const TriggerAutoIngestResponse = zod.object({
+  source: zod.string(),
+  total: zod.number().describe("Number of curated docs in the package."),
+  added: zod.number().describe("Newly downloaded and ingested."),
+  existing: zod.number().describe("Already present"),
+  failed: zod.number(),
+});
+
+/**
+ * @summary Poll the most recent auto-ingest job for a source
+ */
+export const GetAutoIngestStatusQueryParams = zod.object({
+  source: zod.coerce.string(),
+});
+
+export const GetAutoIngestStatusResponse = zod.object({
+  source: zod.string(),
+  job: zod.union([
+    zod.object({
+      id: zod.string(),
+      source: zod.string(),
+      status: zod.string().describe('\"running\" | \"done\" | \"failed\"'),
+      totalCount: zod.number(),
+      addedCount: zod.number(),
+      existingCount: zod.number(),
+      failedCount: zod.number(),
+      errorMessage: zod.string().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+    zod.null(),
+  ]),
 });
 
 /**
@@ -412,6 +485,19 @@ export const GetDocumentResponse = zod
     charCount: zod.number(),
     chunkCount: zod.number(),
     status: zod.string(),
+    autoSource: zod
+      .string()
+      .nullable()
+      .describe(
+        'Stable identifier of the auto-ingest source that produced this doc, e.g. \"mos:army:11B\" or \"unit:marines:MALS-12\". Null for documents the user uploaded by hand.\n',
+      ),
+    sourceUrl: zod
+      .string()
+      .nullable()
+      .describe(
+        "Original public URL the doc was downloaded from (auto-ingest only).",
+      ),
+    errorMessage: zod.string().nullable(),
     uploadedAt: zod.coerce.date(),
     processedAt: zod.coerce.date().nullable(),
   })
