@@ -22,6 +22,8 @@ import type {
   AutoIngestStatusResponse,
   AutoIngestSummary,
   BeginBrowserLoginParams,
+  BriefDraft,
+  BriefDraftRequest,
   Category,
   ChatMessage,
   ConfirmContextBlockRejection,
@@ -3233,6 +3235,94 @@ export const useQueryLibrary = <
   TContext
 > => {
   return useMutation(getQueryLibraryMutationOptions(options));
+};
+
+/**
+ * Session-token-scoped endpoint used by the Mission Brief Drafter demo tool. Re-loads the launching user's profile and primer snippets, optionally pulls additional library snippets for the user's topic, and asks Claude to produce a draft brief in the user's voice.
+
+ * @summary Tool asks Claude to draft a mission brief from the launched context
+ */
+export const getDraftBriefUrl = () => {
+  return `/api/tools/draft-brief`;
+};
+
+export const draftBrief = async (
+  briefDraftRequest: BriefDraftRequest,
+  options?: RequestInit,
+): Promise<BriefDraft> => {
+  return customFetch<BriefDraft>(getDraftBriefUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(briefDraftRequest),
+  });
+};
+
+export const getDraftBriefMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof draftBrief>>,
+    TError,
+    { data: BodyType<BriefDraftRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof draftBrief>>,
+  TError,
+  { data: BodyType<BriefDraftRequest> },
+  TContext
+> => {
+  const mutationKey = ["draftBrief"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof draftBrief>>,
+    { data: BodyType<BriefDraftRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return draftBrief(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DraftBriefMutationResult = NonNullable<
+  Awaited<ReturnType<typeof draftBrief>>
+>;
+export type DraftBriefMutationBody = BodyType<BriefDraftRequest>;
+export type DraftBriefMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Tool asks Claude to draft a mission brief from the launched context
+ */
+export const useDraftBrief = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof draftBrief>>,
+    TError,
+    { data: BodyType<BriefDraftRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof draftBrief>>,
+  TError,
+  { data: BodyType<BriefDraftRequest> },
+  TContext
+> => {
+  return useMutation(getDraftBriefMutationOptions(options));
 };
 
 /**

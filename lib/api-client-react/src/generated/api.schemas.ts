@@ -552,6 +552,46 @@ export interface AutoIngestStatusResponse {
   job: AutoIngestJob | null;
 }
 
+/**
+ * Which brief format to draft.
+ */
+export type BriefDraftRequestBriefType =
+  (typeof BriefDraftRequestBriefType)[keyof typeof BriefDraftRequestBriefType];
+
+export const BriefDraftRequestBriefType = {
+  sitrep: "sitrep",
+  opord_paragraph: "opord_paragraph",
+  training_brief: "training_brief",
+} as const;
+
+export interface BriefDraftRequest {
+  /** @minLength 1 */
+  sessionToken: string;
+  /**
+   * One-line topic the brief should cover.
+   * @minLength 1
+   */
+  topic: string;
+  /** Which brief format to draft. */
+  briefType: BriefDraftRequestBriefType;
+  /**
+   * Optional audience override (e.g. "battalion commander").
+   * @nullable
+   */
+  audience?: string | null;
+}
+
+export interface BriefDraft {
+  briefType: string;
+  topic: string;
+  /** The generated brief in Markdown. */
+  draft: string;
+  /** Library queries used to pull supporting snippets. */
+  queries: string[];
+  /** Snippets the model was asked to draw on. */
+  snippets: RagSnippet[];
+}
+
 export interface LaunchHistoryItem {
   id: string;
   toolId: string;

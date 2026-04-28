@@ -9,13 +9,16 @@ import {
   usersTable,
 } from "@workspace/db";
 import {
+  DraftBriefBody,
   ExchangeContextTokenBody,
   QueryLibraryBody,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { generateOpaqueToken } from "../lib/tokens";
 import {
+  draftMissionBrief,
   generateRagQueries,
+  type BriefType,
 } from "../lib/gemini-helpers";
 import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
@@ -268,6 +271,95 @@ router.post("/tools/library-query", async (req, res) => {
   );
 
   res.json({ query, snippets });
+});
+
+router.post("/tools/draft-brief", async (req, res) => {
+  const parsed = DraftBriefBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request" });
+    return;
+  }
+  const { sessionToken, topic, briefType, audience } = parsed.data;
+
+  const [sess] = await db
+    .select()
+    .from(sessionTokensTable)
+    .where(eq(sessionTokensTable.token, sessionToken))
+    .limit(1);
+  if (!sess) {
+    res.status(401).json({ error: "Invalid session token" });
+    return;
+  }
+  if (sess.expiresAt.getTime() < Date.now()) {
+    res.status(401).json({ error: "Session token expired" });
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, sess.userId))
+    .limit(1);
+  if (!user) {
+    res.status(401).json({ error: "Launch user unavailable" });
+    return;
+  }
+
+  const profile = await getOrCreateProfile(user.id);
+
+  const trimmedTopic = topic.trim();
+  // Use the user's topic as the primary library query, plus a couple of
+  // profile-derived fallbacks so a vague topic still surfaces unit-specific
+  // material.
+  const queries = [trimmedTopic];
+  if (profile.primaryMission) queries.push(profile.primaryMission);
+  if (profile.dutyTitle && profile.unit) {
+    queries.push(`${profile.unit} ${profile.dutyTitle}`);
+  }
+
+  const snippets = await searchChunksMultiQuery(user.id, queries, 3, 8);
+
+  const displayName =
+    [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+    user.email ||
+    user.id;
+
+  const userPayload = {
+    id: user.id,
+    displayName,
+    email: user.email,
+  };
+
+  const contextBlock = buildContextBlock(userPayload, profile);
+
+  let draft: string;
+  try {
+    draft = await draftMissionBrief({
+      topic: trimmedTopic,
+      briefType: briefType as BriefType,
+      audience: audience ?? null,
+      profile,
+      user: { displayName, email: user.email },
+      contextBlock,
+      snippets: snippets.map((s) => ({
+        documentTitle: s.documentTitle,
+        chunkIndex: s.chunkIndex,
+        content: s.content,
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "draftMissionBrief failed");
+    res.status(500).json({ error: "Failed to draft brief" });
+    return;
+  }
+
+  res.json({
+    briefType,
+    topic: trimmedTopic,
+    draft,
+    queries,
+    snippets,
+  });
 });
 
 router.get("/launches/recent", requireAuth, async (req, res) => {

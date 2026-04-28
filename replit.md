@@ -34,6 +34,7 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 - `artifacts/marketplace` — main storefront (React + Vite). Pages: Landing, Dashboard, Catalog (Context Block verification gate), CatalogBrowse (`/catalog/browse`, tool list), CatalogDetail, Profile, Library, Launches, Admin.
 - `artifacts/api-server` — Express + Drizzle. Routes for auth, profile, catalog, library, launches, admin, dashboard.
 - `artifacts/context-echo` — demonstration tool that exchanges a launch token and renders the user/profile/RAG primer payload it received.
+- `artifacts/brief-drafter` — Mission Brief Drafter. Exchanges a launch token, then lets the user pick a brief type (SITREP / OPORD paragraph / Training brief) + topic and calls `POST /api/tools/draft-brief` (server runs profile-aware RAG and Claude `claude-sonnet-4-6`) to produce an editable, copyable markdown brief.
 - `artifacts/mockup-sandbox` — design canvas (unchanged template).
 
 ### Launch token flow

@@ -1268,6 +1268,45 @@ export const QueryLibraryResponse = zod.object({
 });
 
 /**
+ * Session-token-scoped endpoint used by the Mission Brief Drafter demo tool. Re-loads the launching user's profile and primer snippets, optionally pulls additional library snippets for the user's topic, and asks Claude to produce a draft brief in the user's voice.
+
+ * @summary Tool asks Claude to draft a mission brief from the launched context
+ */
+
+export const DraftBriefBody = zod.object({
+  sessionToken: zod.string().min(1),
+  topic: zod.string().min(1).describe("One-line topic the brief should cover."),
+  briefType: zod
+    .enum(["sitrep", "opord_paragraph", "training_brief"])
+    .describe("Which brief format to draft."),
+  audience: zod
+    .string()
+    .nullish()
+    .describe('Optional audience override (e.g. \"battalion commander\").'),
+});
+
+export const DraftBriefResponse = zod.object({
+  briefType: zod.string(),
+  topic: zod.string(),
+  draft: zod.string().describe("The generated brief in Markdown."),
+  queries: zod
+    .array(zod.string())
+    .describe("Library queries used to pull supporting snippets."),
+  snippets: zod
+    .array(
+      zod.object({
+        chunkId: zod.string(),
+        documentId: zod.string(),
+        documentTitle: zod.string(),
+        chunkIndex: zod.number(),
+        content: zod.string(),
+        score: zod.number(),
+      }),
+    )
+    .describe("Snippets the model was asked to draw on."),
+});
+
+/**
  * @summary List the user's recent tool launches
  */
 export const ListRecentLaunchesResponseItem = zod.object({

@@ -477,3 +477,112 @@ Generate the JSON object now.`;
   }
   return merged.slice(0, 8);
 }
+
+export interface BriefSnippetInput {
+  documentTitle: string;
+  chunkIndex: number;
+  content: string;
+}
+
+export type BriefType = "sitrep" | "opord_paragraph" | "training_brief";
+
+const BRIEF_FORMAT: Record<BriefType, string> = {
+  sitrep: `Format: SITREP. Use the standard SALUTE-style headings:
+1. Situation (own forces + enemy/operating environment)
+2. Mission (one sentence — who, what, when, where, why)
+3. Execution (current ops, scheme of maneuver in plain English)
+4. Sustainment (logistics, personnel, key shortfalls)
+5. Command & Signal (who's the decision authority, comms posture)
+Keep it brief — staff officers should be able to read it in under 60 seconds.`,
+  opord_paragraph: `Format: A single OPORD paragraph (paragraph 3 — Execution — by default; if the topic is clearly Situation or Sustainment, use that paragraph instead). Use the standard sub-paragraph numbering (3.a, 3.b, 3.c …). Lead with Commander's Intent in 1-2 sentences. Keep verb tense imperative ("Conducts", "Provides", "Reports").`,
+  training_brief: `Format: Training brief. Use these headings:
+1. Training Event & METL link
+2. Training Audience
+3. Training Objectives (3-5 bullets, action-condition-standard if possible)
+4. Concept of Execution
+5. Resources Required
+6. Risk Assessment & Controls
+Keep it concrete — a squad/platoon leader should be able to execute from this.`,
+};
+
+const BRIEF_LABEL: Record<BriefType, string> = {
+  sitrep: "SITREP",
+  opord_paragraph: "OPORD paragraph",
+  training_brief: "training brief",
+};
+
+export interface DraftBriefInput {
+  topic: string;
+  briefType: BriefType;
+  audience: string | null;
+  profile: Profile | null;
+  user: { displayName: string; email: string | null };
+  contextBlock: string;
+  snippets: BriefSnippetInput[];
+}
+
+export async function draftMissionBrief(
+  input: DraftBriefInput,
+): Promise<string> {
+  const { topic, briefType, audience, contextBlock, snippets, user, profile } =
+    input;
+
+  const briefLabel = BRIEF_LABEL[briefType];
+  const formatRules = BRIEF_FORMAT[briefType];
+
+  const audienceLine = audience?.trim()
+    ? `Intended audience (override): ${audience.trim()}.`
+    : profile?.dutyTitle
+      ? `Intended audience: a peer or higher echelon of the operator's chain — they hold "${profile.dutyTitle}".`
+      : "Intended audience: the operator's immediate higher echelon.";
+
+  const snippetBlock = snippets.length
+    ? snippets
+        .map((s, i) => {
+          const trimmed = s.content.trim().slice(0, 1200);
+          return `[Source ${i + 1}: ${s.documentTitle} — chunk #${s.chunkIndex}]\n${trimmed}`;
+        })
+        .join("\n\n")
+    : "(No matching snippets in the operator's library — draft from profile context only and call out gaps.)";
+
+  const systemPrompt = `You are a U.S. military staff writer embedded in the "Mission Brief Drafter" tool inside a DoD AI Tool Marketplace. Your job is to draft a ${briefLabel} for the operator below, anchored in their structured profile and the snippets pulled from their personal doctrine/SOP library.
+
+Hard rules:
+- Never invent classified facts, casualty figures, friendly force locations, or specific OPSEC-sensitive details. If the operator hasn't given you a fact, say "TBD" rather than guessing.
+- Quote sparingly from the provided library snippets; do not fabricate doctrine references.
+- Match the operator's service voice (Army, Navy, USMC, USAF, USSF, USCG) when the branch is known.
+- Output Markdown only. No preamble, no "Here is your draft" — go straight into the brief.
+- Keep total length under ~400 words unless the topic clearly demands more.
+
+${formatRules}`;
+
+  const userPrompt = `${contextBlock}
+
+${audienceLine}
+
+Topic the operator wants drafted:
+"${topic.trim()}"
+
+Library snippets retrieved on the operator's behalf (use these to anchor specifics — DO NOT invent beyond them):
+${snippetBlock}
+
+Draft the ${briefLabel} now in the operator's voice (${user.displayName}). Output Markdown only.`;
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 1400,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+  });
+
+  const textBlock = response.content.find((b) => b.type === "text");
+  const raw = textBlock && "text" in textBlock ? textBlock.text : "";
+  const cleaned = raw
+    .replace(/^```(?:markdown|md)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  if (!cleaned) {
+    throw new Error("Model returned an empty draft");
+  }
+  return cleaned;
+}

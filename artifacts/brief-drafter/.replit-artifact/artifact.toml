@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/brief-drafter/"
+title = "Mission Brief Drafter"
+version = "1.0.0"
+id = "artifacts/brief-drafter"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/brief-drafter/" ]
+localPort = 22574
+
+[services.development]
+run = "pnpm --filter @workspace/brief-drafter run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/brief-drafter", "run", "build" ]
+publicDir = "artifacts/brief-drafter/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22574"
+BASE_PATH = "/brief-drafter/"

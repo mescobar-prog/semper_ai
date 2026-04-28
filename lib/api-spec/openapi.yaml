@@ -871,6 +871,37 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /tools/draft-brief:
+    post:
+      tags: [Launch]
+      operationId: draftBrief
+      summary: Tool asks Claude to draft a mission brief from the launched context
+      description: >
+        Session-token-scoped endpoint used by the Mission Brief Drafter demo
+        tool. Re-loads the launching user's profile and primer snippets,
+        optionally pulls additional library snippets for the user's topic,
+        and asks Claude to produce a draft brief in the user's voice.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BriefDraftRequest' }
+      responses:
+        '200':
+          description: Draft brief
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BriefDraft' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Invalid session token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /launches/recent:
     get:
       tags: [Launch]
@@ -1831,6 +1862,41 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AutoIngestJob'
             - type: 'null'
+
+    BriefDraftRequest:
+      type: object
+      required: [sessionToken, topic, briefType]
+      properties:
+        sessionToken: { type: string, minLength: 1 }
+        topic:
+          type: string
+          minLength: 1
+          description: One-line topic the brief should cover.
+        briefType:
+          type: string
+          enum: [sitrep, opord_paragraph, training_brief]
+          description: Which brief format to draft.
+        audience:
+          type: [string, 'null']
+          description: Optional audience override (e.g. "battalion commander").
+
+    BriefDraft:
+      type: object
+      required: [briefType, topic, draft, snippets, queries]
+      properties:
+        briefType: { type: string }
+        topic: { type: string }
+        draft:
+          type: string
+          description: The generated brief in Markdown.
+        queries:
+          type: array
+          description: Library queries used to pull supporting snippets.
+          items: { type: string }
+        snippets:
+          type: array
+          description: Snippets the model was asked to draw on.
+          items: { $ref: '#/components/schemas/RagSnippet' }
 
     LaunchHistoryItem:
       type: object

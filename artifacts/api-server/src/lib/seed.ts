@@ -95,16 +95,16 @@ const TOOLS: SeedTool[] = [
     isActive: true,
   },
   {
-    slug: "brief-builder",
-    name: "Brief Builder",
+    slug: "brief-drafter",
+    name: "Mission Brief Drafter",
     vendor: "DoD AI Marketplace",
     categorySlug: "comms-writing",
     shortDescription:
-      "Drafts staff-ready briefs from a one-line topic plus your library and profile.",
+      "Drafts a SITREP, OPORD paragraph, or training brief in your voice from a one-line topic.",
     longDescription:
-      "Brief Builder turns a one-line topic into a staff-ready brief by combining your structured profile (rank, billet, unit) with the most relevant snippets from your personal library. Output follows standard MDMP/JOPP formatting and is ready to paste into a SmartBook deliverable.",
+      "Mission Brief Drafter is the second reference tool for the marketplace. On launch it exchanges your launch token for the same context bundle Context Echo shows, then asks Claude to draft a SITREP, OPORD paragraph, or training brief in your service's voice — anchored to your profile (rank, billet, unit, mission) and the most relevant snippets from your personal library. The output is editable in-place so you can polish it and copy it straight into your staff product.",
     purpose:
-      "Draft staff-ready briefs (situation, mission, execution, sustainment, command & signal) anchored in the operator's library of OPORDs, FRAGOs, and unit SOPs.",
+      "Draft staff-ready briefs (SITREP, OPORD paragraph, or training brief) anchored in the operator's library of OPORDs, FRAGOs, and unit SOPs, in their service's voice.",
     ragQueryTemplates: [
       "{primaryMission} OPORD",
       "{dutyTitle} commander's intent",
@@ -114,10 +114,10 @@ const TOOLS: SeedTool[] = [
     atoStatus: "full_ato",
     impactLevels: ["il2", "il4"],
     dataClassification: "cui",
-    version: "2.3",
-    badges: ["FedRAMP High", "Section 508"],
+    version: "1.0",
+    badges: ["Reference Implementation", "FedRAMP High", "Section 508"],
     homepageUrl: null,
-    launchUrl: "/context-echo/",
+    launchUrl: "/brief-drafter/",
     documentationUrl: null,
     isActive: true,
   },
@@ -445,5 +445,52 @@ export async function seedCatalog(): Promise<void> {
           AND ${toolsTable.ragQueryTemplates} = '[]'::jsonb`,
       );
   }
+
+  // Rename the legacy "brief-builder" placeholder row to the real
+  // "brief-drafter" tool. The earlier catalog seeded a stub at slug
+  // "brief-builder" pointing at /context-echo/; now that the real artifact
+  // exists at /brief-drafter/ we promote that row in place so existing
+  // launches and pinned categories don't dangle.
+  const briefDrafterDef = TOOLS.find((t) => t.slug === "brief-drafter");
+  if (briefDrafterDef) {
+    await db
+      .update(toolsTable)
+      .set({
+        slug: briefDrafterDef.slug,
+        name: briefDrafterDef.name,
+        vendor: briefDrafterDef.vendor,
+        shortDescription: briefDrafterDef.shortDescription,
+        longDescription: briefDrafterDef.longDescription,
+        purpose: briefDrafterDef.purpose,
+        ragQueryTemplates: briefDrafterDef.ragQueryTemplates,
+        atoStatus: briefDrafterDef.atoStatus,
+        impactLevels: briefDrafterDef.impactLevels,
+        dataClassification: briefDrafterDef.dataClassification,
+        version: briefDrafterDef.version,
+        badges: briefDrafterDef.badges,
+        homepageUrl: briefDrafterDef.homepageUrl,
+        launchUrl: briefDrafterDef.launchUrl,
+        documentationUrl: briefDrafterDef.documentationUrl,
+        categoryId: slugToId.get(briefDrafterDef.categorySlug) ?? null,
+      })
+      .where(sql`${toolsTable.slug} = 'brief-builder'`);
+  }
+
+  // For any other still-stub rows that point at the /context-echo/ placeholder
+  // (besides context-echo itself), if the seed catalog now has a real
+  // launchUrl for that slug, promote it. This keeps launchUrl in sync as new
+  // demo tools come online without clobbering admin-customized launchUrls.
+  for (const t of TOOLS) {
+    if (t.slug === "context-echo") continue;
+    if (t.launchUrl === "/context-echo/") continue;
+    await db
+      .update(toolsTable)
+      .set({ launchUrl: t.launchUrl })
+      .where(
+        sql`${toolsTable.slug} = ${t.slug}
+          AND ${toolsTable.launchUrl} = '/context-echo/'`,
+      );
+  }
+
   logger.info("backfill complete");
 }
