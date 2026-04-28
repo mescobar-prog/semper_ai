@@ -36,7 +36,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
     },
   });
 
-  if (!user) {
+  // The auth callback route renders without the chrome (and the
+  // classification banner) even if a stale user is briefly present
+  // during redirect handoff. Treat it as an unauthenticated screen.
+  if (!user || location === "/auth/callback") {
     return <>{children}</>;
   }
 
@@ -62,7 +65,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
   ];
 
   return (
-    <div className="min-h-screen flex bg-background text-foreground">
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <div
+        role="status"
+        aria-label="Classification banner"
+        className="w-full bg-green-500 text-black font-bold text-center text-sm tracking-widest uppercase py-1.5 border-b border-green-700"
+      >
+        UNCLASSIFIED (DEMO)
+      </div>
+      <div className="flex flex-1 min-h-0">
       <aside className="w-64 border-r border-border bg-card flex flex-col">
         <div className="px-6 py-5 border-b border-border">
           <div className="flex items-center gap-2">
@@ -122,6 +133,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </header>
         <div className="flex-1 overflow-auto">{children}</div>
       </main>
+      </div>
     </div>
   );
 }

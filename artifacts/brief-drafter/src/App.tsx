@@ -233,6 +233,13 @@ function BriefDrafterPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div
+        role="status"
+        aria-label="Classification banner"
+        className="w-full bg-green-500 text-black font-bold text-center text-sm tracking-widest uppercase py-1.5 border-b border-green-700"
+      >
+        UNCLASSIFIED (DEMO)
+      </div>
       <header className="border-b border-slate-800 bg-slate-900/40 backdrop-blur sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
           <div className="space-y-1">
