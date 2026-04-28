@@ -69,10 +69,13 @@ async function bootstrap() {
     try {
       // Re-chunk legacy documents first: their chunks were sized for the
       // old (larger) chunker and the back half of every chunk was being
-      // truncated by the embedder. Rebuilding here means the freshly
-      // emitted chunks get embedded inline, so the subsequent
-      // backfillEmbeddings pass only has to clean up any stragglers.
-      await rebuildOversizedChunks();
+      // truncated by the embedder. The in-process embedder is CPU-bound
+      // and a doc with hundreds of chunks blocks the event loop long
+      // enough to stall HTTP requests, so this is opt-in via env var.
+      // Set RUN_CHUNK_REBUILD_ON_BOOT=1 to run it at the next boot.
+      if (process.env["RUN_CHUNK_REBUILD_ON_BOOT"] === "1") {
+        await rebuildOversizedChunks();
+      }
       await backfillEmbeddings();
       await backfillHeadingTrails();
     } catch (err) {
