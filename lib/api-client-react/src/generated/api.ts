@@ -48,6 +48,10 @@ import type {
   ProfileChatResponse,
   ProfileUpdate,
   SimpleSuccess,
+  SubmissionDetail,
+  SubmissionReviewRequest,
+  SubmissionSummary,
+  SubmissionUpsert,
   TextDocumentUploadRequest,
   ToolDetail,
   ToolSummary,
@@ -2841,6 +2845,587 @@ export const useDeleteTool = <
   TContext
 > => {
   return useMutation(getDeleteToolMutationOptions(options));
+};
+
+/**
+ * @summary List the current user's tool submissions
+ */
+export const getListMySubmissionsUrl = () => {
+  return `/api/submissions`;
+};
+
+export const listMySubmissions = async (
+  options?: RequestInit,
+): Promise<SubmissionSummary[]> => {
+  return customFetch<SubmissionSummary[]>(getListMySubmissionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListMySubmissionsQueryKey = () => {
+  return [`/api/submissions`] as const;
+};
+
+export const getListMySubmissionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMySubmissions>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listMySubmissions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListMySubmissionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMySubmissions>>
+  > = ({ signal }) => listMySubmissions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMySubmissions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMySubmissionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMySubmissions>>
+>;
+export type ListMySubmissionsQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary List the current user's tool submissions
+ */
+
+export function useListMySubmissions<
+  TData = Awaited<ReturnType<typeof listMySubmissions>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listMySubmissions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMySubmissionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Submit a new tool for admin review
+ */
+export const getCreateSubmissionUrl = () => {
+  return `/api/submissions`;
+};
+
+export const createSubmission = async (
+  submissionUpsert: SubmissionUpsert,
+  options?: RequestInit,
+): Promise<SubmissionDetail> => {
+  return customFetch<SubmissionDetail>(getCreateSubmissionUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(submissionUpsert),
+  });
+};
+
+export const getCreateSubmissionMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmission>>,
+    TError,
+    { data: BodyType<SubmissionUpsert> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSubmission>>,
+  TError,
+  { data: BodyType<SubmissionUpsert> },
+  TContext
+> => {
+  const mutationKey = ["createSubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSubmission>>,
+    { data: BodyType<SubmissionUpsert> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createSubmission(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSubmission>>
+>;
+export type CreateSubmissionMutationBody = BodyType<SubmissionUpsert>;
+export type CreateSubmissionMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Submit a new tool for admin review
+ */
+export const useCreateSubmission = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmission>>,
+    TError,
+    { data: BodyType<SubmissionUpsert> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSubmission>>,
+  TError,
+  { data: BodyType<SubmissionUpsert> },
+  TContext
+> => {
+  return useMutation(getCreateSubmissionMutationOptions(options));
+};
+
+/**
+ * @summary Get one of the current user's submissions
+ */
+export const getGetMySubmissionUrl = (id: string) => {
+  return `/api/submissions/${id}`;
+};
+
+export const getMySubmission = async (
+  id: string,
+  options?: RequestInit,
+): Promise<SubmissionDetail> => {
+  return customFetch<SubmissionDetail>(getGetMySubmissionUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMySubmissionQueryKey = (id: string) => {
+  return [`/api/submissions/${id}`] as const;
+};
+
+export const getGetMySubmissionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMySubmission>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMySubmission>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMySubmissionQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMySubmission>>> = ({
+    signal,
+  }) => getMySubmission(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMySubmission>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMySubmissionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMySubmission>>
+>;
+export type GetMySubmissionQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Get one of the current user's submissions
+ */
+
+export function useGetMySubmission<
+  TData = Awaited<ReturnType<typeof getMySubmission>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMySubmission>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMySubmissionQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update or resubmit a pending or changes-requested submission
+ */
+export const getUpdateMySubmissionUrl = (id: string) => {
+  return `/api/submissions/${id}`;
+};
+
+export const updateMySubmission = async (
+  id: string,
+  submissionUpsert: SubmissionUpsert,
+  options?: RequestInit,
+): Promise<SubmissionDetail> => {
+  return customFetch<SubmissionDetail>(getUpdateMySubmissionUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(submissionUpsert),
+  });
+};
+
+export const getUpdateMySubmissionMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMySubmission>>,
+    TError,
+    { id: string; data: BodyType<SubmissionUpsert> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMySubmission>>,
+  TError,
+  { id: string; data: BodyType<SubmissionUpsert> },
+  TContext
+> => {
+  const mutationKey = ["updateMySubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMySubmission>>,
+    { id: string; data: BodyType<SubmissionUpsert> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateMySubmission(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMySubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMySubmission>>
+>;
+export type UpdateMySubmissionMutationBody = BodyType<SubmissionUpsert>;
+export type UpdateMySubmissionMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Update or resubmit a pending or changes-requested submission
+ */
+export const useUpdateMySubmission = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMySubmission>>,
+    TError,
+    { id: string; data: BodyType<SubmissionUpsert> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMySubmission>>,
+  TError,
+  { id: string; data: BodyType<SubmissionUpsert> },
+  TContext
+> => {
+  return useMutation(getUpdateMySubmissionMutationOptions(options));
+};
+
+/**
+ * @summary Withdraw a pending or changes-requested submission
+ */
+export const getWithdrawMySubmissionUrl = (id: string) => {
+  return `/api/submissions/${id}/withdraw`;
+};
+
+export const withdrawMySubmission = async (
+  id: string,
+  options?: RequestInit,
+): Promise<SubmissionDetail> => {
+  return customFetch<SubmissionDetail>(getWithdrawMySubmissionUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getWithdrawMySubmissionMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof withdrawMySubmission>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof withdrawMySubmission>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["withdrawMySubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof withdrawMySubmission>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return withdrawMySubmission(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type WithdrawMySubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof withdrawMySubmission>>
+>;
+
+export type WithdrawMySubmissionMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Withdraw a pending or changes-requested submission
+ */
+export const useWithdrawMySubmission = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof withdrawMySubmission>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof withdrawMySubmission>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getWithdrawMySubmissionMutationOptions(options));
+};
+
+/**
+ * @summary Admin review queue (pending and changes-requested submissions)
+ */
+export const getAdminListSubmissionsUrl = () => {
+  return `/api/admin/submissions`;
+};
+
+export const adminListSubmissions = async (
+  options?: RequestInit,
+): Promise<SubmissionDetail[]> => {
+  return customFetch<SubmissionDetail[]>(getAdminListSubmissionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListSubmissionsQueryKey = () => {
+  return [`/api/admin/submissions`] as const;
+};
+
+export const getAdminListSubmissionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListSubmissions>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListSubmissions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminListSubmissionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListSubmissions>>
+  > = ({ signal }) => adminListSubmissions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListSubmissions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListSubmissionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListSubmissions>>
+>;
+export type AdminListSubmissionsQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Admin review queue (pending and changes-requested submissions)
+ */
+
+export function useAdminListSubmissions<
+  TData = Awaited<ReturnType<typeof adminListSubmissions>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListSubmissions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListSubmissionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Approve, request changes on, or reject a submission
+ */
+export const getReviewSubmissionUrl = (id: string) => {
+  return `/api/admin/submissions/${id}/review`;
+};
+
+export const reviewSubmission = async (
+  id: string,
+  submissionReviewRequest: SubmissionReviewRequest,
+  options?: RequestInit,
+): Promise<SubmissionDetail> => {
+  return customFetch<SubmissionDetail>(getReviewSubmissionUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(submissionReviewRequest),
+  });
+};
+
+export const getReviewSubmissionMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reviewSubmission>>,
+    TError,
+    { id: string; data: BodyType<SubmissionReviewRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reviewSubmission>>,
+  TError,
+  { id: string; data: BodyType<SubmissionReviewRequest> },
+  TContext
+> => {
+  const mutationKey = ["reviewSubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reviewSubmission>>,
+    { id: string; data: BodyType<SubmissionReviewRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return reviewSubmission(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReviewSubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reviewSubmission>>
+>;
+export type ReviewSubmissionMutationBody = BodyType<SubmissionReviewRequest>;
+export type ReviewSubmissionMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Approve, request changes on, or reject a submission
+ */
+export const useReviewSubmission = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reviewSubmission>>,
+    TError,
+    { id: string; data: BodyType<SubmissionReviewRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof reviewSubmission>>,
+  TError,
+  { id: string; data: BodyType<SubmissionReviewRequest> },
+  TContext
+> => {
+  return useMutation(getReviewSubmissionMutationOptions(options));
 };
 
 /**

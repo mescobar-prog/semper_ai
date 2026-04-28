@@ -6,6 +6,7 @@ import catalogRouter from "./catalog";
 import libraryRouter from "./library";
 import launchesRouter from "./launches";
 import adminRouter from "./admin";
+import submissionsRouter from "./submissions";
 import dashboardRouter from "./dashboard";
 
 const router: IRouter = Router();
@@ -17,6 +18,7 @@ router.use(catalogRouter);
 router.use(libraryRouter);
 router.use(launchesRouter);
 router.use(adminRouter);
+router.use(submissionsRouter);
 router.use(dashboardRouter);
 
 export default router;

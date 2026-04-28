@@ -160,6 +160,7 @@ export interface ToolSummary {
   categorySlug: string | null;
   /** @nullable */
   categoryName: string | null;
+  isVendorSubmitted: boolean;
 }
 
 export type ToolDetail = ToolSummary & {
@@ -177,6 +178,8 @@ export type ToolDetail = ToolSummary & {
   launchUrl: string;
   /** @nullable */
   documentationUrl: string | null;
+  /** @nullable */
+  logoUrl: string | null;
   isActive: boolean;
   /** @nullable */
   categoryId: string | null;
@@ -211,7 +214,93 @@ export interface ToolUpsert {
   launchUrl: string;
   /** @nullable */
   documentationUrl?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
   isActive: boolean;
+}
+
+export interface SubmissionUpsert {
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 1 */
+  vendor: string;
+  /** @minLength 1 */
+  shortDescription: string;
+  /** @minLength 1 */
+  longDescription: string;
+  /** @nullable */
+  categoryId?: string | null;
+  atoStatus: string;
+  impactLevels: string[];
+  dataClassification: string;
+  /** @minLength 1 */
+  launchUrl: string;
+  /** @nullable */
+  homepageUrl?: string | null;
+  /** @nullable */
+  documentationUrl?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
+  /** @minLength 1 */
+  contactEmail: string;
+}
+
+export interface SubmissionSummary {
+  id: string;
+  slug: string;
+  name: string;
+  vendor: string;
+  shortDescription: string;
+  atoStatus: string;
+  submissionStatus: string;
+  /** @nullable */
+  submittedAt: string | null;
+  updatedAt: string;
+  /** @nullable */
+  reviewComment: string | null;
+  /** @nullable */
+  reviewedAt: string | null;
+  isVendorSubmitted: boolean;
+}
+
+export type SubmissionDetail = SubmissionSummary & {
+  longDescription: string;
+  impactLevels: string[];
+  dataClassification: string;
+  launchUrl: string;
+  /** @nullable */
+  homepageUrl: string | null;
+  /** @nullable */
+  documentationUrl: string | null;
+  /** @nullable */
+  logoUrl: string | null;
+  /** @nullable */
+  contactEmail: string | null;
+  /** @nullable */
+  categoryId: string | null;
+  /** @nullable */
+  categorySlug: string | null;
+  /** @nullable */
+  categoryName: string | null;
+  /** @nullable */
+  submitterId: string | null;
+  /** @nullable */
+  submitterDisplayName: string | null;
+};
+
+export type SubmissionReviewRequestAction =
+  (typeof SubmissionReviewRequestAction)[keyof typeof SubmissionReviewRequestAction];
+
+export const SubmissionReviewRequestAction = {
+  approve: "approve",
+  request_changes: "request_changes",
+  reject: "reject",
+} as const;
+
+export interface SubmissionReviewRequest {
+  action: SubmissionReviewRequestAction;
+  /** @nullable */
+  comment?: string | null;
 }
 
 export interface LibraryStats {

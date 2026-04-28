@@ -32,7 +32,10 @@ router.get("/catalog/tools", async (req, res) => {
       : undefined;
   const favoritesOnly = req.query.favorites_only === "true";
 
-  const conditions = [eq(toolsTable.isActive, "true")];
+  const conditions = [
+    eq(toolsTable.isActive, "true"),
+    eq(toolsTable.submissionStatus, "approved"),
+  ];
   if (q) {
     conditions.push(
       or(
@@ -63,6 +66,7 @@ router.get("/catalog/tools", async (req, res) => {
       badges: toolsTable.badges,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
+      submitterId: toolsTable.submitterId,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
       launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`,
       isFavorite: userId
@@ -80,11 +84,12 @@ router.get("/catalog/tools", async (req, res) => {
   }
 
   res.json(
-    result.map((r) => ({
+    result.map(({ submitterId, ...r }) => ({
       ...r,
       favoriteCount: Number(r.favoriteCount ?? 0),
       launchCount: Number(r.launchCount ?? 0),
       isFavorite: Boolean(r.isFavorite),
+      isVendorSubmitted: submitterId != null,
     })),
   );
 });
@@ -109,10 +114,13 @@ router.get("/catalog/tools/:slug", async (req, res) => {
       homepageUrl: toolsTable.homepageUrl,
       launchUrl: toolsTable.launchUrl,
       documentationUrl: toolsTable.documentationUrl,
+      logoUrl: toolsTable.logoUrl,
       isActive: toolsTable.isActive,
       categoryId: toolsTable.categoryId,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
+      submitterId: toolsTable.submitterId,
+      submissionStatus: toolsTable.submissionStatus,
       createdAt: toolsTable.createdAt,
       updatedAt: toolsTable.updatedAt,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
@@ -126,17 +134,19 @@ router.get("/catalog/tools/:slug", async (req, res) => {
     .where(eq(toolsTable.slug, slug))
     .limit(1);
 
-  if (!row) {
+  if (!row || row.submissionStatus !== "approved") {
     res.status(404).json({ error: "Tool not found" });
     return;
   }
 
+  const { submitterId, submissionStatus, ...rest } = row;
   res.json({
-    ...row,
+    ...rest,
     isActive: row.isActive === "true",
     favoriteCount: Number(row.favoriteCount ?? 0),
     launchCount: Number(row.launchCount ?? 0),
     isFavorite: Boolean(row.isFavorite),
+    isVendorSubmitted: submitterId != null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });

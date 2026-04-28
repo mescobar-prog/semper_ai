@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
   db,
   toolsTable,
@@ -24,12 +24,14 @@ interface ToolDetailRow extends Tool {
 }
 
 function serializeToolDetail(row: ToolDetailRow) {
+  const { submitterId, submissionStatus, ...rest } = row;
   return {
-    ...row,
+    ...rest,
     isActive: row.isActive === "true",
     favoriteCount: Number(row.favoriteCount ?? 0),
     launchCount: Number(row.launchCount ?? 0),
     isFavorite: false,
+    isVendorSubmitted: submitterId != null,
     purpose: row.purpose ?? "",
     ragQueryTemplates: row.ragQueryTemplates ?? [],
     createdAt: row.createdAt.toISOString(),
@@ -56,11 +58,14 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
       homepageUrl: toolsTable.homepageUrl,
       launchUrl: toolsTable.launchUrl,
       documentationUrl: toolsTable.documentationUrl,
+      logoUrl: toolsTable.logoUrl,
       isActive: toolsTable.isActive,
       categoryId: toolsTable.categoryId,
       createdBy: toolsTable.createdBy,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
+      submitterId: toolsTable.submitterId,
+      submissionStatus: toolsTable.submissionStatus,
       createdAt: toolsTable.createdAt,
       updatedAt: toolsTable.updatedAt,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
@@ -68,6 +73,7 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
     })
     .from(toolsTable)
     .leftJoin(categoriesTable, eq(toolsTable.categoryId, categoriesTable.id))
+    .where(eq(toolsTable.submissionStatus, "approved"))
     .orderBy(asc(toolsTable.name));
 
   res.json(rows.map((r) => serializeToolDetail(r as ToolDetailRow)));
@@ -99,7 +105,9 @@ router.post("/admin/tools", requireAdmin, async (req, res) => {
       homepageUrl: data.homepageUrl ?? null,
       launchUrl: data.launchUrl,
       documentationUrl: data.documentationUrl ?? null,
+      logoUrl: data.logoUrl ?? null,
       isActive: data.isActive ? "true" : "false",
+      submissionStatus: "approved",
       createdBy: req.user!.id,
     })
     .returning();
@@ -149,9 +157,15 @@ router.put("/admin/tools/:id", requireAdmin, async (req, res) => {
       homepageUrl: data.homepageUrl ?? null,
       launchUrl: data.launchUrl,
       documentationUrl: data.documentationUrl ?? null,
+      logoUrl: data.logoUrl ?? null,
       isActive: data.isActive ? "true" : "false",
     })
-    .where(eq(toolsTable.id, String(req.params.id)))
+    .where(
+      and(
+        eq(toolsTable.id, String(req.params.id)),
+        eq(toolsTable.submissionStatus, "approved"),
+      ),
+    )
     .returning();
 
   if (!updated) {
@@ -181,7 +195,12 @@ router.put("/admin/tools/:id", requireAdmin, async (req, res) => {
 router.delete("/admin/tools/:id", requireAdmin, async (req, res) => {
   const result = await db
     .delete(toolsTable)
-    .where(eq(toolsTable.id, String(req.params.id)))
+    .where(
+      and(
+        eq(toolsTable.id, String(req.params.id)),
+        eq(toolsTable.submissionStatus, "approved"),
+      ),
+    )
     .returning();
   if (result.length === 0) {
     res.status(404).json({ error: "Tool not found" });

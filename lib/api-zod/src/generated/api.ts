@@ -236,6 +236,7 @@ export const ListToolsResponseItem = zod.object({
   launchCount: zod.number(),
   categorySlug: zod.string().nullable(),
   categoryName: zod.string().nullable(),
+  isVendorSubmitted: zod.boolean(),
 });
 export const ListToolsResponse = zod.array(ListToolsResponseItem);
 
@@ -262,6 +263,7 @@ export const GetToolBySlugResponse = zod
     launchCount: zod.number(),
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
+    isVendorSubmitted: zod.boolean(),
   })
   .and(
     zod.object({
@@ -280,6 +282,7 @@ export const GetToolBySlugResponse = zod
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
       documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
       createdAt: zod.coerce.date(),
@@ -657,6 +660,7 @@ export const AdminListToolsResponseItem = zod
     launchCount: zod.number(),
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
+    isVendorSubmitted: zod.boolean(),
   })
   .and(
     zod.object({
@@ -675,6 +679,7 @@ export const AdminListToolsResponseItem = zod
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
       documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
       createdAt: zod.coerce.date(),
@@ -704,6 +709,7 @@ export const CreateToolBody = zod.object({
   homepageUrl: zod.string().nullish(),
   launchUrl: zod.string().min(1),
   documentationUrl: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
   isActive: zod.boolean(),
 });
 
@@ -723,6 +729,7 @@ export const CreateToolResponse = zod
     launchCount: zod.number(),
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
+    isVendorSubmitted: zod.boolean(),
   })
   .and(
     zod.object({
@@ -741,6 +748,7 @@ export const CreateToolResponse = zod
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
       documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
       createdAt: zod.coerce.date(),
@@ -772,6 +780,7 @@ export const UpdateToolBody = zod.object({
   homepageUrl: zod.string().nullish(),
   launchUrl: zod.string().min(1),
   documentationUrl: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
   isActive: zod.boolean(),
 });
 
@@ -791,6 +800,7 @@ export const UpdateToolResponse = zod
     launchCount: zod.number(),
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
+    isVendorSubmitted: zod.boolean(),
   })
   .and(
     zod.object({
@@ -809,6 +819,7 @@ export const UpdateToolResponse = zod
       homepageUrl: zod.string().nullable(),
       launchUrl: zod.string(),
       documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
       createdAt: zod.coerce.date(),
@@ -826,6 +837,300 @@ export const DeleteToolParams = zod.object({
 export const DeleteToolResponse = zod.object({
   success: zod.boolean(),
 });
+
+/**
+ * @summary List the current user's tool submissions
+ */
+export const ListMySubmissionsResponseItem = zod.object({
+  id: zod.string(),
+  slug: zod.string(),
+  name: zod.string(),
+  vendor: zod.string(),
+  shortDescription: zod.string(),
+  atoStatus: zod.string(),
+  submissionStatus: zod.string(),
+  submittedAt: zod.coerce.date().nullable(),
+  updatedAt: zod.coerce.date(),
+  reviewComment: zod.string().nullable(),
+  reviewedAt: zod.coerce.date().nullable(),
+  isVendorSubmitted: zod.boolean(),
+});
+export const ListMySubmissionsResponse = zod.array(
+  ListMySubmissionsResponseItem,
+);
+
+/**
+ * @summary Submit a new tool for admin review
+ */
+
+export const CreateSubmissionBody = zod.object({
+  name: zod.string().min(1),
+  vendor: zod.string().min(1),
+  shortDescription: zod.string().min(1),
+  longDescription: zod.string().min(1),
+  categoryId: zod.string().nullish(),
+  atoStatus: zod.string(),
+  impactLevels: zod.array(zod.string()),
+  dataClassification: zod.string(),
+  launchUrl: zod.string().min(1),
+  homepageUrl: zod.string().nullish(),
+  documentationUrl: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
+  contactEmail: zod.string().email().min(1),
+});
+
+export const CreateSubmissionResponse = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    submissionStatus: zod.string(),
+    submittedAt: zod.coerce.date().nullable(),
+    updatedAt: zod.coerce.date(),
+    reviewComment: zod.string().nullable(),
+    reviewedAt: zod.coerce.date().nullable(),
+    isVendorSubmitted: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      impactLevels: zod.array(zod.string()),
+      dataClassification: zod.string(),
+      launchUrl: zod.string(),
+      homepageUrl: zod.string().nullable(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      contactEmail: zod.string().nullable(),
+      categoryId: zod.string().nullable(),
+      categorySlug: zod.string().nullable(),
+      categoryName: zod.string().nullable(),
+      submitterId: zod.string().nullable(),
+      submitterDisplayName: zod.string().nullable(),
+    }),
+  );
+
+/**
+ * @summary Get one of the current user's submissions
+ */
+export const GetMySubmissionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetMySubmissionResponse = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    submissionStatus: zod.string(),
+    submittedAt: zod.coerce.date().nullable(),
+    updatedAt: zod.coerce.date(),
+    reviewComment: zod.string().nullable(),
+    reviewedAt: zod.coerce.date().nullable(),
+    isVendorSubmitted: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      impactLevels: zod.array(zod.string()),
+      dataClassification: zod.string(),
+      launchUrl: zod.string(),
+      homepageUrl: zod.string().nullable(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      contactEmail: zod.string().nullable(),
+      categoryId: zod.string().nullable(),
+      categorySlug: zod.string().nullable(),
+      categoryName: zod.string().nullable(),
+      submitterId: zod.string().nullable(),
+      submitterDisplayName: zod.string().nullable(),
+    }),
+  );
+
+/**
+ * @summary Update or resubmit a pending or changes-requested submission
+ */
+export const UpdateMySubmissionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateMySubmissionBody = zod.object({
+  name: zod.string().min(1),
+  vendor: zod.string().min(1),
+  shortDescription: zod.string().min(1),
+  longDescription: zod.string().min(1),
+  categoryId: zod.string().nullish(),
+  atoStatus: zod.string(),
+  impactLevels: zod.array(zod.string()),
+  dataClassification: zod.string(),
+  launchUrl: zod.string().min(1),
+  homepageUrl: zod.string().nullish(),
+  documentationUrl: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
+  contactEmail: zod.string().email().min(1),
+});
+
+export const UpdateMySubmissionResponse = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    submissionStatus: zod.string(),
+    submittedAt: zod.coerce.date().nullable(),
+    updatedAt: zod.coerce.date(),
+    reviewComment: zod.string().nullable(),
+    reviewedAt: zod.coerce.date().nullable(),
+    isVendorSubmitted: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      impactLevels: zod.array(zod.string()),
+      dataClassification: zod.string(),
+      launchUrl: zod.string(),
+      homepageUrl: zod.string().nullable(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      contactEmail: zod.string().nullable(),
+      categoryId: zod.string().nullable(),
+      categorySlug: zod.string().nullable(),
+      categoryName: zod.string().nullable(),
+      submitterId: zod.string().nullable(),
+      submitterDisplayName: zod.string().nullable(),
+    }),
+  );
+
+/**
+ * @summary Withdraw a pending or changes-requested submission
+ */
+export const WithdrawMySubmissionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const WithdrawMySubmissionResponse = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    submissionStatus: zod.string(),
+    submittedAt: zod.coerce.date().nullable(),
+    updatedAt: zod.coerce.date(),
+    reviewComment: zod.string().nullable(),
+    reviewedAt: zod.coerce.date().nullable(),
+    isVendorSubmitted: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      impactLevels: zod.array(zod.string()),
+      dataClassification: zod.string(),
+      launchUrl: zod.string(),
+      homepageUrl: zod.string().nullable(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      contactEmail: zod.string().nullable(),
+      categoryId: zod.string().nullable(),
+      categorySlug: zod.string().nullable(),
+      categoryName: zod.string().nullable(),
+      submitterId: zod.string().nullable(),
+      submitterDisplayName: zod.string().nullable(),
+    }),
+  );
+
+/**
+ * @summary Admin review queue (pending and changes-requested submissions)
+ */
+export const AdminListSubmissionsResponseItem = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    submissionStatus: zod.string(),
+    submittedAt: zod.coerce.date().nullable(),
+    updatedAt: zod.coerce.date(),
+    reviewComment: zod.string().nullable(),
+    reviewedAt: zod.coerce.date().nullable(),
+    isVendorSubmitted: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      impactLevels: zod.array(zod.string()),
+      dataClassification: zod.string(),
+      launchUrl: zod.string(),
+      homepageUrl: zod.string().nullable(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      contactEmail: zod.string().nullable(),
+      categoryId: zod.string().nullable(),
+      categorySlug: zod.string().nullable(),
+      categoryName: zod.string().nullable(),
+      submitterId: zod.string().nullable(),
+      submitterDisplayName: zod.string().nullable(),
+    }),
+  );
+export const AdminListSubmissionsResponse = zod.array(
+  AdminListSubmissionsResponseItem,
+);
+
+/**
+ * @summary Approve, request changes on, or reject a submission
+ */
+export const ReviewSubmissionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ReviewSubmissionBody = zod.object({
+  action: zod.enum(["approve", "request_changes", "reject"]),
+  comment: zod.string().nullish(),
+});
+
+export const ReviewSubmissionResponse = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    submissionStatus: zod.string(),
+    submittedAt: zod.coerce.date().nullable(),
+    updatedAt: zod.coerce.date(),
+    reviewComment: zod.string().nullable(),
+    reviewedAt: zod.coerce.date().nullable(),
+    isVendorSubmitted: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      impactLevels: zod.array(zod.string()),
+      dataClassification: zod.string(),
+      launchUrl: zod.string(),
+      homepageUrl: zod.string().nullable(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      contactEmail: zod.string().nullable(),
+      categoryId: zod.string().nullable(),
+      categorySlug: zod.string().nullable(),
+      categoryName: zod.string().nullable(),
+      submitterId: zod.string().nullable(),
+      submitterDisplayName: zod.string().nullable(),
+    }),
+  );
 
 /**
  * @summary Aggregated dashboard summary
@@ -868,6 +1173,7 @@ export const GetDashboardSummaryResponse = zod.object({
       launchCount: zod.number(),
       categorySlug: zod.string().nullable(),
       categoryName: zod.string().nullable(),
+      isVendorSubmitted: zod.boolean(),
     }),
   ),
 });

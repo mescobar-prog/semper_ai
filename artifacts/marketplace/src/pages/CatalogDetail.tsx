@@ -122,8 +122,16 @@ export function CatalogDetail() {
               </>
             )}
           </div>
-          <h1 className="text-4xl font-semibold tracking-tight mb-3">
+          <h1 className="text-4xl font-semibold tracking-tight mb-3 flex items-center gap-3 flex-wrap">
             {tool.name}
+            {tool.isVendorSubmitted && (
+              <span
+                title="Submitted by vendor"
+                className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300"
+              >
+                Submitted by vendor
+              </span>
+            )}
           </h1>
           <div className="flex flex-wrap gap-1.5 mb-6">
             <Pill tone={atoTone(tool.atoStatus)}>

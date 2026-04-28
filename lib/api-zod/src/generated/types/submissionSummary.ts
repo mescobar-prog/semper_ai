@@ -6,22 +6,20 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface ToolSummary {
+export interface SubmissionSummary {
   id: string;
   slug: string;
   name: string;
   vendor: string;
   shortDescription: string;
   atoStatus: string;
-  impactLevels: string[];
-  dataClassification: string;
-  badges: string[];
-  isFavorite: boolean;
-  favoriteCount: number;
-  launchCount: number;
+  submissionStatus: string;
   /** @nullable */
-  categorySlug: string | null;
+  submittedAt: Date | null;
+  updatedAt: Date;
   /** @nullable */
-  categoryName: string | null;
+  reviewComment: string | null;
+  /** @nullable */
+  reviewedAt: Date | null;
   isVendorSubmitted: boolean;
 }

@@ -52,7 +52,19 @@ export const toolsTable = pgTable(
     homepageUrl: varchar("homepage_url"),
     launchUrl: varchar("launch_url").notNull(),
     documentationUrl: varchar("documentation_url"),
+    logoUrl: varchar("logo_url"),
+    contactEmail: varchar("contact_email"),
     isActive: varchar("is_active").notNull().default("true"),
+    submissionStatus: varchar("submission_status").notNull().default("approved"),
+    submitterId: varchar("submitter_id").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    reviewerId: varchar("reviewer_id").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    reviewComment: text("review_comment"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     createdBy: varchar("created_by").references(() => usersTable.id, {
       onDelete: "set null",
     }),

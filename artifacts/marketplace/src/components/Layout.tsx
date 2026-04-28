@@ -38,6 +38,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/library", label: "Library" },
     { href: "/profile", label: "Profile" },
     { href: "/launches", label: "Launches" },
+    { href: "/submissions", label: "My submissions" },
     ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
 

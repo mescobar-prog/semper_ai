@@ -171,8 +171,16 @@ function ToolCard({
               </>
             )}
           </div>
-          <div className="text-base font-semibold leading-tight group-hover:text-primary transition-colors">
+          <div className="text-base font-semibold leading-tight group-hover:text-primary transition-colors flex items-center gap-2">
             {tool.name}
+            {tool.isVendorSubmitted && (
+              <span
+                title="Submitted by vendor"
+                className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300"
+              >
+                Vendor
+              </span>
+            )}
           </div>
         </div>
         <button

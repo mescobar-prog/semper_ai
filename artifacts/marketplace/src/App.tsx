@@ -15,6 +15,8 @@ import { Profile } from "@/pages/Profile";
 import { Library } from "@/pages/Library";
 import { Launches } from "@/pages/Launches";
 import { Admin } from "@/pages/Admin";
+import { SubmitTool } from "@/pages/SubmitTool";
+import { MySubmissions } from "@/pages/MySubmissions";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -69,6 +71,15 @@ function Router() {
         </Route>
         <Route path="/launches">
           <ProtectedRoute component={Launches} />
+        </Route>
+        <Route path="/submissions">
+          <ProtectedRoute component={MySubmissions} />
+        </Route>
+        <Route path="/submissions/new">
+          <ProtectedRoute component={SubmitTool} />
+        </Route>
+        <Route path="/submissions/:id/edit">
+          <ProtectedRoute component={SubmitTool} />
         </Route>
         <Route path="/admin">
           <ProtectedRoute component={Admin} />

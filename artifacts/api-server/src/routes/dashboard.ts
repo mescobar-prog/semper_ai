@@ -65,7 +65,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       count: sql<number>`COUNT(*)::int`,
     })
     .from(toolsTable)
-    .where(eq(toolsTable.isActive, "true"))
+    .where(
+      sql`${toolsTable.isActive} = 'true' AND ${toolsTable.submissionStatus} = 'approved'`,
+    )
     .groupBy(toolsTable.atoStatus);
 
   const topTools = await db
@@ -81,13 +83,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       badges: toolsTable.badges,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
+      submitterId: toolsTable.submitterId,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
       launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`,
       isFavorite: sql<boolean>`EXISTS (SELECT 1 FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id} AND f.user_id = ${userId})`,
     })
     .from(toolsTable)
     .leftJoin(categoriesTable, eq(toolsTable.categoryId, categoriesTable.id))
-    .where(eq(toolsTable.isActive, "true"))
+    .where(
+      sql`${toolsTable.isActive} = 'true' AND ${toolsTable.submissionStatus} = 'approved'`,
+    )
     .orderBy(
       desc(sql`(SELECT COUNT(*) FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`),
       desc(sql`(SELECT COUNT(*) FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`),
@@ -108,11 +113,12 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       atoStatus: a.atoStatus,
       count: Number(a.count),
     })),
-    topTools: topTools.map((t) => ({
+    topTools: topTools.map(({ submitterId, ...t }) => ({
       ...t,
       favoriteCount: Number(t.favoriteCount ?? 0),
       launchCount: Number(t.launchCount ?? 0),
       isFavorite: Boolean(t.isFavorite),
+      isVendorSubmitted: submitterId != null,
     })),
   });
 });

@@ -22,6 +22,8 @@ export type ToolDetail = ToolSummary & {
   launchUrl: string;
   /** @nullable */
   documentationUrl: string | null;
+  /** @nullable */
+  logoUrl: string | null;
   isActive: boolean;
   /** @nullable */
   categoryId: string | null;

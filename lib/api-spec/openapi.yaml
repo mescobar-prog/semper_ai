@@ -22,6 +22,8 @@ tags:
     description: Tool launch + token-based context exchange.
   - name: Admin
     description: Admin tool and category CRUD.
+  - name: Submissions
+    description: Vendor tool submissions and admin review queue.
   - name: Dashboard
     description: Aggregated dashboard summaries.
 
@@ -707,6 +709,187 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  # ---------- Submissions ----------
+  /submissions:
+    get:
+      tags: [Submissions]
+      operationId: listMySubmissions
+      summary: List the current user's tool submissions
+      responses:
+        '200':
+          description: Submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubmissionSummary' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    post:
+      tags: [Submissions]
+      operationId: createSubmission
+      summary: Submit a new tool for admin review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmissionUpsert' }
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionDetail' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /submissions/{id}:
+    get:
+      tags: [Submissions]
+      operationId: getMySubmission
+      summary: Get one of the current user's submissions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Submission detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionDetail' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    put:
+      tags: [Submissions]
+      operationId: updateMySubmission
+      summary: Update or resubmit a pending or changes-requested submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmissionUpsert' }
+      responses:
+        '200':
+          description: Updated submission (status reset to pending)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionDetail' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '403':
+          description: Forbidden — submission not editable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /submissions/{id}/withdraw:
+    post:
+      tags: [Submissions]
+      operationId: withdrawMySubmission
+      summary: Withdraw a pending or changes-requested submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Withdrawn
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionDetail' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/submissions:
+    get:
+      tags: [Submissions]
+      operationId: adminListSubmissions
+      summary: Admin review queue (pending and changes-requested submissions)
+      responses:
+        '200':
+          description: Submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubmissionDetail' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/submissions/{id}/review:
+    post:
+      tags: [Submissions]
+      operationId: reviewSubmission
+      summary: Approve, request changes on, or reject a submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmissionReviewRequest' }
+      responses:
+        '200':
+          description: Reviewed submission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionDetail' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   # ---------- Dashboard ----------
   /dashboard/summary:
     get:
@@ -882,7 +1065,7 @@ components:
       required:
         [id, slug, name, vendor, shortDescription, atoStatus, impactLevels,
          dataClassification, badges, isFavorite, favoriteCount,
-         launchCount, categorySlug, categoryName]
+         launchCount, categorySlug, categoryName, isVendorSubmitted]
       properties:
         id: { type: string }
         slug: { type: string }
@@ -902,6 +1085,7 @@ components:
         launchCount: { type: integer }
         categorySlug: { type: [string, 'null'] }
         categoryName: { type: [string, 'null'] }
+        isVendorSubmitted: { type: boolean }
 
     ToolDetail:
       allOf:
@@ -909,8 +1093,8 @@ components:
         - type: object
           required:
             [longDescription, purpose, ragQueryTemplates, version, homepageUrl,
-             launchUrl, documentationUrl, isActive, categoryId, createdAt,
-             updatedAt]
+             launchUrl, documentationUrl, logoUrl, isActive, categoryId,
+             createdAt, updatedAt]
           properties:
             longDescription: { type: string }
             purpose:
@@ -933,6 +1117,7 @@ components:
             homepageUrl: { type: [string, 'null'] }
             launchUrl: { type: string }
             documentationUrl: { type: [string, 'null'] }
+            logoUrl: { type: [string, 'null'] }
             isActive: { type: boolean }
             categoryId: { type: [string, 'null'] }
             createdAt: { type: string, format: date-time }
@@ -967,7 +1152,85 @@ components:
         homepageUrl: { type: [string, 'null'] }
         launchUrl: { type: string, minLength: 1 }
         documentationUrl: { type: [string, 'null'] }
+        logoUrl: { type: [string, 'null'] }
         isActive: { type: boolean }
+
+    SubmissionUpsert:
+      type: object
+      required:
+        [name, vendor, shortDescription, longDescription, atoStatus,
+         impactLevels, dataClassification, launchUrl, contactEmail]
+      properties:
+        name: { type: string, minLength: 1 }
+        vendor: { type: string, minLength: 1 }
+        shortDescription: { type: string, minLength: 1 }
+        longDescription: { type: string, minLength: 1 }
+        categoryId: { type: [string, 'null'] }
+        atoStatus: { type: string }
+        impactLevels:
+          type: array
+          items: { type: string }
+        dataClassification: { type: string }
+        launchUrl: { type: string, minLength: 1 }
+        homepageUrl: { type: [string, 'null'] }
+        documentationUrl: { type: [string, 'null'] }
+        logoUrl: { type: [string, 'null'] }
+        contactEmail: { type: string, minLength: 1, format: email }
+
+    SubmissionSummary:
+      type: object
+      required:
+        [id, slug, name, vendor, shortDescription, atoStatus,
+         submissionStatus, submittedAt, updatedAt, reviewComment,
+         reviewedAt, isVendorSubmitted]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        vendor: { type: string }
+        shortDescription: { type: string }
+        atoStatus: { type: string }
+        submissionStatus: { type: string }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        updatedAt: { type: string, format: date-time }
+        reviewComment: { type: [string, 'null'] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        isVendorSubmitted: { type: boolean }
+
+    SubmissionDetail:
+      allOf:
+        - $ref: '#/components/schemas/SubmissionSummary'
+        - type: object
+          required:
+            [longDescription, impactLevels, dataClassification,
+             launchUrl, homepageUrl, documentationUrl, logoUrl,
+             contactEmail, categoryId, categorySlug, categoryName,
+             submitterId, submitterDisplayName]
+          properties:
+            longDescription: { type: string }
+            impactLevels:
+              type: array
+              items: { type: string }
+            dataClassification: { type: string }
+            launchUrl: { type: string }
+            homepageUrl: { type: [string, 'null'] }
+            documentationUrl: { type: [string, 'null'] }
+            logoUrl: { type: [string, 'null'] }
+            contactEmail: { type: [string, 'null'] }
+            categoryId: { type: [string, 'null'] }
+            categorySlug: { type: [string, 'null'] }
+            categoryName: { type: [string, 'null'] }
+            submitterId: { type: [string, 'null'] }
+            submitterDisplayName: { type: [string, 'null'] }
+
+    SubmissionReviewRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [approve, request_changes, reject]
+        comment: { type: [string, 'null'] }
 
     LibraryStats:
       type: object

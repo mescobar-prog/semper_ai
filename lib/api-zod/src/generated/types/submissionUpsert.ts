@@ -6,9 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface ToolUpsert {
-  /** @minLength 1 */
-  slug: string;
+export interface SubmissionUpsert {
   /** @minLength 1 */
   name: string;
   /** @minLength 1 */
@@ -17,23 +15,19 @@ export interface ToolUpsert {
   shortDescription: string;
   /** @minLength 1 */
   longDescription: string;
-  purpose: string;
-  ragQueryTemplates: string[];
   /** @nullable */
   categoryId?: string | null;
   atoStatus: string;
   impactLevels: string[];
   dataClassification: string;
-  /** @nullable */
-  version?: string | null;
-  badges: string[];
-  /** @nullable */
-  homepageUrl?: string | null;
   /** @minLength 1 */
   launchUrl: string;
+  /** @nullable */
+  homepageUrl?: string | null;
   /** @nullable */
   documentationUrl?: string | null;
   /** @nullable */
   logoUrl?: string | null;
-  isActive: boolean;
+  /** @minLength 1 */
+  contactEmail: string;
 }
