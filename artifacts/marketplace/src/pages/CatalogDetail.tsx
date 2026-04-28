@@ -110,6 +110,8 @@ export function CatalogDetail() {
   const launchPref = profile?.launchPreference ?? "preview";
   const showPreview = forcePreview || launchPref !== "direct";
   const isLocal = tool.hostingType === "local_install";
+  const cb = profile?.contextBlock;
+  const cbConfirmed = !!cb?.confirmedAt;
 
   return (
     <PageContainer>
@@ -214,9 +216,29 @@ export function CatalogDetail() {
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-3">
               Launch this tool
             </div>
+            {!cbConfirmed && (
+              <div
+                role="alert"
+                className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
+              >
+                <div className="font-semibold text-amber-300 mb-1">
+                  Context Block not confirmed
+                </div>
+                <p className="text-muted-foreground leading-relaxed">
+                  This tool can't be launched until your 6-element Context
+                  Block is confirmed.{" "}
+                  <Link
+                    href="/catalog"
+                    className="text-primary underline underline-offset-2 hover:text-primary/80"
+                  >
+                    Open the verification gate →
+                  </Link>
+                </p>
+              </div>
+            )}
             <button
               onClick={() => launch()}
-              disabled={!!launchTrigger || !tool.isActive}
+              disabled={!!launchTrigger || !tool.isActive || !cbConfirmed}
               className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {launchTrigger
@@ -225,9 +247,11 @@ export function CatalogDetail() {
                   : "Launching…"
                 : !tool.isActive
                   ? "Tool inactive"
-                  : isLocal
-                    ? "Launch local app with my context"
-                    : "Launch with my context"}
+                  : !cbConfirmed
+                    ? "Confirm Context Block to launch"
+                    : isLocal
+                      ? "Launch local app with my context"
+                      : "Launch with my context"}
             </button>
             <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
               {isLocal
@@ -235,15 +259,18 @@ export function CatalogDetail() {
                 : launchPref === "direct"
                   ? "Your default is to launch directly. Want to choose what to share? "
                   : "You'll preview your profile and library snippets before they're sent. "}
-              {!isLocal && launchPref === "direct" && tool.isActive && (
-                <button
-                  type="button"
-                  onClick={() => launch({ forcePreview: true })}
-                  className="text-primary hover:underline"
-                >
-                  Edit before launch
-                </button>
-              )}
+              {!isLocal &&
+                launchPref === "direct" &&
+                tool.isActive &&
+                cbConfirmed && (
+                  <button
+                    type="button"
+                    onClick={() => launch({ forcePreview: true })}
+                    className="text-primary hover:underline"
+                  >
+                    Edit before launch
+                  </button>
+                )}
             </p>
             {launchState.status === "launched" && (
               <div className="mt-3 rounded border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs text-emerald-300">
