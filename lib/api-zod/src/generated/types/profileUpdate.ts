@@ -7,6 +7,10 @@
  */
 import type { ProfileUpdateLaunchPreference } from "./profileUpdateLaunchPreference";
 
+/**
+ * Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use /profile/context-block/confirm instead.
+
+ */
 export interface ProfileUpdate {
   /** @nullable */
   branch?: string | null;
@@ -24,9 +28,14 @@ export interface ProfileUpdate {
   securityClearance?: string | null;
   /** @nullable */
   deploymentStatus?: string | null;
-  /** @nullable */
-  primaryMission?: string | null;
-  aiUseCases?: string[];
+  /**
+   * Combatant command code. Server-side validated against the COMBATANT_COMMANDS list; invalid codes are coerced to null.
+
+   * @nullable
+   */
+  command?: string | null;
+  /** Billet titles the operator currently holds. */
+  billets?: string[];
   /** @nullable */
   freeFormContext?: string | null;
   launchPreference?: ProfileUpdateLaunchPreference;

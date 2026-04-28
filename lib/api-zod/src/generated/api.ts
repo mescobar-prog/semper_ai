@@ -94,157 +94,207 @@ export const LogoutMobileSessionResponse = zod.object({
 });
 
 /**
- * @summary Get the current user's profile
+ * @summary Get the current user's profile and context block
  */
-export const GetMyProfileResponse = zod.object({
-  userId: zod.string(),
-  branch: zod.string().nullable(),
-  rank: zod.string().nullable(),
-  mosCode: zod.string().nullable(),
-  dutyTitle: zod.string().nullable(),
-  unit: zod.string().nullable(),
-  baseLocation: zod.string().nullable(),
-  securityClearance: zod.string().nullable(),
-  deploymentStatus: zod.string().nullable(),
-  primaryMission: zod.string().nullable(),
-  aiUseCases: zod.array(zod.string()),
-  freeFormContext: zod.string().nullable(),
-  isAdmin: zod.boolean(),
-  launchPreference: zod.enum(["preview", "direct"]),
-  completenessPct: zod.number(),
-  contextBlock: zod.object({
-    doctrine: zod.string().nullable(),
-    intent: zod.string().nullable(),
-    environment: zod.string().nullable(),
-    constraints: zod.string().nullable(),
-    risk: zod.string().nullable(),
-    experience: zod.string().nullable(),
-    confirmedAt: zod.coerce
-      .date()
-      .nullable()
-      .describe("When the operator last accepted this Context Block."),
-    lastEvaluation: zod.union([
-      zod.object({
-        submissionId: zod.string(),
-        scores: zod.object({
-          doctrine: zod.number().describe("Criterion 1 score (1-3)."),
-          environment: zod
+export const GetMyProfileResponse = zod
+  .object({
+    profile: zod
+      .object({
+        userId: zod.string(),
+        branch: zod.string().nullable(),
+        rank: zod.string().nullable(),
+        mosCode: zod.string().nullable(),
+        dutyTitle: zod.string().nullable(),
+        unit: zod.string().nullable(),
+        baseLocation: zod.string().nullable(),
+        securityClearance: zod.string().nullable(),
+        deploymentStatus: zod.string().nullable(),
+        command: zod
+          .string()
+          .nullable()
+          .describe(
+            "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+          ),
+        billets: zod
+          .array(zod.string())
+          .describe("Billet titles the operator currently holds."),
+        freeFormContext: zod.string().nullable(),
+        isAdmin: zod.boolean(),
+        launchPreference: zod.enum(["preview", "direct"]),
+        completenessPct: zod.number(),
+        activePresetId: zod.string().nullable(),
+        updatedAt: zod.coerce.date(),
+      })
+      .describe(
+        "Persistent identity \/ assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.\n",
+      ),
+    contextBlock: zod.object({
+      doctrine: zod.string().nullable(),
+      intent: zod.string().nullable(),
+      environment: zod.string().nullable(),
+      constraints: zod.string().nullable(),
+      risk: zod.string().nullable(),
+      experience: zod.string().nullable(),
+      confirmedAt: zod.coerce
+        .date()
+        .nullable()
+        .describe("When the operator last accepted this Context Block."),
+      lastEvaluation: zod.union([
+        zod.object({
+          submissionId: zod.string(),
+          scores: zod.object({
+            doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+            environment: zod
+              .number()
+              .describe(
+                "Criterion 2 — environment & commander's intent (1-3).",
+              ),
+            constraints: zod
+              .number()
+              .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+            experience: zod.number().describe("Criterion 4 score (1-3)."),
+          }),
+          totalScore: zod
             .number()
-            .describe("Criterion 2 — environment & commander's intent (1-3)."),
-          constraints: zod
-            .number()
-            .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
-          experience: zod.number().describe("Criterion 4 score (1-3)."),
+            .describe(
+              "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+            ),
+          status: zod
+            .string()
+            .describe(
+              '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+            ),
+          opsecFlag: zod
+            .boolean()
+            .describe("True if the submission tripped the OPSEC fail-safe."),
+          flags: zod
+            .string()
+            .describe(
+              'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+            ),
         }),
-        totalScore: zod
-          .number()
-          .describe(
-            "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
-          ),
-        status: zod
-          .string()
-          .describe(
-            '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
-          ),
-        opsecFlag: zod
-          .boolean()
-          .describe("True if the submission tripped the OPSEC fail-safe."),
-        flags: zod
-          .string()
-          .describe(
-            'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
-          ),
-      }),
-      zod.null(),
-    ]),
-  }),
-  activePresetId: zod.string().nullable(),
-  updatedAt: zod.coerce.date(),
-});
+        zod.null(),
+      ]),
+    }),
+  })
+  .describe(
+    "Envelope returned by GET \/profile and PUT \/profile. The persistent identity profile and the task-dependent Context Block are kept in separate top-level fields so callers can refresh either one without touching the other.\n",
+  );
 
 /**
  * @summary Update the current user's profile
  */
-export const UpdateMyProfileBody = zod.object({
-  branch: zod.string().nullish(),
-  rank: zod.string().nullish(),
-  mosCode: zod.string().nullish(),
-  dutyTitle: zod.string().nullish(),
-  unit: zod.string().nullish(),
-  baseLocation: zod.string().nullish(),
-  securityClearance: zod.string().nullish(),
-  deploymentStatus: zod.string().nullish(),
-  primaryMission: zod.string().nullish(),
-  aiUseCases: zod.array(zod.string()).optional(),
-  freeFormContext: zod.string().nullish(),
-  launchPreference: zod.enum(["preview", "direct"]).optional(),
-});
+export const UpdateMyProfileBody = zod
+  .object({
+    branch: zod.string().nullish(),
+    rank: zod.string().nullish(),
+    mosCode: zod.string().nullish(),
+    dutyTitle: zod.string().nullish(),
+    unit: zod.string().nullish(),
+    baseLocation: zod.string().nullish(),
+    securityClearance: zod.string().nullish(),
+    deploymentStatus: zod.string().nullish(),
+    command: zod
+      .string()
+      .nullish()
+      .describe(
+        "Combatant command code. Server-side validated against the COMBATANT_COMMANDS list; invalid codes are coerced to null.\n",
+      ),
+    billets: zod
+      .array(zod.string())
+      .optional()
+      .describe("Billet titles the operator currently holds."),
+    freeFormContext: zod.string().nullish(),
+    launchPreference: zod.enum(["preview", "direct"]).optional(),
+  })
+  .describe(
+    "Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use \/profile\/context-block\/confirm instead.\n",
+  );
 
-export const UpdateMyProfileResponse = zod.object({
-  userId: zod.string(),
-  branch: zod.string().nullable(),
-  rank: zod.string().nullable(),
-  mosCode: zod.string().nullable(),
-  dutyTitle: zod.string().nullable(),
-  unit: zod.string().nullable(),
-  baseLocation: zod.string().nullable(),
-  securityClearance: zod.string().nullable(),
-  deploymentStatus: zod.string().nullable(),
-  primaryMission: zod.string().nullable(),
-  aiUseCases: zod.array(zod.string()),
-  freeFormContext: zod.string().nullable(),
-  isAdmin: zod.boolean(),
-  launchPreference: zod.enum(["preview", "direct"]),
-  completenessPct: zod.number(),
-  contextBlock: zod.object({
-    doctrine: zod.string().nullable(),
-    intent: zod.string().nullable(),
-    environment: zod.string().nullable(),
-    constraints: zod.string().nullable(),
-    risk: zod.string().nullable(),
-    experience: zod.string().nullable(),
-    confirmedAt: zod.coerce
-      .date()
-      .nullable()
-      .describe("When the operator last accepted this Context Block."),
-    lastEvaluation: zod.union([
-      zod.object({
-        submissionId: zod.string(),
-        scores: zod.object({
-          doctrine: zod.number().describe("Criterion 1 score (1-3)."),
-          environment: zod
+export const UpdateMyProfileResponse = zod
+  .object({
+    profile: zod
+      .object({
+        userId: zod.string(),
+        branch: zod.string().nullable(),
+        rank: zod.string().nullable(),
+        mosCode: zod.string().nullable(),
+        dutyTitle: zod.string().nullable(),
+        unit: zod.string().nullable(),
+        baseLocation: zod.string().nullable(),
+        securityClearance: zod.string().nullable(),
+        deploymentStatus: zod.string().nullable(),
+        command: zod
+          .string()
+          .nullable()
+          .describe(
+            "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+          ),
+        billets: zod
+          .array(zod.string())
+          .describe("Billet titles the operator currently holds."),
+        freeFormContext: zod.string().nullable(),
+        isAdmin: zod.boolean(),
+        launchPreference: zod.enum(["preview", "direct"]),
+        completenessPct: zod.number(),
+        activePresetId: zod.string().nullable(),
+        updatedAt: zod.coerce.date(),
+      })
+      .describe(
+        "Persistent identity \/ assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.\n",
+      ),
+    contextBlock: zod.object({
+      doctrine: zod.string().nullable(),
+      intent: zod.string().nullable(),
+      environment: zod.string().nullable(),
+      constraints: zod.string().nullable(),
+      risk: zod.string().nullable(),
+      experience: zod.string().nullable(),
+      confirmedAt: zod.coerce
+        .date()
+        .nullable()
+        .describe("When the operator last accepted this Context Block."),
+      lastEvaluation: zod.union([
+        zod.object({
+          submissionId: zod.string(),
+          scores: zod.object({
+            doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+            environment: zod
+              .number()
+              .describe(
+                "Criterion 2 — environment & commander's intent (1-3).",
+              ),
+            constraints: zod
+              .number()
+              .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+            experience: zod.number().describe("Criterion 4 score (1-3)."),
+          }),
+          totalScore: zod
             .number()
-            .describe("Criterion 2 — environment & commander's intent (1-3)."),
-          constraints: zod
-            .number()
-            .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
-          experience: zod.number().describe("Criterion 4 score (1-3)."),
+            .describe(
+              "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+            ),
+          status: zod
+            .string()
+            .describe(
+              '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+            ),
+          opsecFlag: zod
+            .boolean()
+            .describe("True if the submission tripped the OPSEC fail-safe."),
+          flags: zod
+            .string()
+            .describe(
+              'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+            ),
         }),
-        totalScore: zod
-          .number()
-          .describe(
-            "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
-          ),
-        status: zod
-          .string()
-          .describe(
-            '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
-          ),
-        opsecFlag: zod
-          .boolean()
-          .describe("True if the submission tripped the OPSEC fail-safe."),
-        flags: zod
-          .string()
-          .describe(
-            'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
-          ),
-      }),
-      zod.null(),
-    ]),
-  }),
-  activePresetId: zod.string().nullable(),
-  updatedAt: zod.coerce.date(),
-});
+        zod.null(),
+      ]),
+    }),
+  })
+  .describe(
+    "Envelope returned by GET \/profile and PUT \/profile. The persistent identity profile and the task-dependent Context Block are kept in separate top-level fields so callers can refresh either one without touching the other.\n",
+  );
 
 /**
  * @summary Get profile-builder chat history
@@ -270,20 +320,32 @@ export const SendProfileChatBody = zod.object({
 export const SendProfileChatResponse = zod.object({
   reply: zod.string(),
   suggestedProfile: zod.union([
-    zod.object({
-      branch: zod.string().nullish(),
-      rank: zod.string().nullish(),
-      mosCode: zod.string().nullish(),
-      dutyTitle: zod.string().nullish(),
-      unit: zod.string().nullish(),
-      baseLocation: zod.string().nullish(),
-      securityClearance: zod.string().nullish(),
-      deploymentStatus: zod.string().nullish(),
-      primaryMission: zod.string().nullish(),
-      aiUseCases: zod.array(zod.string()).optional(),
-      freeFormContext: zod.string().nullish(),
-      launchPreference: zod.enum(["preview", "direct"]).optional(),
-    }),
+    zod
+      .object({
+        branch: zod.string().nullish(),
+        rank: zod.string().nullish(),
+        mosCode: zod.string().nullish(),
+        dutyTitle: zod.string().nullish(),
+        unit: zod.string().nullish(),
+        baseLocation: zod.string().nullish(),
+        securityClearance: zod.string().nullish(),
+        deploymentStatus: zod.string().nullish(),
+        command: zod
+          .string()
+          .nullish()
+          .describe(
+            "Combatant command code. Server-side validated against the COMBATANT_COMMANDS list; invalid codes are coerced to null.\n",
+          ),
+        billets: zod
+          .array(zod.string())
+          .optional()
+          .describe("Billet titles the operator currently holds."),
+        freeFormContext: zod.string().nullish(),
+        launchPreference: zod.enum(["preview", "direct"]).optional(),
+      })
+      .describe(
+        "Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use \/profile\/context-block\/confirm instead.\n",
+      ),
     zod.null(),
   ]),
 });
@@ -366,72 +428,81 @@ export const ConfirmContextBlockBody = zod.object({
 });
 
 export const ConfirmContextBlockResponse = zod.object({
-  profile: zod.object({
-    userId: zod.string(),
-    branch: zod.string().nullable(),
-    rank: zod.string().nullable(),
-    mosCode: zod.string().nullable(),
-    dutyTitle: zod.string().nullable(),
-    unit: zod.string().nullable(),
-    baseLocation: zod.string().nullable(),
-    securityClearance: zod.string().nullable(),
-    deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
-    freeFormContext: zod.string().nullable(),
-    isAdmin: zod.boolean(),
-    launchPreference: zod.enum(["preview", "direct"]),
-    completenessPct: zod.number(),
-    contextBlock: zod.object({
-      doctrine: zod.string().nullable(),
-      intent: zod.string().nullable(),
-      environment: zod.string().nullable(),
-      constraints: zod.string().nullable(),
-      risk: zod.string().nullable(),
-      experience: zod.string().nullable(),
-      confirmedAt: zod.coerce
-        .date()
+  profile: zod
+    .object({
+      userId: zod.string(),
+      branch: zod.string().nullable(),
+      rank: zod.string().nullable(),
+      mosCode: zod.string().nullable(),
+      dutyTitle: zod.string().nullable(),
+      unit: zod.string().nullable(),
+      baseLocation: zod.string().nullable(),
+      securityClearance: zod.string().nullable(),
+      deploymentStatus: zod.string().nullable(),
+      command: zod
+        .string()
         .nullable()
-        .describe("When the operator last accepted this Context Block."),
-      lastEvaluation: zod.union([
-        zod.object({
-          submissionId: zod.string(),
-          scores: zod.object({
-            doctrine: zod.number().describe("Criterion 1 score (1-3)."),
-            environment: zod
-              .number()
-              .describe(
-                "Criterion 2 — environment & commander's intent (1-3).",
-              ),
-            constraints: zod
-              .number()
-              .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
-            experience: zod.number().describe("Criterion 4 score (1-3)."),
-          }),
-          totalScore: zod
+        .describe(
+          "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+        ),
+      billets: zod
+        .array(zod.string())
+        .describe("Billet titles the operator currently holds."),
+      freeFormContext: zod.string().nullable(),
+      isAdmin: zod.boolean(),
+      launchPreference: zod.enum(["preview", "direct"]),
+      completenessPct: zod.number(),
+      activePresetId: zod.string().nullable(),
+      updatedAt: zod.coerce.date(),
+    })
+    .describe(
+      "Persistent identity \/ assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.\n",
+    ),
+  contextBlock: zod.object({
+    doctrine: zod.string().nullable(),
+    intent: zod.string().nullable(),
+    environment: zod.string().nullable(),
+    constraints: zod.string().nullable(),
+    risk: zod.string().nullable(),
+    experience: zod.string().nullable(),
+    confirmedAt: zod.coerce
+      .date()
+      .nullable()
+      .describe("When the operator last accepted this Context Block."),
+    lastEvaluation: zod.union([
+      zod.object({
+        submissionId: zod.string(),
+        scores: zod.object({
+          doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+          environment: zod
             .number()
-            .describe(
-              "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
-            ),
-          status: zod
-            .string()
-            .describe(
-              '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
-            ),
-          opsecFlag: zod
-            .boolean()
-            .describe("True if the submission tripped the OPSEC fail-safe."),
-          flags: zod
-            .string()
-            .describe(
-              'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
-            ),
+            .describe("Criterion 2 — environment & commander's intent (1-3)."),
+          constraints: zod
+            .number()
+            .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+          experience: zod.number().describe("Criterion 4 score (1-3)."),
         }),
-        zod.null(),
-      ]),
-    }),
-    activePresetId: zod.string().nullable(),
-    updatedAt: zod.coerce.date(),
+        totalScore: zod
+          .number()
+          .describe(
+            "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+          ),
+        status: zod
+          .string()
+          .describe(
+            '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+          ),
+        opsecFlag: zod
+          .boolean()
+          .describe("True if the submission tripped the OPSEC fail-safe."),
+        flags: zod
+          .string()
+          .describe(
+            'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+          ),
+      }),
+      zod.null(),
+    ]),
   }),
   evaluation: zod.object({
     submissionId: zod.string(),
@@ -482,8 +553,15 @@ export const ListMyPresetsResponseItem = zod.object({
     baseLocation: zod.string().nullable(),
     securityClearance: zod.string().nullable(),
     deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
+    command: zod
+      .string()
+      .nullable()
+      .describe(
+        "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+      ),
+    billets: zod
+      .array(zod.string())
+      .describe("Billet titles the operator currently holds."),
     freeFormContext: zod.string().nullable(),
   }),
   documentIds: zod.array(zod.string()),
@@ -511,8 +589,15 @@ export const CreateMyPresetBody = zod.object({
         baseLocation: zod.string().nullable(),
         securityClearance: zod.string().nullable(),
         deploymentStatus: zod.string().nullable(),
-        primaryMission: zod.string().nullable(),
-        aiUseCases: zod.array(zod.string()),
+        command: zod
+          .string()
+          .nullable()
+          .describe(
+            "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+          ),
+        billets: zod
+          .array(zod.string())
+          .describe("Billet titles the operator currently holds."),
         freeFormContext: zod.string().nullable(),
       }),
       zod.null(),
@@ -535,8 +620,15 @@ export const CreateMyPresetResponse = zod.object({
     baseLocation: zod.string().nullable(),
     securityClearance: zod.string().nullable(),
     deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
+    command: zod
+      .string()
+      .nullable()
+      .describe(
+        "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+      ),
+    billets: zod
+      .array(zod.string())
+      .describe("Billet titles the operator currently holds."),
     freeFormContext: zod.string().nullable(),
   }),
   documentIds: zod.array(zod.string()),
@@ -566,8 +658,15 @@ export const UpdateMyPresetBody = zod.object({
         baseLocation: zod.string().nullable(),
         securityClearance: zod.string().nullable(),
         deploymentStatus: zod.string().nullable(),
-        primaryMission: zod.string().nullable(),
-        aiUseCases: zod.array(zod.string()),
+        command: zod
+          .string()
+          .nullable()
+          .describe(
+            "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+          ),
+        billets: zod
+          .array(zod.string())
+          .describe("Billet titles the operator currently holds."),
         freeFormContext: zod.string().nullable(),
       }),
       zod.null(),
@@ -589,8 +688,15 @@ export const UpdateMyPresetResponse = zod.object({
     baseLocation: zod.string().nullable(),
     securityClearance: zod.string().nullable(),
     deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
+    command: zod
+      .string()
+      .nullable()
+      .describe(
+        "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+      ),
+    billets: zod
+      .array(zod.string())
+      .describe("Billet titles the operator currently holds."),
     freeFormContext: zod.string().nullable(),
   }),
   documentIds: zod.array(zod.string()),
@@ -631,8 +737,15 @@ export const DuplicateMyPresetResponse = zod.object({
     baseLocation: zod.string().nullable(),
     securityClearance: zod.string().nullable(),
     deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
+    command: zod
+      .string()
+      .nullable()
+      .describe(
+        "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+      ),
+    billets: zod
+      .array(zod.string())
+      .describe("Billet titles the operator currently holds."),
     freeFormContext: zod.string().nullable(),
   }),
   documentIds: zod.array(zod.string()),
@@ -661,8 +774,15 @@ export const ActivateMyPresetResponse = zod.object({
     baseLocation: zod.string().nullable(),
     securityClearance: zod.string().nullable(),
     deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
+    command: zod
+      .string()
+      .nullable()
+      .describe(
+        "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+      ),
+    billets: zod
+      .array(zod.string())
+      .describe("Billet titles the operator currently holds."),
     freeFormContext: zod.string().nullable(),
   }),
   documentIds: zod.array(zod.string()),
@@ -770,7 +890,7 @@ export const GetToolBySlugResponse = zod
       ragQueryTemplates: zod
         .array(zod.string())
         .describe(
-          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+          'Admin-authored seed query templates (e.g. \"{dutyTitle} SOPs\", \"{billets} OPORD\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
         ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
@@ -1530,134 +1650,86 @@ export const ExchangeContextTokenResponse = zod.object({
     displayName: zod.string(),
     email: zod.string().nullable(),
   }),
-  profile: zod.object({
-    userId: zod.string(),
-    branch: zod.string().nullable(),
-    rank: zod.string().nullable(),
-    mosCode: zod.string().nullable(),
-    dutyTitle: zod.string().nullable(),
-    unit: zod.string().nullable(),
-    baseLocation: zod.string().nullable(),
-    securityClearance: zod.string().nullable(),
-    deploymentStatus: zod.string().nullable(),
-    primaryMission: zod.string().nullable(),
-    aiUseCases: zod.array(zod.string()),
-    freeFormContext: zod.string().nullable(),
-    isAdmin: zod.boolean(),
-    launchPreference: zod.enum(["preview", "direct"]),
-    completenessPct: zod.number(),
-    contextBlock: zod.object({
-      doctrine: zod.string().nullable(),
-      intent: zod.string().nullable(),
-      environment: zod.string().nullable(),
-      constraints: zod.string().nullable(),
-      risk: zod.string().nullable(),
-      experience: zod.string().nullable(),
-      confirmedAt: zod.coerce
-        .date()
+  profile: zod
+    .object({
+      userId: zod.string(),
+      branch: zod.string().nullable(),
+      rank: zod.string().nullable(),
+      mosCode: zod.string().nullable(),
+      dutyTitle: zod.string().nullable(),
+      unit: zod.string().nullable(),
+      baseLocation: zod.string().nullable(),
+      securityClearance: zod.string().nullable(),
+      deploymentStatus: zod.string().nullable(),
+      command: zod
+        .string()
         .nullable()
-        .describe("When the operator last accepted this Context Block."),
-      lastEvaluation: zod.union([
-        zod.object({
-          submissionId: zod.string(),
-          scores: zod.object({
-            doctrine: zod.number().describe("Criterion 1 score (1-3)."),
-            environment: zod
-              .number()
-              .describe(
-                "Criterion 2 — environment & commander's intent (1-3).",
-              ),
-            constraints: zod
-              .number()
-              .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
-            experience: zod.number().describe("Criterion 4 score (1-3)."),
-          }),
-          totalScore: zod
-            .number()
-            .describe(
-              "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
-            ),
-          status: zod
-            .string()
-            .describe(
-              '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
-            ),
-          opsecFlag: zod
-            .boolean()
-            .describe("True if the submission tripped the OPSEC fail-safe."),
-          flags: zod
-            .string()
-            .describe(
-              'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
-            ),
-        }),
-        zod.null(),
-      ]),
-    }),
-    activePresetId: zod.string().nullable(),
-    updatedAt: zod.coerce.date(),
-  }),
-  contextBlock: zod
-    .string()
+        .describe(
+          "Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).\n",
+        ),
+      billets: zod
+        .array(zod.string())
+        .describe("Billet titles the operator currently holds."),
+      freeFormContext: zod.string().nullable(),
+      isAdmin: zod.boolean(),
+      launchPreference: zod.enum(["preview", "direct"]),
+      completenessPct: zod.number(),
+      activePresetId: zod.string().nullable(),
+      updatedAt: zod.coerce.date(),
+    })
     .describe(
-      "Pre-formatted Markdown block summarizing the user's identity, mission, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.\n",
+      "Persistent identity \/ assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.\n",
     ),
-  structuredContextBlock: zod
-    .union([
+  contextBlock: zod.object({
+    doctrine: zod.string().nullable(),
+    intent: zod.string().nullable(),
+    environment: zod.string().nullable(),
+    constraints: zod.string().nullable(),
+    risk: zod.string().nullable(),
+    experience: zod.string().nullable(),
+    confirmedAt: zod.coerce
+      .date()
+      .nullable()
+      .describe("When the operator last accepted this Context Block."),
+    lastEvaluation: zod.union([
       zod.object({
-        doctrine: zod.string().nullable(),
-        intent: zod.string().nullable(),
-        environment: zod.string().nullable(),
-        constraints: zod.string().nullable(),
-        risk: zod.string().nullable(),
-        experience: zod.string().nullable(),
-        confirmedAt: zod.coerce
-          .date()
-          .nullable()
-          .describe("When the operator last accepted this Context Block."),
-        lastEvaluation: zod.union([
-          zod.object({
-            submissionId: zod.string(),
-            scores: zod.object({
-              doctrine: zod.number().describe("Criterion 1 score (1-3)."),
-              environment: zod
-                .number()
-                .describe(
-                  "Criterion 2 — environment & commander's intent (1-3).",
-                ),
-              constraints: zod
-                .number()
-                .describe(
-                  "Criterion 3 — constraints, limitations & risk (1-3).",
-                ),
-              experience: zod.number().describe("Criterion 4 score (1-3)."),
-            }),
-            totalScore: zod
-              .number()
-              .describe(
-                "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
-              ),
-            status: zod
-              .string()
-              .describe(
-                '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
-              ),
-            opsecFlag: zod
-              .boolean()
-              .describe("True if the submission tripped the OPSEC fail-safe."),
-            flags: zod
-              .string()
-              .describe(
-                'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
-              ),
-          }),
-          zod.null(),
-        ]),
+        submissionId: zod.string(),
+        scores: zod.object({
+          doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+          environment: zod
+            .number()
+            .describe("Criterion 2 — environment & commander's intent (1-3)."),
+          constraints: zod
+            .number()
+            .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+          experience: zod.number().describe("Criterion 4 score (1-3)."),
+        }),
+        totalScore: zod
+          .number()
+          .describe(
+            "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+          ),
+        status: zod
+          .string()
+          .describe(
+            '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+          ),
+        opsecFlag: zod
+          .boolean()
+          .describe("True if the submission tripped the OPSEC fail-safe."),
+        flags: zod
+          .string()
+          .describe(
+            'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+          ),
       }),
       zod.null(),
-    ])
+    ]),
+  }),
+  contextMarkdown: zod
+    .string()
     .describe(
-      "Structured 6-element Context Block as last confirmed by the operator, or null when they have not yet confirmed one.\n",
+      "Pre-formatted Markdown summary of the user's identity, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile or contextBlock objects.\n",
     ),
   primer: zod.object({
     queries: zod.array(zod.string()),
@@ -1806,7 +1878,7 @@ export const AdminListToolsResponseItem = zod
       ragQueryTemplates: zod
         .array(zod.string())
         .describe(
-          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+          'Admin-authored seed query templates (e.g. \"{dutyTitle} SOPs\", \"{billets} OPORD\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
         ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
@@ -1922,7 +1994,7 @@ export const CreateToolResponse = zod
       ragQueryTemplates: zod
         .array(zod.string())
         .describe(
-          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+          'Admin-authored seed query templates (e.g. \"{dutyTitle} SOPs\", \"{billets} OPORD\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
         ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
@@ -2040,7 +2112,7 @@ export const UpdateToolResponse = zod
       ragQueryTemplates: zod
         .array(zod.string())
         .describe(
-          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+          'Admin-authored seed query templates (e.g. \"{dutyTitle} SOPs\", \"{billets} OPORD\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
         ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),

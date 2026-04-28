@@ -5,9 +5,12 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
-import type { ContextBlockState } from "./contextBlockState";
 import type { UserProfileLaunchPreference } from "./userProfileLaunchPreference";
 
+/**
+ * Persistent identity / assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.
+
+ */
 export interface UserProfile {
   userId: string;
   /** @nullable */
@@ -26,15 +29,19 @@ export interface UserProfile {
   securityClearance: string | null;
   /** @nullable */
   deploymentStatus: string | null;
-  /** @nullable */
-  primaryMission: string | null;
-  aiUseCases: string[];
+  /**
+   * Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+
+   * @nullable
+   */
+  command: string | null;
+  /** Billet titles the operator currently holds. */
+  billets: string[];
   /** @nullable */
   freeFormContext: string | null;
   isAdmin: boolean;
   launchPreference: UserProfileLaunchPreference;
   completenessPct: number;
-  contextBlock: ContextBlockState;
   /** @nullable */
   activePresetId: string | null;
   updatedAt: Date;

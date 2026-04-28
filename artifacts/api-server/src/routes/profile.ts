@@ -3,6 +3,7 @@ import { eq, asc, desc } from "drizzle-orm";
 import {
   db,
   profilesTable,
+  contextBlocksTable,
   profileChatMessagesTable,
 } from "@workspace/db";
 import {
@@ -15,7 +16,9 @@ import { requireAuth } from "../middlewares/requireAuth";
 import {
   ensureActivePreset,
   getOrCreateProfile,
+  getOrCreateContextBlock,
   serializeProfile,
+  serializeContextBlock,
 } from "../lib/profile-helpers";
 import {
   evaluateContextBlock,
@@ -26,22 +29,41 @@ import {
   ingestUnitPackage,
   startIngestPackage,
 } from "../lib/auto-ingest";
-import { branchCode, hasUnitDoctrinePackage, findMosEntry } from "@workspace/mil-data";
+import {
+  branchCode,
+  hasUnitDoctrinePackage,
+  findMosEntry,
+  isValidCommandCode,
+} from "@workspace/mil-data";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
 router.get("/profile", requireAuth, async (req, res) => {
+  const userId = req.user!.id;
   // Lazy-create the user's default mission preset on first read so that
   // the returned activePresetId is always populated.
-  const { profile, preset } = await ensureActivePreset(req.user!.id);
-  res.json(serializeProfile(profile, preset.id));
+  const [{ profile, preset }, contextBlock] = await Promise.all([
+    ensureActivePreset(userId),
+    getOrCreateContextBlock(userId),
+  ]);
+  res.json({
+    profile: serializeProfile(profile, contextBlock, preset.id),
+    contextBlock: serializeContextBlock(contextBlock),
+  });
 });
 
 router.put("/profile", requireAuth, async (req, res) => {
-  const parsed = UpdateMyProfileBody.safeParse(req.body);
+  // `.strict()` rejects payloads that include any field not in the schema —
+  // e.g. legacy `primaryMission` / `aiUseCases`, or typos like `bilets`.
+  // Returning 400 instead of silently ignoring them prevents stale clients
+  // from believing they wrote a value that we actually dropped.
+  const parsed = UpdateMyProfileBody.strict().safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid profile data" });
+    res.status(400).json({
+      error: "Invalid profile data",
+      issues: parsed.error.issues,
+    });
     return;
   }
 
@@ -58,12 +80,29 @@ router.put("/profile", requireAuth, async (req, res) => {
     "baseLocation",
     "securityClearance",
     "deploymentStatus",
-    "primaryMission",
     "freeFormContext",
   ] as const) {
     if (k in data) update[k] = data[k];
   }
-  if (Array.isArray(data.aiUseCases)) update.aiUseCases = data.aiUseCases;
+  if ("command" in data) {
+    const c = data.command;
+    if (c == null || c === "") {
+      update.command = null;
+    } else if (typeof c === "string" && isValidCommandCode(c)) {
+      update.command = c;
+    } else {
+      res.status(400).json({
+        error: "invalid_command_code",
+        message: `Unknown combatant command code: ${String(c)}`,
+      });
+      return;
+    }
+  }
+  if (Array.isArray(data.billets)) {
+    update.billets = data.billets
+      .map((b) => (typeof b === "string" ? b.trim() : ""))
+      .filter((b) => b.length > 0);
+  }
   if (data.launchPreference === "preview" || data.launchPreference === "direct") {
     update.launchPreference = data.launchPreference;
   }
@@ -149,7 +188,11 @@ router.put("/profile", requireAuth, async (req, res) => {
     );
   }
 
-  res.json(serializeProfile(updated, updated.activePresetId));
+  const contextBlock = await getOrCreateContextBlock(userId);
+  res.json({
+    profile: serializeProfile(updated, contextBlock, updated.activePresetId),
+    contextBlock: serializeContextBlock(contextBlock),
+  });
 });
 
 router.get("/profile/chat", requireAuth, async (req, res) => {
@@ -272,29 +315,36 @@ router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
     return;
   }
 
+  // Make sure a context_blocks row exists, then upsert.
+  await getOrCreateContextBlock(userId);
+
   const now = new Date();
-  const [updated] = await db
-    .update(profilesTable)
+  const [updatedCb] = await db
+    .update(contextBlocksTable)
     .set({
-      cbDoctrine: parsed.data.doctrine,
-      cbIntent: parsed.data.intent,
-      cbEnvironment: parsed.data.environment,
-      cbConstraints: parsed.data.constraints,
-      cbRisk: parsed.data.risk,
-      cbExperience: parsed.data.experience,
-      cbConfirmedAt: now,
-      cbScoreTotal: evaluation.totalScore,
-      cbScores: evaluation.scores,
-      cbStatus: evaluation.status,
-      cbFlags: evaluation.flags,
-      cbSubmissionId: evaluation.submissionId,
-      cbOpsecFlag: evaluation.opsecFlag ? "true" : "false",
+      doctrine: parsed.data.doctrine,
+      intent: parsed.data.intent,
+      environment: parsed.data.environment,
+      constraints: parsed.data.constraints,
+      risk: parsed.data.risk,
+      experience: parsed.data.experience,
+      confirmedAt: now,
+      scoreTotal: evaluation.totalScore,
+      scores: evaluation.scores,
+      status: evaluation.status,
+      flags: evaluation.flags,
+      submissionId: evaluation.submissionId,
+      opsecFlag: evaluation.opsecFlag ? "true" : "false",
+      updatedAt: now,
     })
-    .where(eq(profilesTable.userId, userId))
+    .where(eq(contextBlocksTable.userId, userId))
     .returning();
 
+  const profile = await getOrCreateProfile(userId);
+
   res.json({
-    profile: serializeProfile(updated, updated.activePresetId),
+    profile: serializeProfile(profile, updatedCb, profile.activePresetId),
+    contextBlock: serializeContextBlock(updatedCb),
     evaluation,
   });
 });

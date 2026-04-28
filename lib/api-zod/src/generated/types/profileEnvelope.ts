@@ -5,12 +5,14 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
-import type { ContextBlockEvaluation } from "./contextBlockEvaluation";
 import type { ContextBlockState } from "./contextBlockState";
 import type { UserProfile } from "./userProfile";
 
-export interface ContextBlockConfirmation {
+/**
+ * Envelope returned by GET /profile and PUT /profile. The persistent identity profile and the task-dependent Context Block are kept in separate top-level fields so callers can refresh either one without touching the other.
+
+ */
+export interface ProfileEnvelope {
   profile: UserProfile;
   contextBlock: ContextBlockState;
-  evaluation: ContextBlockEvaluation;
 }

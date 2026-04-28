@@ -154,13 +154,13 @@ paths:
     get:
       tags: [Profile]
       operationId: getMyProfile
-      summary: Get the current user's profile
+      summary: Get the current user's profile and context block
       responses:
         '200':
-          description: Profile
+          description: Profile envelope
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UserProfile' }
+              schema: { $ref: '#/components/schemas/ProfileEnvelope' }
         '401':
           description: Unauthorized
           content:
@@ -177,10 +177,10 @@ paths:
             schema: { $ref: '#/components/schemas/ProfileUpdate' }
       responses:
         '200':
-          description: Updated profile
+          description: Updated profile envelope
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/UserProfile' }
+              schema: { $ref: '#/components/schemas/ProfileEnvelope' }
         '401':
           description: Unauthorized
           content:
@@ -1727,11 +1727,15 @@ components:
 
     UserProfile:
       type: object
+      description: >
+        Persistent identity / assignment data for the operator. The
+        task-dependent 6-element Context Block is returned as a sibling
+        `contextBlock` field, never embedded here.
       required:
         [userId, branch, rank, mosCode, dutyTitle, unit, baseLocation,
-         securityClearance, deploymentStatus, primaryMission,
-         aiUseCases, freeFormContext, isAdmin, launchPreference,
-         completenessPct, contextBlock, activePresetId, updatedAt]
+         securityClearance, deploymentStatus, command, billets,
+         freeFormContext, isAdmin, launchPreference, completenessPct,
+         activePresetId, updatedAt]
       properties:
         userId: { type: string }
         branch: { type: [string, 'null'] }
@@ -1742,17 +1746,32 @@ components:
         baseLocation: { type: [string, 'null'] }
         securityClearance: { type: [string, 'null'] }
         deploymentStatus: { type: [string, 'null'] }
-        primaryMission: { type: [string, 'null'] }
-        aiUseCases:
+        command:
+          type: [string, 'null']
+          description: >
+            Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+        billets:
           type: array
+          description: Billet titles the operator currently holds.
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
         isAdmin: { type: boolean }
         launchPreference: { type: string, enum: [preview, direct] }
         completenessPct: { type: integer }
-        contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
         activePresetId: { type: [string, 'null'] }
         updatedAt: { type: string, format: date-time }
+
+    ProfileEnvelope:
+      type: object
+      description: >
+        Envelope returned by GET /profile and PUT /profile. The persistent
+        identity profile and the task-dependent Context Block are kept in
+        separate top-level fields so callers can refresh either one
+        without touching the other.
+      required: [profile, contextBlock]
+      properties:
+        profile: { $ref: '#/components/schemas/UserProfile' }
+        contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
 
     ContextBlockFields:
       type: object
@@ -1832,9 +1851,10 @@ components:
 
     ContextBlockConfirmation:
       type: object
-      required: [profile, evaluation]
+      required: [profile, contextBlock, evaluation]
       properties:
         profile: { $ref: '#/components/schemas/UserProfile' }
+        contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
         evaluation: { $ref: '#/components/schemas/ContextBlockEvaluation' }
 
     ConfirmContextBlockRejection:
@@ -1846,6 +1866,11 @@ components:
 
     ProfileUpdate:
       type: object
+      description: >
+        Partial update for the persistent identity profile. Only the
+        supplied fields are written. The 6-element Context Block is NOT
+        updated through this endpoint — use /profile/context-block/confirm
+        instead.
       properties:
         branch: { type: [string, 'null'] }
         rank: { type: [string, 'null'] }
@@ -1855,9 +1880,14 @@ components:
         baseLocation: { type: [string, 'null'] }
         securityClearance: { type: [string, 'null'] }
         deploymentStatus: { type: [string, 'null'] }
-        primaryMission: { type: [string, 'null'] }
-        aiUseCases:
+        command:
+          type: [string, 'null']
+          description: >
+            Combatant command code. Server-side validated against the
+            COMBATANT_COMMANDS list; invalid codes are coerced to null.
+        billets:
           type: array
+          description: Billet titles the operator currently holds.
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
         launchPreference: { type: string, enum: [preview, direct] }
@@ -1960,8 +1990,8 @@ components:
             ragQueryTemplates:
               type: array
               description: >
-                Admin-authored seed query templates (e.g. "{primaryMission}",
-                "{dutyTitle} SOPs"). Variables in {curlies} are interpolated
+                Admin-authored seed query templates (e.g. "{dutyTitle} SOPs",
+                "{billets} OPORD"). Variables in {curlies} are interpolated
                 from the launching user's profile; the resolved strings are
                 merged with LLM-generated queries before searching the user's
                 library.
@@ -2424,7 +2454,7 @@ components:
       type: object
       required:
         [sessionToken, sessionExpiresAt, tool, user, profile, contextBlock,
-         structuredContextBlock, primer, additionalNote, sharedFieldKeys]
+         contextMarkdown, primer, additionalNote, sharedFieldKeys]
       properties:
         sessionToken: { type: string }
         sessionExpiresAt: { type: string, format: date-time }
@@ -2447,20 +2477,15 @@ components:
         # Profile object — keys excluded by the user are returned as null
         # (or empty arrays), so the receiving tool keeps a stable shape.
         profile: { $ref: '#/components/schemas/UserProfile' }
-        contextBlock:
+        contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
+        contextMarkdown:
           type: string
           description: >
-            Pre-formatted Markdown block summarizing the user's identity,
-            mission, assignment, and (when confirmed) the 6-element
-            Context Block. Tool builders can drop this directly into
-            their model prompt without re-parsing the structured profile.
-        structuredContextBlock:
-          oneOf:
-            - $ref: '#/components/schemas/ContextBlockState'
-            - type: 'null'
-          description: >
-            Structured 6-element Context Block as last confirmed by the
-            operator, or null when they have not yet confirmed one.
+            Pre-formatted Markdown summary of the user's identity,
+            assignment, and (when confirmed) the 6-element Context
+            Block. Tool builders can drop this directly into their
+            model prompt without re-parsing the structured profile or
+            contextBlock objects.
         primer: { $ref: '#/components/schemas/RagPrimer' }
         # User-supplied freeform note appended at preview time.
         additionalNote: { type: [string, 'null'] }
@@ -2670,8 +2695,8 @@ components:
       type: object
       required:
         [branch, rank, mosCode, dutyTitle, unit, baseLocation,
-         securityClearance, deploymentStatus, primaryMission,
-         aiUseCases, freeFormContext]
+         securityClearance, deploymentStatus, command, billets,
+         freeFormContext]
       properties:
         branch: { type: [string, 'null'] }
         rank: { type: [string, 'null'] }
@@ -2681,9 +2706,13 @@ components:
         baseLocation: { type: [string, 'null'] }
         securityClearance: { type: [string, 'null'] }
         deploymentStatus: { type: [string, 'null'] }
-        primaryMission: { type: [string, 'null'] }
-        aiUseCases:
+        command:
+          type: [string, 'null']
+          description: >
+            Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+        billets:
           type: array
+          description: Billet titles the operator currently holds.
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
 

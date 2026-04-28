@@ -1,6 +1,7 @@
 import { ai } from "@workspace/integrations-gemini-ai";
 import { randomUUID } from "node:crypto";
 import type { Profile, ContextBlockScores } from "@workspace/db";
+import { findCommand } from "@workspace/mil-data";
 import { logger } from "./logger";
 
 const MODEL = "gemini-3-flash-preview";
@@ -218,14 +219,17 @@ function profileSummary(profile: Profile | null): string {
   if (profile.mosCode) lines.push(`MOS/Rate/AFSC: ${profile.mosCode}`);
   if (profile.dutyTitle) lines.push(`Duty title: ${profile.dutyTitle}`);
   if (profile.unit) lines.push(`Unit: ${profile.unit}`);
+  if (profile.command) {
+    const cmd = findCommand(profile.command);
+    lines.push(`Command: ${cmd ? `${cmd.code} (${cmd.name})` : profile.command}`);
+  }
+  if (profile.billets?.length)
+    lines.push(`Billets: ${profile.billets.join("; ")}`);
   if (profile.baseLocation) lines.push(`Base/location: ${profile.baseLocation}`);
   if (profile.securityClearance)
     lines.push(`Clearance: ${profile.securityClearance}`);
   if (profile.deploymentStatus)
     lines.push(`Deployment status: ${profile.deploymentStatus}`);
-  if (profile.primaryMission) lines.push(`Mission: ${profile.primaryMission}`);
-  if (profile.aiUseCases?.length)
-    lines.push(`AI use cases: ${profile.aiUseCases.join(", ")}`);
   if (profile.freeFormContext)
     lines.push(`Free-form context:\n${profile.freeFormContext}`);
   return lines.length ? lines.join("\n") : "No structured profile data yet.";
@@ -250,8 +254,8 @@ const PROFILE_FIELDS = [
   "baseLocation",
   "securityClearance",
   "deploymentStatus",
-  "primaryMission",
-  "aiUseCases",
+  "command",
+  "billets",
   "freeFormContext",
 ] as const;
 
@@ -273,8 +277,8 @@ Available structured fields you can populate:
 - baseLocation (current base/station)
 - securityClearance (none, secret, top_secret, ts_sci)
 - deploymentStatus (garrison, deployed, training, transitioning)
-- primaryMission (1-2 sentence mission statement)
-- aiUseCases (array of strings — what they want AI to help with)
+- command (combatant command code: USAFRICOM, USCENTCOM, USCYBERCOM, USEUCOM, USINDOPACOM, USNORTHCOM, USSOCOM, USSOUTHCOM, USSPACECOM, USSTRATCOM, USTRANSCOM, OTHER)
+- billets (array of strings — billet titles the operator currently holds, e.g. "Platoon Sergeant", "S3 OPSO")
 - freeFormContext (any narrative context not captured elsewhere)
 
 Conversation rules:
@@ -288,7 +292,7 @@ Output format (CRITICAL):
 - First, write your conversational reply as plain text.
 - Then, if the user's most recent message contains new structured information, append the literal separator on its own line:
   ---PROFILE---
-- Followed by a JSON object containing ONLY the fields you learned new values for (omit unchanged fields). Use the exact field names listed above. For aiUseCases, use a string array. Do not include the separator or JSON if no structured updates were made.
+- Followed by a JSON object containing ONLY the fields you learned new values for (omit unchanged fields). Use the exact field names listed above. For billets, use a string array. Do not include the separator or JSON if no structured updates were made.
 - Never put the separator inside your reply text.`;
 
   const contents = history.map((m) => ({
@@ -344,15 +348,14 @@ Output format (CRITICAL):
  */
 function resolveTemplate(template: string, profile: Profile | null): string | null {
   const lookup: Record<string, string> = {};
-  if (profile?.primaryMission) lookup.primaryMission = profile.primaryMission;
   if (profile?.dutyTitle) lookup.dutyTitle = profile.dutyTitle;
   if (profile?.mosCode) lookup.mosCode = profile.mosCode;
   if (profile?.unit) lookup.unit = profile.unit;
   if (profile?.branch) lookup.branch = profile.branch;
   if (profile?.rank) lookup.rank = profile.rank;
   if (profile?.baseLocation) lookup.baseLocation = profile.baseLocation;
-  if (profile?.aiUseCases?.length)
-    lookup.aiUseCases = profile.aiUseCases.join(" ");
+  if (profile?.command) lookup.command = profile.command;
+  if (profile?.billets?.length) lookup.billets = profile.billets.join(" ");
 
   let unresolved = false;
   const out = template.replace(/\{(\w+)\}/g, (_m, key) => {
@@ -411,7 +414,7 @@ const DRAFT_INSTRUCTIONS: Record<DraftField, string> = {
   purpose:
     "Write ONE sentence describing what the tool actually does WITH the user's profile + RAG context. This sentence is fed to a query generator that pulls relevant snippets from the user's library — make it operationally specific (e.g. 'Drafts pre-mission ISR collection plans grounded in unit SOPs and current mission'). Plain text, single sentence.",
   ragQueryTemplates:
-    'Output a JSON array of 3–5 short search-query templates (2–6 words each) that this tool would want from the user\'s personal doctrine library. Use {curlies} placeholders for profile fields available: {primaryMission}, {dutyTitle}, {mosCode}, {unit}, {branch}, {rank}, {baseLocation}. Example: ["{dutyTitle} SOPs", "{primaryMission} planning", "{mosCode} doctrine"]. Output ONLY the JSON array, no prose.',
+    'Output a JSON array of 3–5 short search-query templates (2–6 words each) that this tool would want from the user\'s personal doctrine library. Use {curlies} placeholders for profile fields available: {command}, {billets}, {dutyTitle}, {mosCode}, {unit}, {branch}, {rank}, {baseLocation}. Example: ["{dutyTitle} SOPs", "{command} planning", "{mosCode} doctrine"]. Output ONLY the JSON array, no prose.',
 };
 
 function trimSource(s: string | null | undefined, max: number): string {
@@ -500,7 +503,10 @@ export async function generateRagQueries(
   toolDesc: RagToolDescriptor,
 ): Promise<string[]> {
   const profileQueries: string[] = [];
-  if (profile?.primaryMission) profileQueries.push(profile.primaryMission);
+  if (profile?.command) {
+    const cmd = findCommand(profile.command);
+    profileQueries.push(cmd ? `${cmd.code} ${cmd.name}` : profile.command);
+  }
   if (profile?.dutyTitle && profile?.mosCode) {
     profileQueries.push(`${profile.dutyTitle} ${profile.mosCode}`);
   } else if (profile?.dutyTitle) {
@@ -508,8 +514,8 @@ export async function generateRagQueries(
   } else if (profile?.mosCode) {
     profileQueries.push(profile.mosCode);
   }
-  if (profile?.aiUseCases && profile.aiUseCases.length > 0) {
-    profileQueries.push(profile.aiUseCases.slice(0, 3).join(" "));
+  if (profile?.billets && profile.billets.length > 0) {
+    profileQueries.push(profile.billets.slice(0, 3).join(" "));
   }
   if (profile?.unit) profileQueries.push(profile.unit);
 

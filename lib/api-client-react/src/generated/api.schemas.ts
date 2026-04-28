@@ -63,6 +63,46 @@ export const UserProfileLaunchPreference = {
   direct: "direct",
 } as const;
 
+/**
+ * Persistent identity / assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.
+
+ */
+export interface UserProfile {
+  userId: string;
+  /** @nullable */
+  branch: string | null;
+  /** @nullable */
+  rank: string | null;
+  /** @nullable */
+  mosCode: string | null;
+  /** @nullable */
+  dutyTitle: string | null;
+  /** @nullable */
+  unit: string | null;
+  /** @nullable */
+  baseLocation: string | null;
+  /** @nullable */
+  securityClearance: string | null;
+  /** @nullable */
+  deploymentStatus: string | null;
+  /**
+   * Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+
+   * @nullable
+   */
+  command: string | null;
+  /** Billet titles the operator currently holds. */
+  billets: string[];
+  /** @nullable */
+  freeFormContext: string | null;
+  isAdmin: boolean;
+  launchPreference: UserProfileLaunchPreference;
+  completenessPct: number;
+  /** @nullable */
+  activePresetId: string | null;
+  updatedAt: string;
+}
+
 export interface ContextBlockScores {
   /** Criterion 1 score (1-3). */
   doctrine: number;
@@ -108,36 +148,13 @@ export interface ContextBlockState {
   lastEvaluation: ContextBlockEvaluation | null;
 }
 
-export interface UserProfile {
-  userId: string;
-  /** @nullable */
-  branch: string | null;
-  /** @nullable */
-  rank: string | null;
-  /** @nullable */
-  mosCode: string | null;
-  /** @nullable */
-  dutyTitle: string | null;
-  /** @nullable */
-  unit: string | null;
-  /** @nullable */
-  baseLocation: string | null;
-  /** @nullable */
-  securityClearance: string | null;
-  /** @nullable */
-  deploymentStatus: string | null;
-  /** @nullable */
-  primaryMission: string | null;
-  aiUseCases: string[];
-  /** @nullable */
-  freeFormContext: string | null;
-  isAdmin: boolean;
-  launchPreference: UserProfileLaunchPreference;
-  completenessPct: number;
+/**
+ * Envelope returned by GET /profile and PUT /profile. The persistent identity profile and the task-dependent Context Block are kept in separate top-level fields so callers can refresh either one without touching the other.
+
+ */
+export interface ProfileEnvelope {
+  profile: UserProfile;
   contextBlock: ContextBlockState;
-  /** @nullable */
-  activePresetId: string | null;
-  updatedAt: string;
 }
 
 export interface ContextBlockFields {
@@ -157,6 +174,7 @@ export interface ContextBlockFields {
 
 export interface ContextBlockConfirmation {
   profile: UserProfile;
+  contextBlock: ContextBlockState;
   evaluation: ContextBlockEvaluation;
 }
 
@@ -173,6 +191,10 @@ export const ProfileUpdateLaunchPreference = {
   direct: "direct",
 } as const;
 
+/**
+ * Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use /profile/context-block/confirm instead.
+
+ */
 export interface ProfileUpdate {
   /** @nullable */
   branch?: string | null;
@@ -190,9 +212,14 @@ export interface ProfileUpdate {
   securityClearance?: string | null;
   /** @nullable */
   deploymentStatus?: string | null;
-  /** @nullable */
-  primaryMission?: string | null;
-  aiUseCases?: string[];
+  /**
+   * Combatant command code. Server-side validated against the COMBATANT_COMMANDS list; invalid codes are coerced to null.
+
+   * @nullable
+   */
+  command?: string | null;
+  /** Billet titles the operator currently holds. */
+  billets?: string[];
   /** @nullable */
   freeFormContext?: string | null;
   launchPreference?: ProfileUpdateLaunchPreference;
@@ -286,7 +313,7 @@ export type ToolDetail = ToolSummary & {
   /** Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).
    */
   purpose: string;
-  /** Admin-authored seed query templates (e.g. "{primaryMission}", "{dutyTitle} SOPs"). Variables in {curlies} are interpolated from the launching user's profile; the resolved strings are merged with LLM-generated queries before searching the user's library.
+  /** Admin-authored seed query templates (e.g. "{dutyTitle} SOPs", "{billets} OPORD"). Variables in {curlies} are interpolated from the launching user's profile; the resolved strings are merged with LLM-generated queries before searching the user's library.
    */
   ragQueryTemplates: string[];
   /** @nullable */
@@ -780,12 +807,10 @@ export interface ContextExchangeResponse {
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;
-  /** Pre-formatted Markdown block summarizing the user's identity, mission, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
+  contextBlock: ContextBlockState;
+  /** Pre-formatted Markdown summary of the user's identity, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile or contextBlock objects.
    */
-  contextBlock: string;
-  /** Structured 6-element Context Block as last confirmed by the operator, or null when they have not yet confirmed one.
-   */
-  structuredContextBlock: ContextBlockState | null;
+  contextMarkdown: string;
   primer: RagPrimer;
   /** @nullable */
   additionalNote: string | null;
@@ -953,9 +978,14 @@ export interface PresetProfileSnapshot {
   securityClearance: string | null;
   /** @nullable */
   deploymentStatus: string | null;
-  /** @nullable */
-  primaryMission: string | null;
-  aiUseCases: string[];
+  /**
+   * Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+
+   * @nullable
+   */
+  command: string | null;
+  /** Billet titles the operator currently holds. */
+  billets: string[];
   /** @nullable */
   freeFormContext: string | null;
 }

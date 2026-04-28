@@ -88,8 +88,9 @@ const EMPTY_TOOL: ToolUpsert = {
 };
 
 export function Admin() {
-  const { data: profile, isLoading: profileLoading } = useGetMyProfile();
-  const isAdmin = profile?.isAdmin === true;
+  const { data: profileEnvelope, isLoading: profileLoading } =
+    useGetMyProfile();
+  const isAdmin = profileEnvelope?.profile.isAdmin === true;
 
   if (profileLoading) {
     return (
@@ -1781,11 +1782,11 @@ function ContextSection({
                 .filter(Boolean),
             )
           }
-          placeholder={`{primaryMission} OPORD\n{dutyTitle} commander's intent\n{unit} mission essential task`}
+          placeholder={`{billets} OPORD\n{dutyTitle} commander's intent\n{unit} mission essential task`}
           className={`${inputCls} font-mono`}
         />
         <div className="mt-1.5 text-[10px] font-mono text-muted-foreground leading-relaxed">
-          Available vars: {"{primaryMission} {dutyTitle} {mosCode} {unit} {branch} {rank} {baseLocation} {aiUseCases}"}.
+          Available vars: {"{dutyTitle} {mosCode} {unit} {branch} {rank} {baseLocation} {command} {billets}"}.
           Templates with vars the operator hasn't filled in are skipped.
         </div>
       </Field>

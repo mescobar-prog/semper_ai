@@ -465,10 +465,11 @@ function BriefDrafterPage() {
             <Field label="Duty title" value={profile.dutyTitle} />
             <Field label="Unit" value={profile.unit} />
             <Field label="Base / location" value={profile.baseLocation} />
+            <Field label="Combatant command" value={profile.command} />
           </div>
-          {profile.primaryMission && (
+          {profile.billets && profile.billets.length > 0 && (
             <div className="mt-6">
-              <Field label="Primary mission" value={profile.primaryMission} />
+              <Field label="Billets" value={profile.billets.join(", ")} />
             </div>
           )}
         </section>

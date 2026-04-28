@@ -29,6 +29,7 @@ import {
   buildContextBlock,
   ensureActivePreset,
   getActiveContext,
+  getOrCreateContextBlock,
   getOrCreateProfile,
   hasConfirmedContextBlock,
   serializeContextBlock,
@@ -367,11 +368,15 @@ router.post("/tools/context-exchange", async (req, res) => {
 
   // Resolve the active mission preset — its snapshot becomes the "profile"
   // the tool sees (so cross-mission contamination is prevented), and the
-  // live profile rides along for cb_* (Context Block) fields. We then apply
-  // the user's preview-time redaction so any field they excluded at preview
-  // is stripped from what's actually sent to the tool. Snippets come from
-  // the launch row's audit-time snapshot, never re-run RAG here.
-  const ctx = await getActiveContext(user.id);
+  // task-dependent Context Block lives in its own table and rides alongside
+  // the snapshot profile. We then apply the user's preview-time redaction so
+  // any field they excluded at preview is stripped from what's actually sent
+  // to the tool. Snippets come from the launch row's audit-time snapshot, we
+  // never re-run RAG here.
+  const [ctx, contextBlock] = await Promise.all([
+    getActiveContext(user.id),
+    getOrCreateContextBlock(user.id),
+  ]);
   const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
   const sharedFieldKeys = launch.sharedFieldKeys ?? [];
   const redactedProfile = redactProfileForLaunch(
@@ -419,16 +424,12 @@ router.post("/tools/context-exchange", async (req, res) => {
       atoStatus: tool.atoStatus,
     },
     user: userPayload,
-    profile: serializeProfile(redactedProfile, ctx.activePreset.id),
-    contextBlock: buildContextBlock(userPayload, redactedProfile),
-    // Per spec: structuredContextBlock is null when the operator has not
-    // confirmed a Context Block yet; otherwise it carries the full state
-    // including the most recent evaluation. The cb_* fields ride on the
-    // live profile (snapshotAsProfile carries them through from fallback)
-    // and are not subject to redactProfileForLaunch.
-    structuredContextBlock: hasConfirmedContextBlock(snapshotProfile)
-      ? serializeContextBlock(snapshotProfile)
-      : null,
+    // Profile is the redacted view (per the user's preview-time field
+    // selections); contextBlock travels separately so the receiving tool
+    // sees the {profile, contextBlock} envelope shape used everywhere else.
+    profile: serializeProfile(redactedProfile, contextBlock, ctx.activePreset.id),
+    contextBlock: serializeContextBlock(contextBlock),
+    contextMarkdown: buildContextBlock(userPayload, redactedProfile, contextBlock),
     // Snippets are the user-approved set captured at preview time; queries
     // are intentionally empty here because we did not re-run RAG.
     primer: { queries: [], snippets },
@@ -505,14 +506,18 @@ router.post("/tools/draft-brief", async (req, res) => {
     return;
   }
 
-  const profile = await getOrCreateProfile(user.id);
+  const [profile, contextBlockRow] = await Promise.all([
+    getOrCreateProfile(user.id),
+    getOrCreateContextBlock(user.id),
+  ]);
 
   const trimmedTopic = topic.trim();
   // Use the user's topic as the primary library query, plus a couple of
   // profile-derived fallbacks so a vague topic still surfaces unit-specific
-  // material.
+  // material. The Context Block's commander's-intent line is a great
+  // fallback when the topic itself is vague.
   const queries = [trimmedTopic];
-  if (profile.primaryMission) queries.push(profile.primaryMission);
+  if (contextBlockRow?.intent) queries.push(contextBlockRow.intent);
   if (profile.dutyTitle && profile.unit) {
     queries.push(`${profile.unit} ${profile.dutyTitle}`);
   }
@@ -530,7 +535,7 @@ router.post("/tools/draft-brief", async (req, res) => {
     email: user.email,
   };
 
-  const contextBlock = buildContextBlock(userPayload, profile);
+  const contextBlock = buildContextBlock(userPayload, profile, contextBlockRow);
 
   let draft: string;
   try {

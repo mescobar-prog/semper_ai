@@ -80,7 +80,7 @@ const TOOLS: SeedTool[] = [
     purpose:
       "Surface the exact profile fields and library snippets that get forwarded on launch so operators can audit what each tool is allowed to see.",
     ragQueryTemplates: [
-      "{primaryMission}",
+      "{billets}",
       "{dutyTitle} {mosCode}",
       "{unit} SOP",
     ],
@@ -106,7 +106,7 @@ const TOOLS: SeedTool[] = [
     purpose:
       "Draft staff-ready briefs (SITREP, OPORD paragraph, or training brief) anchored in the operator's library of OPORDs, FRAGOs, and unit SOPs, in their service's voice.",
     ragQueryTemplates: [
-      "{primaryMission} OPORD",
+      "{billets} OPORD",
       "{dutyTitle} commander's intent",
       "{unit} mission essential task",
       "MDMP commander's guidance",
@@ -185,7 +185,7 @@ const TOOLS: SeedTool[] = [
     purpose:
       "Triage open-source reporting against the operator's collection plan and PIRs, scoring sources and preserving provenance for finished intelligence products.",
     ragQueryTemplates: [
-      "{primaryMission} collection requirements",
+      "{billets} collection requirements",
       "{unit} priority intelligence requirements",
       "OSINT source evaluation criteria",
     ],
@@ -211,7 +211,7 @@ const TOOLS: SeedTool[] = [
     purpose:
       "Fuse SIGINT/IMINT/HUMINT layers over the operator's named area of interest and produce NGA-compliant geospatial products.",
     ragQueryTemplates: [
-      "{primaryMission} named area of interest",
+      "{billets} named area of interest",
       "{baseLocation} geospatial baseline",
       "NGA export geospatial",
     ],
@@ -264,7 +264,7 @@ const TOOLS: SeedTool[] = [
       "Translate CVE advisories into unit-specific exposure assessments by joining them against the operator's asset inventory and mission-criticality records.",
     ragQueryTemplates: [
       "{unit} asset inventory",
-      "{primaryMission} mission critical systems",
+      "{billets} mission critical systems",
       "patch management policy",
     ],
     atoStatus: "in_review",
@@ -290,7 +290,7 @@ const TOOLS: SeedTool[] = [
       "Generate STX/LFX scenarios, white-cell injects, and AAR prompts calibrated to the operator's METL and recent training gaps.",
     ragQueryTemplates: [
       "{unit} mission essential task list",
-      "{primaryMission} training gaps",
+      "{billets} training gaps",
       "STX after action review",
     ],
     atoStatus: "full_ato",
@@ -315,7 +315,7 @@ const TOOLS: SeedTool[] = [
     purpose:
       "Answer doctrinal questions with paragraph-level citations from the operator's saved FMs, JPs, MCWPs, AFDPs, and unit-authored references.",
     ragQueryTemplates: [
-      "{primaryMission} doctrine reference",
+      "{billets} doctrine reference",
       "{dutyTitle} field manual",
       "joint publication tactics",
     ],

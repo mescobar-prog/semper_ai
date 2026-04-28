@@ -49,7 +49,14 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 - Search is **semantic-first** (`searchChunks` in `artifacts/api-server/src/lib/rag.ts`): embed query → cosine top-K → return snippets. If embedding fails, the top hit is below the similarity floor (0.2), or no hits come back, the search falls back to the existing `to_tsquery` keyword search and logs a fallback line. Snippets carry `source: "semantic" | "fts"` so callers can see which path served them.
 - A backfill job runs at server startup (`artifacts/api-server/src/lib/embeddings-backfill.ts`): it walks `doc_chunks WHERE embedding IS NULL` in batches of 32 and is idempotent + resumable. A second pass re-derives heading trails for chunks that were created before the chunker upgrade.
 - `/healthz` reports `{ semanticSearch: { ready, failed, reason, model, dim } }` so operators can confirm whether semantic or FTS-only search is active without tailing logs.
-- Primer queries are generated per-launch by Gemini (`gemini-3-flash-preview` via the Replit Gemini AI integration) from `profile + tool description`, then **always merged** with profile-derived queries (primaryMission, dutyTitle+MOS, aiUseCases, unit) to guarantee personal-doc recall even when the LLM focuses on tool terminology. The same Gemini model also powers the profile intake chat. Helper module: `artifacts/api-server/src/lib/gemini-helpers.ts`.
+- Primer queries are generated per-launch by Gemini (`gemini-3-flash-preview` via the Replit Gemini AI integration) from `profile + tool description`, then **always merged** with profile-derived queries (billets, dutyTitle+MOS, command, unit) to guarantee personal-doc recall even when the LLM focuses on tool terminology. The same Gemini model also powers the profile intake chat. Helper module: `artifacts/api-server/src/lib/gemini-helpers.ts`.
+
+### Profile vs Context Block
+- Persistent operator identity (branch, rank, MOS, dutyTitle, unit, command, billets, baseLocation, securityClearance, deploymentStatus, freeFormContext, isAdmin) lives in `profiles`.
+- The task-dependent 6-element Context Block (who/what/when/where/risk/experience + lastEvaluation) lives in a separate `context_blocks` table keyed by userId.
+- `command` is a combatant command code from `lib/mil-data` (USAFRICOM, USCENTCOM, USCYBERCOM, USEUCOM, USINDOPACOM, USNORTHCOM, USSOCOM, USSOUTHCOM, USSPACECOM, USSTRATCOM, USTRANSCOM, OTHER).
+- `billets` is a free-form `text[]` of role/duty assignments (e.g. "Squad Leader", "Range Safety Officer").
+- `GET /api/profile` and `PUT /api/profile` return a `ProfileEnvelope` = `{ profile: UserProfile, contextBlock: ContextBlockState }`. Launch responses return `profile` and `contextBlock` separately, plus a `contextMarkdown` rendering of the block.
 
 ### Library uploads (PDF/DOCX/MD/TXT)
 - Binary uploads use object storage (App Storage / GCS) via presigned PUT URLs. Flow:
@@ -64,7 +71,7 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 - Paste-text uploads still use the synchronous `content` field on the same endpoint.
 
 ### Auth & admin
-- Replit OIDC via `@workspace/replit-auth-web`. Layout fetches `/api/profile` to determine `isAdmin` (which lives on UserProfile, not AuthUser).
+- Replit OIDC via `@workspace/replit-auth-web`. Layout fetches `/api/profile` to determine `isAdmin` (which lives on `envelope.profile`, not AuthUser).
 - The first user is a normal operator. Promote to admin with `UPDATE profiles SET is_admin = true WHERE user_id = '...'`.
 
 ### Profile autosave

@@ -17,12 +17,10 @@ export interface ContextExchangeResponse {
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;
-  /** Pre-formatted Markdown block summarizing the user's identity, mission, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
+  contextBlock: ContextBlockState;
+  /** Pre-formatted Markdown summary of the user's identity, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile or contextBlock objects.
    */
-  contextBlock: string;
-  /** Structured 6-element Context Block as last confirmed by the operator, or null when they have not yet confirmed one.
-   */
-  structuredContextBlock: ContextBlockState | null;
+  contextMarkdown: string;
   primer: RagPrimer;
   /** @nullable */
   additionalNote: string | null;

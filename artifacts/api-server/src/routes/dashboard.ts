@@ -13,6 +13,7 @@ import {
 import { requireAuth } from "../middlewares/requireAuth";
 import {
   getOrCreateProfile,
+  getOrCreateContextBlock,
   completenessPct,
 } from "../lib/profile-helpers";
 
@@ -22,6 +23,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   const userId = req.user!.id;
 
   const profile = await getOrCreateProfile(userId);
+  const contextBlock = await getOrCreateContextBlock(userId);
 
   const [libStats] = await db
     .select({
@@ -103,7 +105,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     .limit(6);
 
   res.json({
-    profileCompletenessPct: completenessPct(profile),
+    profileCompletenessPct: completenessPct(profile, contextBlock),
     libraryDocumentCount: Number(libStats?.documentCount ?? 0),
     libraryChunkCount: Number(libStats?.chunkCount ?? 0),
     favoritesCount: Number(favs?.c ?? 0),

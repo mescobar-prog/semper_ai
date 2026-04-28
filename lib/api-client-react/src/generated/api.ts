@@ -73,6 +73,7 @@ import type {
   PresetDeleteResponse,
   ProfileChatRequest,
   ProfileChatResponse,
+  ProfileEnvelope,
   ProfileUpdate,
   SimpleSuccess,
   SubmissionDetail,
@@ -88,7 +89,6 @@ import type {
   ToolUpsert,
   UploadUrlRequest,
   UploadUrlResponse,
-  UserProfile,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -700,7 +700,7 @@ export const useLogoutMobileSession = <
 };
 
 /**
- * @summary Get the current user's profile
+ * @summary Get the current user's profile and context block
  */
 export const getGetMyProfileUrl = () => {
   return `/api/profile`;
@@ -708,8 +708,8 @@ export const getGetMyProfileUrl = () => {
 
 export const getMyProfile = async (
   options?: RequestInit,
-): Promise<UserProfile> => {
-  return customFetch<UserProfile>(getGetMyProfileUrl(), {
+): Promise<ProfileEnvelope> => {
+  return customFetch<ProfileEnvelope>(getGetMyProfileUrl(), {
     ...options,
     method: "GET",
   });
@@ -751,7 +751,7 @@ export type GetMyProfileQueryResult = NonNullable<
 export type GetMyProfileQueryError = ErrorType<ErrorEnvelope>;
 
 /**
- * @summary Get the current user's profile
+ * @summary Get the current user's profile and context block
  */
 
 export function useGetMyProfile<
@@ -784,8 +784,8 @@ export const getUpdateMyProfileUrl = () => {
 export const updateMyProfile = async (
   profileUpdate: ProfileUpdate,
   options?: RequestInit,
-): Promise<UserProfile> => {
-  return customFetch<UserProfile>(getUpdateMyProfileUrl(), {
+): Promise<ProfileEnvelope> => {
+  return customFetch<ProfileEnvelope>(getUpdateMyProfileUrl(), {
     ...options,
     method: "PUT",
     headers: { "Content-Type": "application/json", ...options?.headers },

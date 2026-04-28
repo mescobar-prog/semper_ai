@@ -21,8 +21,8 @@ export interface PresetProfileSnapshot {
   baseLocation: string | null;
   securityClearance: string | null;
   deploymentStatus: string | null;
-  primaryMission: string | null;
-  aiUseCases: string[];
+  command: string | null;
+  billets: string[];
   freeFormContext: string | null;
 }
 

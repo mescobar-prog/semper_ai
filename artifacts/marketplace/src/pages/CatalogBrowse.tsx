@@ -50,8 +50,8 @@ export function CatalogBrowse() {
 
   const { data: categories } = useListCategories();
   const { data: tools, isLoading, error } = useListTools(params);
-  const { data: profile } = useGetMyProfile();
-  const cb = profile?.contextBlock;
+  const { data: profileEnvelope } = useGetMyProfile();
+  const cb = profileEnvelope?.contextBlock;
 
   return (
     <PageContainer>

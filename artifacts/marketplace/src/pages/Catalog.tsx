@@ -74,8 +74,9 @@ function fieldsFromState(cb: ContextBlockState | undefined): ContextBlockFields 
 
 export function Catalog() {
   const queryClient = useQueryClient();
-  const { data: profile, isLoading } = useGetMyProfile();
-  const cb = profile?.contextBlock;
+  const { data: profileEnvelope, isLoading } = useGetMyProfile();
+  const profile = profileEnvelope?.profile;
+  const cb = profileEnvelope?.contextBlock;
 
   const [fields, setFields] = useState<ContextBlockFields>(EMPTY_FIELDS);
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);

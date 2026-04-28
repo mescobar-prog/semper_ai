@@ -26,7 +26,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
 
-  const { data: profile } = useGetMyProfile({
+  const { data: profileEnvelope } = useGetMyProfile({
     query: {
       enabled: !!user,
       retry: false,
@@ -38,7 +38,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  const isAdmin = profile?.isAdmin === true;
+  const isAdmin = profileEnvelope?.profile.isAdmin === true;
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard" },

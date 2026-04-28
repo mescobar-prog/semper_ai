@@ -17,7 +17,8 @@ import {
 
 export function Dashboard() {
   const { user } = useAuth();
-  const { data: profile } = useGetMyProfile();
+  const { data: profileEnvelope } = useGetMyProfile();
+  const profile = profileEnvelope?.profile;
   const {
     data: summary,
     isLoading,

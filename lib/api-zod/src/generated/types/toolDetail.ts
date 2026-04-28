@@ -13,7 +13,7 @@ export type ToolDetail = ToolSummary & {
   /** Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).
    */
   purpose: string;
-  /** Admin-authored seed query templates (e.g. "{primaryMission}", "{dutyTitle} SOPs"). Variables in {curlies} are interpolated from the launching user's profile; the resolved strings are merged with LLM-generated queries before searching the user's library.
+  /** Admin-authored seed query templates (e.g. "{dutyTitle} SOPs", "{billets} OPORD"). Variables in {curlies} are interpolated from the launching user's profile; the resolved strings are merged with LLM-generated queries before searching the user's library.
    */
   ragQueryTemplates: string[];
   /** @nullable */

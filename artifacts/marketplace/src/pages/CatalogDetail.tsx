@@ -44,7 +44,8 @@ export function CatalogDetail() {
 
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
-  const { data: profile } = useGetMyProfile();
+  const { data: profileEnvelope } = useGetMyProfile();
+  const profile = profileEnvelope?.profile;
 
   const [launchTrigger, setLaunchTrigger] = useState<LaunchTrigger | null>(
     null,

@@ -30,6 +30,7 @@ import type {
 } from "@workspace/api-client-react";
 import {
   BRANCHES as MIL_BRANCHES,
+  COMBATANT_COMMANDS,
   branchCode,
   buildMosAutoSource,
   buildUnitAutoSource,
@@ -93,13 +94,6 @@ const FIELDS: Array<{
     options: DEPLOYMENT_STATUS,
   },
   {
-    key: "primaryMission",
-    label: "Primary mission",
-    type: "textarea",
-    span: 3,
-    placeholder: "What does your unit actually do day-to-day?",
-  },
-  {
     key: "freeFormContext",
     label: "Narrative context",
     type: "textarea",
@@ -111,7 +105,12 @@ const FIELDS: Array<{
 
 export function Profile() {
   const queryClient = useQueryClient();
-  const { data: profile, isLoading, error } = useGetMyProfile();
+  const {
+    data: profileEnvelope,
+    isLoading,
+    error,
+  } = useGetMyProfile();
+  const profile = profileEnvelope?.profile;
   const updateMutation = useUpdateMyProfile();
 
   const [draft, setDraft] = useState<ProfileUpdate | null>(null);
@@ -138,13 +137,13 @@ export function Profile() {
     const myVersion = ++versionRef.current;
     setSaveError(null);
     try {
-      const updated = await updateMutation.mutateAsync({ data: next });
+      const updatedEnvelope = await updateMutation.mutateAsync({ data: next });
       // Only commit this response if no newer save has been queued in the
       // meantime — discards stale "last response wins" overwrites.
       if (myVersion >= lastCommittedRef.current) {
         lastCommittedRef.current = myVersion;
         setSavedAt(Date.now());
-        queryClient.setQueryData(getGetMyProfileQueryKey(), updated);
+        queryClient.setQueryData(getGetMyProfileQueryKey(), updatedEnvelope);
       }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Failed to save profile");
@@ -193,13 +192,9 @@ export function Profile() {
     queueSave(next);
   };
 
-  const onAiUseCases = (value: string) => {
+  const setBillets = (next: string[]) => {
     if (!draft) return;
-    const arr = value
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    queueSave({ ...draft, aiUseCases: arr });
+    queueSave({ ...draft, billets: next });
   };
 
   const applySuggestion = (suggestion: ProfileUpdate) => {
@@ -215,21 +210,23 @@ export function Profile() {
         debounceRef.current = null;
         await flush();
       }
-      const latest =
-        queryClient.getQueryData<UserProfile>(getGetMyProfileQueryKey()) ??
-        profile;
-      if (!latest) return;
+      const latestEnvelope =
+        queryClient.getQueryData<{
+          profile: UserProfile;
+          contextBlock: unknown;
+        }>(getGetMyProfileQueryKey()) ?? profileEnvelope;
+      if (!latestEnvelope) return;
 
       const date = new Date().toISOString().slice(0, 10);
       let content: string;
       let mime: string;
       let ext: string;
       if (format === "md") {
-        content = profileToMarkdown(latest);
+        content = profileToMarkdown(latestEnvelope.profile);
         mime = "text/markdown;charset=utf-8";
         ext = "md";
       } else {
-        content = JSON.stringify(latest, null, 2);
+        content = JSON.stringify(latestEnvelope, null, 2);
         mime = "application/json;charset=utf-8";
         ext = "json";
       }
@@ -243,7 +240,7 @@ export function Profile() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     },
-    [flush, profile, queryClient],
+    [flush, profileEnvelope, queryClient],
   );
 
   if (error) {
@@ -348,16 +345,27 @@ export function Profile() {
                   </div>
                 );
               })}
-              <div className="col-span-3">
+              <div className="col-span-3 sm:col-span-1">
                 <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-                  AI use cases (comma-separated)
+                  Combatant Command
                 </label>
-                <input
-                  type="text"
-                  defaultValue={(draft.aiUseCases ?? []).join(", ")}
-                  onBlur={(e) => onAiUseCases(e.target.value)}
-                  placeholder="planning, analysis, drafting, code review…"
+                <select
+                  value={draft.command ?? ""}
+                  onChange={(e) => onChange("command", e.target.value)}
                   className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+                >
+                  <option value="">— unset —</option>
+                  {COMBATANT_COMMANDS.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-3">
+                <BilletsEditor
+                  value={draft.billets ?? []}
+                  onChange={setBillets}
                 />
               </div>
               <div className="col-span-3 border-t border-border pt-4 mt-2">
@@ -858,6 +866,141 @@ function PresetCard({
   );
 }
 
+function BilletsEditor({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [pending, setPending] = useState("");
+
+  const add = () => {
+    const text = pending.trim();
+    if (!text) return;
+    if (value.includes(text)) {
+      setPending("");
+      return;
+    }
+    onChange([...value, text]);
+    setPending("");
+  };
+
+  const remove = (idx: number) => {
+    const next = value.slice();
+    next.splice(idx, 1);
+    onChange(next);
+  };
+
+  const move = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= value.length) return;
+    const next = value.slice();
+    const [item] = next.splice(idx, 1);
+    if (item === undefined) return;
+    next.splice(target, 0, item);
+    onChange(next);
+  };
+
+  const updateAt = (idx: number, text: string) => {
+    const next = value.slice();
+    next[idx] = text;
+    onChange(next);
+  };
+
+  return (
+    <div>
+      <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+        Billets
+      </label>
+      <p className="text-xs text-muted-foreground mb-2">
+        Roles or duty assignments you currently hold (e.g. "Squad Leader",
+        "Range Safety Officer", "S3 OIC"). Add them one at a time.
+      </p>
+      <ul className="space-y-1.5 mb-2">
+        {value.length === 0 && (
+          <li className="text-xs text-muted-foreground italic">
+            No billets yet.
+          </li>
+        )}
+        {value.map((b, idx) => (
+          <li
+            key={`${idx}-${b}`}
+            className="flex items-center gap-2 bg-background border border-border rounded-md px-2 py-1.5"
+          >
+            <input
+              type="text"
+              value={b}
+              onChange={(e) => updateAt(idx, e.target.value)}
+              onBlur={(e) => {
+                const trimmed = e.target.value.trim();
+                if (!trimmed) {
+                  remove(idx);
+                } else if (trimmed !== b) {
+                  updateAt(idx, trimmed);
+                }
+              }}
+              className="flex-1 bg-transparent text-sm focus:outline-none"
+              aria-label={`Billet ${idx + 1}`}
+            />
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => move(idx, -1)}
+                disabled={idx === 0}
+                aria-label={`Move billet ${idx + 1} up`}
+                className="px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => move(idx, 1)}
+                disabled={idx === value.length - 1}
+                aria-label={`Move billet ${idx + 1} down`}
+                className="px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(idx)}
+                aria-label={`Remove billet ${idx + 1}`}
+                className="px-2 py-0.5 text-xs text-destructive hover:bg-destructive/10 rounded"
+              >
+                Remove
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={pending}
+          onChange={(e) => setPending(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="Add a billet and press Enter…"
+          className="flex-1 px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={!pending.trim()}
+          className="px-3 py-2 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-sm font-medium disabled:opacity-40"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ExportMenu({
   onExport,
 }: {
@@ -1350,7 +1493,17 @@ function profileToMarkdown(p: UserProfile): string {
   lines.push("");
   lines.push(`- **Duty title:** ${dash(p.dutyTitle)}`);
   lines.push(`- **Unit:** ${dash(p.unit)}`);
+  lines.push(`- **Command:** ${dash(p.command)}`);
   lines.push(`- **Base / location:** ${dash(p.baseLocation)}`);
+  lines.push("");
+
+  lines.push("## Billets");
+  lines.push("");
+  if (!p.billets || p.billets.length === 0) {
+    lines.push("—");
+  } else {
+    for (const b of p.billets) lines.push(`- ${b}`);
+  }
   lines.push("");
 
   lines.push("## Readiness & security");
@@ -1361,22 +1514,9 @@ function profileToMarkdown(p: UserProfile): string {
 
   lines.push("## Narrative");
   lines.push("");
-  lines.push("### Primary mission");
-  lines.push("");
-  lines.push(block(p.primaryMission));
-  lines.push("");
   lines.push("### Narrative context");
   lines.push("");
   lines.push(block(p.freeFormContext));
-  lines.push("");
-
-  lines.push("## AI use cases");
-  lines.push("");
-  if (!p.aiUseCases || p.aiUseCases.length === 0) {
-    lines.push("—");
-  } else {
-    for (const uc of p.aiUseCases) lines.push(`- ${uc}`);
-  }
   lines.push("");
 
   return lines.join("\n");
@@ -1389,11 +1529,11 @@ function profileToDraft(p: UserProfile): ProfileUpdate {
     mosCode: p.mosCode,
     dutyTitle: p.dutyTitle,
     unit: p.unit,
+    command: p.command,
+    billets: p.billets,
     baseLocation: p.baseLocation,
     securityClearance: p.securityClearance,
     deploymentStatus: p.deploymentStatus,
-    primaryMission: p.primaryMission,
-    aiUseCases: p.aiUseCases,
     freeFormContext: p.freeFormContext,
     launchPreference: p.launchPreference,
   };

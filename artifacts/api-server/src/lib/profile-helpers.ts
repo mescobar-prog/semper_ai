@@ -4,11 +4,14 @@ import {
   profilesTable,
   presetsTable,
   presetDocumentsTable,
+  contextBlocksTable,
   type Preset,
   type PresetProfileSnapshot,
   type Profile,
+  type ContextBlock,
   type ContextBlockScores,
 } from "@workspace/db";
+import { findCommand } from "@workspace/mil-data";
 
 const BRANCH_LABEL: Record<string, string> = {
   army: "U.S. Army",
@@ -33,7 +36,10 @@ const DEPLOYMENT_LABEL: Record<string, string> = {
   transitioning: "Transitioning",
 };
 
-const TRACKED_FIELDS: Array<keyof Profile> = [
+// Identity / persistent profile fields tracked for completeness. The 6-element
+// Context Block lives in its own table and contributes to completeness via the
+// helper below.
+const TRACKED_PROFILE_FIELDS: Array<keyof Profile> = [
   "branch",
   "rank",
   "mosCode",
@@ -42,17 +48,9 @@ const TRACKED_FIELDS: Array<keyof Profile> = [
   "baseLocation",
   "securityClearance",
   "deploymentStatus",
-  "primaryMission",
-  "aiUseCases",
+  "command",
+  "billets",
   "freeFormContext",
-  // The 6-element Context Block also counts toward profile completeness:
-  // operators are not "done" until they have a confirmed block.
-  "cbDoctrine",
-  "cbIntent",
-  "cbEnvironment",
-  "cbConstraints",
-  "cbRisk",
-  "cbExperience",
 ];
 
 const SNAPSHOT_TRACKED_FIELDS: Array<keyof PresetProfileSnapshot> = [
@@ -64,23 +62,44 @@ const SNAPSHOT_TRACKED_FIELDS: Array<keyof PresetProfileSnapshot> = [
   "baseLocation",
   "securityClearance",
   "deploymentStatus",
-  "primaryMission",
-  "aiUseCases",
+  "command",
+  "billets",
   "freeFormContext",
 ];
 
-export function completenessPct(profile: Profile | null): number {
-  if (!profile) return 0;
+const TRACKED_CB_FIELDS: Array<keyof ContextBlock> = [
+  "doctrine",
+  "intent",
+  "environment",
+  "constraints",
+  "risk",
+  "experience",
+];
+
+export function completenessPct(
+  profile: Profile | null,
+  contextBlock: ContextBlock | null,
+): number {
+  const total = TRACKED_PROFILE_FIELDS.length + TRACKED_CB_FIELDS.length;
+  if (!profile && !contextBlock) return 0;
   let filled = 0;
-  for (const f of TRACKED_FIELDS) {
-    const v = profile[f];
-    if (Array.isArray(v)) {
-      if (v.length > 0) filled++;
-    } else if (typeof v === "string") {
-      if (v.trim()) filled++;
+  if (profile) {
+    for (const f of TRACKED_PROFILE_FIELDS) {
+      const v = profile[f];
+      if (Array.isArray(v)) {
+        if (v.length > 0) filled++;
+      } else if (typeof v === "string") {
+        if (v.trim()) filled++;
+      }
     }
   }
-  return Math.round((filled / TRACKED_FIELDS.length) * 100);
+  if (contextBlock) {
+    for (const f of TRACKED_CB_FIELDS) {
+      const v = contextBlock[f];
+      if (typeof v === "string" && v.trim()) filled++;
+    }
+  }
+  return Math.round((filled / total) * 100);
 }
 
 export function completenessPctFromSnapshot(
@@ -108,7 +127,24 @@ export async function getOrCreateProfile(userId: string): Promise<Profile> {
 
   const [created] = await db
     .insert(profilesTable)
-    .values({ userId, aiUseCases: [] })
+    .values({ userId, billets: [] })
+    .returning();
+  return created;
+}
+
+export async function getOrCreateContextBlock(
+  userId: string,
+): Promise<ContextBlock> {
+  const existing = await db
+    .select()
+    .from(contextBlocksTable)
+    .where(eq(contextBlocksTable.userId, userId))
+    .limit(1);
+  if (existing[0]) return existing[0];
+
+  const [created] = await db
+    .insert(contextBlocksTable)
+    .values({ userId })
     .returning();
   return created;
 }
@@ -134,41 +170,53 @@ export interface SerializedContextBlockEvaluation {
 }
 
 export function serializeContextBlock(
-  profile: Profile,
+  cb: ContextBlock | null,
 ): SerializedContextBlockState {
+  if (!cb) {
+    return {
+      doctrine: null,
+      intent: null,
+      environment: null,
+      constraints: null,
+      risk: null,
+      experience: null,
+      confirmedAt: null,
+      lastEvaluation: null,
+    };
+  }
   const lastEvaluation: SerializedContextBlockEvaluation | null =
-    profile.cbScoreTotal != null && profile.cbScores && profile.cbStatus
+    cb.scoreTotal != null && cb.scores && cb.status
       ? {
-          submissionId: profile.cbSubmissionId ?? "",
-          scores: profile.cbScores,
-          totalScore: profile.cbScoreTotal,
-          status: profile.cbStatus,
-          opsecFlag: profile.cbOpsecFlag === "true",
-          flags: profile.cbFlags ?? "None",
+          submissionId: cb.submissionId ?? "",
+          scores: cb.scores,
+          totalScore: cb.scoreTotal,
+          status: cb.status,
+          opsecFlag: cb.opsecFlag === "true",
+          flags: cb.flags ?? "None",
         }
       : null;
   return {
-    doctrine: profile.cbDoctrine,
-    intent: profile.cbIntent,
-    environment: profile.cbEnvironment,
-    constraints: profile.cbConstraints,
-    risk: profile.cbRisk,
-    experience: profile.cbExperience,
-    confirmedAt: profile.cbConfirmedAt ? profile.cbConfirmedAt.toISOString() : null,
+    doctrine: cb.doctrine,
+    intent: cb.intent,
+    environment: cb.environment,
+    constraints: cb.constraints,
+    risk: cb.risk,
+    experience: cb.experience,
+    confirmedAt: cb.confirmedAt ? cb.confirmedAt.toISOString() : null,
     lastEvaluation,
   };
 }
 
-export function hasConfirmedContextBlock(profile: Profile | null): boolean {
-  if (!profile || !profile.cbConfirmedAt) return false;
+export function hasConfirmedContextBlock(cb: ContextBlock | null): boolean {
+  if (!cb || !cb.confirmedAt) return false;
   // All 6 elements must have been filled at confirm time.
   return [
-    profile.cbDoctrine,
-    profile.cbIntent,
-    profile.cbEnvironment,
-    profile.cbConstraints,
-    profile.cbRisk,
-    profile.cbExperience,
+    cb.doctrine,
+    cb.intent,
+    cb.environment,
+    cb.constraints,
+    cb.risk,
+    cb.experience,
   ].every((v) => typeof v === "string" && v.trim().length > 0);
 }
 
@@ -176,11 +224,14 @@ export function hasConfirmedContextBlock(profile: Profile | null): boolean {
  * Build a tool-friendly Markdown context block for a launching user. Tool
  * builders can drop this string directly into their model prompt without
  * re-parsing the structured profile JSON. Sections that have no data are
- * omitted so the block stays tight.
+ * omitted so the block stays tight. The Markdown sources from BOTH the
+ * persistent profile (identity, billets, command, …) and the latest
+ * context_block row (the 6 elements + evaluation).
  */
 export function buildContextBlock(
   user: { displayName: string; email: string | null },
   profile: Profile | null,
+  contextBlock: ContextBlock | null,
 ): string {
   const lines: string[] = [];
   lines.push(`# Operator context for ${user.displayName}`);
@@ -196,6 +247,15 @@ export function buildContextBlock(
   if (profile?.mosCode) identity.push(`- MOS/Rate/AFSC: ${profile.mosCode}`);
   if (profile?.dutyTitle) identity.push(`- Duty title: ${profile.dutyTitle}`);
   if (profile?.unit) identity.push(`- Unit: ${profile.unit}`);
+  if (profile?.command) {
+    const cmd = findCommand(profile.command);
+    identity.push(
+      `- Command: ${cmd ? `${cmd.code} (${cmd.name})` : profile.command}`,
+    );
+  }
+  if (profile?.billets && profile.billets.length > 0) {
+    identity.push(`- Billets: ${profile.billets.join("; ")}`);
+  }
   if (profile?.baseLocation)
     identity.push(`- Base/location: ${profile.baseLocation}`);
   if (identity.length > 0) {
@@ -227,20 +287,6 @@ export function buildContextBlock(
     appendedSection = true;
   }
 
-  if (profile?.primaryMission) {
-    lines.push("## Primary mission");
-    lines.push(profile.primaryMission.trim());
-    lines.push("");
-    appendedSection = true;
-  }
-
-  if (profile?.aiUseCases && profile.aiUseCases.length > 0) {
-    lines.push("## What they want AI help with");
-    for (const uc of profile.aiUseCases) lines.push(`- ${uc}`);
-    lines.push("");
-    appendedSection = true;
-  }
-
   if (profile?.freeFormContext && profile.freeFormContext.trim()) {
     lines.push("## Additional context");
     lines.push(profile.freeFormContext.trim());
@@ -251,32 +297,32 @@ export function buildContextBlock(
   // 6-element Context Block (verification gate). Only render when the
   // operator has actually confirmed one. Otherwise drop a one-line note so
   // tool builders know the gate has not been cleared yet.
-  if (hasConfirmedContextBlock(profile)) {
-    const score = profile!.cbScoreTotal;
-    const status = profile!.cbStatus;
-    const confirmedAt = profile!.cbConfirmedAt!.toISOString();
+  if (hasConfirmedContextBlock(contextBlock)) {
+    const score = contextBlock!.scoreTotal;
+    const status = contextBlock!.status;
+    const confirmedAt = contextBlock!.confirmedAt!.toISOString();
     lines.push("## Context Block");
     lines.push(
       `_Confirmed ${confirmedAt} · evaluator score ${score ?? "?"} /12 · status ${status ?? "?"}_`,
     );
     lines.push("");
     lines.push("### 1. Doctrine & Orders");
-    lines.push(profile!.cbDoctrine!.trim());
+    lines.push(contextBlock!.doctrine!.trim());
     lines.push("");
     lines.push("### 2. Commander's Intent");
-    lines.push(profile!.cbIntent!.trim());
+    lines.push(contextBlock!.intent!.trim());
     lines.push("");
     lines.push("### 3. Environment");
-    lines.push(profile!.cbEnvironment!.trim());
+    lines.push(contextBlock!.environment!.trim());
     lines.push("");
     lines.push("### 4. Constraints & Limitations");
-    lines.push(profile!.cbConstraints!.trim());
+    lines.push(contextBlock!.constraints!.trim());
     lines.push("");
     lines.push("### 5. Risk");
-    lines.push(profile!.cbRisk!.trim());
+    lines.push(contextBlock!.risk!.trim());
     lines.push("");
     lines.push("### 6. Experience & Judgment");
-    lines.push(profile!.cbExperience!.trim());
+    lines.push(contextBlock!.experience!.trim());
     lines.push("");
     appendedSection = true;
   } else {
@@ -307,8 +353,8 @@ export function snapshotFromProfile(profile: Profile): PresetProfileSnapshot {
     baseLocation: profile.baseLocation ?? null,
     securityClearance: profile.securityClearance ?? null,
     deploymentStatus: profile.deploymentStatus ?? null,
-    primaryMission: profile.primaryMission ?? null,
-    aiUseCases: Array.isArray(profile.aiUseCases) ? profile.aiUseCases : [],
+    command: profile.command ?? null,
+    billets: Array.isArray(profile.billets) ? profile.billets : [],
     freeFormContext: profile.freeFormContext ?? null,
   };
 }
@@ -323,18 +369,18 @@ export function emptySnapshot(): PresetProfileSnapshot {
     baseLocation: null,
     securityClearance: null,
     deploymentStatus: null,
-    primaryMission: null,
-    aiUseCases: [],
+    command: null,
+    billets: [],
     freeFormContext: null,
   };
 }
 
 /**
- * Build a "Profile-shaped" object whose identity/mission fields come from a
- * preset snapshot, while the cb_* / Context Block fields and other live-only
- * fields fall back to the live profile. Used by launch flows where the
- * preset's snapshot drives identity but the user's confirmed Context Block
- * is still a property of the live profile.
+ * Build a "Profile-shaped" object whose identity fields come from a preset
+ * snapshot, while live-only fields (activePresetId, isAdmin, updatedAt)
+ * fall back to the live profile. Used by launch flows where the preset's
+ * snapshot drives identity but the user's confirmed Context Block lives in
+ * its own table.
  */
 export function snapshotAsProfile(
   snap: PresetProfileSnapshot,
@@ -350,14 +396,15 @@ export function snapshotAsProfile(
     baseLocation: snap.baseLocation,
     securityClearance: snap.securityClearance,
     deploymentStatus: snap.deploymentStatus,
-    primaryMission: snap.primaryMission,
-    aiUseCases: snap.aiUseCases ?? [],
+    command: snap.command,
+    billets: snap.billets ?? [],
     freeFormContext: snap.freeFormContext,
   };
 }
 
 export function serializeProfile(
   profile: Profile,
+  contextBlock: ContextBlock | null,
   activePresetId: string | null = null,
 ) {
   return {
@@ -370,15 +417,14 @@ export function serializeProfile(
     baseLocation: profile.baseLocation,
     securityClearance: profile.securityClearance,
     deploymentStatus: profile.deploymentStatus,
-    primaryMission: profile.primaryMission,
-    aiUseCases: profile.aiUseCases ?? [],
+    command: profile.command,
+    billets: profile.billets ?? [],
     freeFormContext: profile.freeFormContext,
     isAdmin: profile.isAdmin === "true",
     activePresetId: activePresetId ?? profile.activePresetId ?? null,
     launchPreference:
       profile.launchPreference === "direct" ? "direct" : "preview",
-    completenessPct: completenessPct(profile),
-    contextBlock: serializeContextBlock(profile),
+    completenessPct: completenessPct(profile, contextBlock),
     updatedAt: profile.updatedAt.toISOString(),
   };
 }
@@ -523,8 +569,8 @@ export const SHAREABLE_PROFILE_FIELDS: Array<{
   { key: "baseLocation", label: "Base / location" },
   { key: "securityClearance", label: "Security clearance" },
   { key: "deploymentStatus", label: "Deployment status" },
-  { key: "primaryMission", label: "Primary mission" },
-  { key: "aiUseCases", label: "AI use cases" },
+  { key: "command", label: "Combatant command" },
+  { key: "billets", label: "Billets" },
   { key: "freeFormContext", label: "Free-form context" },
 ];
 
@@ -544,7 +590,7 @@ export function profileFieldDisplayValue(
 }
 
 // Build a Profile-shaped object containing only the allow-listed field keys;
-// every other shareable field is set to null (or [] for aiUseCases) so the
+// every other shareable field is set to null (or [] for billets) so the
 // receiving tool sees a stable shape with explicit "redacted" markers.
 export function redactProfileForLaunch(
   profile: Profile,
@@ -554,7 +600,7 @@ export function redactProfileForLaunch(
   const out: Profile = { ...profile };
   for (const { key } of SHAREABLE_PROFILE_FIELDS) {
     if (allowed.has(key as string)) continue;
-    if (key === "aiUseCases") {
+    if (key === "billets") {
       (out as Record<string, unknown>)[key] = [];
     } else {
       (out as Record<string, unknown>)[key] = null;

@@ -260,21 +260,23 @@ function ContextEchoPage() {
             <Field label="MOS / Rate / AFSC" value={profile.mosCode} />
             <Field label="Duty title" value={profile.dutyTitle} />
             <Field label="Unit" value={profile.unit} />
+            <Field label="Command" value={profile.command} />
             <Field label="Base / location" value={profile.baseLocation} />
             <Field label="Clearance" value={profile.securityClearance} />
             <Field label="Deployment status" value={profile.deploymentStatus} />
-            <Field
-              label="AI use cases"
-              value={
-                profile.aiUseCases.length
-                  ? profile.aiUseCases.join(", ")
-                  : null
-              }
-            />
           </div>
-          {profile.primaryMission && (
+          {profile.billets.length > 0 && (
             <div className="mt-6">
-              <Field label="Primary mission" value={profile.primaryMission} />
+              <Field
+                label="Billets"
+                value={
+                  <ul className="list-disc list-inside text-slate-200 space-y-0.5">
+                    {profile.billets.map((b) => (
+                      <li key={b}>{b}</li>
+                    ))}
+                  </ul>
+                }
+              />
             </div>
           )}
           {profile.freeFormContext && (

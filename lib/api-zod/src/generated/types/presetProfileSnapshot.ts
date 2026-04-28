@@ -23,9 +23,14 @@ export interface PresetProfileSnapshot {
   securityClearance: string | null;
   /** @nullable */
   deploymentStatus: string | null;
-  /** @nullable */
-  primaryMission: string | null;
-  aiUseCases: string[];
+  /**
+   * Combatant command code (e.g. USINDOPACOM, USCYBERCOM, OTHER).
+
+   * @nullable
+   */
+  command: string | null;
+  /** Billet titles the operator currently holds. */
+  billets: string[];
   /** @nullable */
   freeFormContext: string | null;
 }

@@ -82,6 +82,7 @@ export * from "./presetDeleteResponse";
 export * from "./presetProfileSnapshot";
 export * from "./profileChatRequest";
 export * from "./profileChatResponse";
+export * from "./profileEnvelope";
 export * from "./profileUpdate";
 export * from "./profileUpdateLaunchPreference";
 export * from "./ragPrimer";
