@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ToolUpsertHostingType } from "./toolUpsertHostingType";
 
 export interface ToolUpsert {
   /** @minLength 1 */
@@ -36,4 +37,33 @@ export interface ToolUpsert {
   /** @nullable */
   logoUrl?: string | null;
   isActive: boolean;
+  hostingType: ToolUpsertHostingType;
+  /** @nullable */
+  installerUrl?: string | null;
+  /** @nullable */
+  installerObjectKey?: string | null;
+  /** @nullable */
+  installerFilename?: string | null;
+  /** @nullable */
+  installerSizeBytes?: number | null;
+  /** @nullable */
+  installerPlatform?: string | null;
+  /** @nullable */
+  installInstructions?: string | null;
+  /** @nullable */
+  localLaunchUrlPattern?: string | null;
+  /** @nullable */
+  gitRepoOwner?: string | null;
+  /** @nullable */
+  gitRepoName?: string | null;
+  /** @nullable */
+  gitDefaultBranch?: string | null;
+  /** @nullable */
+  gitLatestReleaseTag?: string | null;
+  /** @nullable */
+  gitLatestCommitSha?: string | null;
+  /** @nullable */
+  gitLicenseSpdx?: string | null;
+  /** @nullable */
+  gitStars?: number | null;
 }

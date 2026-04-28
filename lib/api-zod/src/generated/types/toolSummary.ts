@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ToolSummaryHostingType } from "./toolSummaryHostingType";
 
 export interface ToolSummary {
   id: string;
@@ -31,4 +32,5 @@ export interface ToolSummary {
   avgRating: number | null;
   /** Number of visible reviews. */
   reviewCount: number;
+  hostingType: ToolSummaryHostingType;
 }

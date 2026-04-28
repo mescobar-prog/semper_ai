@@ -17,7 +17,9 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AdminGetGithubRepoMetadataParams,
   AdminHideReviewRequest,
+  AdminListGithubReposParams,
   AdminListReviewsParams,
   AdminReviewListResponse,
   AdminToolReview,
@@ -40,10 +42,16 @@ import type {
   DocumentDetail,
   DocumentPresetTagsUpdate,
   DocumentSummary,
+  DraftToolTextRequest,
+  DraftToolTextResult,
   ErrorEnvelope,
   GetAutoIngestStatusParams,
+  GithubRepoMetadata,
+  GithubRepoSummary,
   HandleBrowserLoginCallbackParams,
   HealthStatus,
+  InstallerUploadUrlRequest,
+  InstallerUploadUrlResponse,
   LaunchHistoryItem,
   LaunchInitiateResponse,
   LaunchPreviewResponse,
@@ -4365,6 +4373,478 @@ export const useDeleteTool = <
   TContext
 > => {
   return useMutation(getDeleteToolMutationOptions(options));
+};
+
+/**
+ * @summary Re-pull README/release/license/stars from the linked GitHub repo
+ */
+export const getSyncToolFromGithubUrl = (id: string) => {
+  return `/api/admin/tools/${id}/sync-github`;
+};
+
+export const syncToolFromGithub = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ToolDetail> => {
+  return customFetch<ToolDetail>(getSyncToolFromGithubUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getSyncToolFromGithubMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncToolFromGithub>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof syncToolFromGithub>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["syncToolFromGithub"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof syncToolFromGithub>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return syncToolFromGithub(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SyncToolFromGithubMutationResult = NonNullable<
+  Awaited<ReturnType<typeof syncToolFromGithub>>
+>;
+
+export type SyncToolFromGithubMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Re-pull README/release/license/stars from the linked GitHub repo
+ */
+export const useSyncToolFromGithub = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncToolFromGithub>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof syncToolFromGithub>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getSyncToolFromGithubMutationOptions(options));
+};
+
+/**
+ * @summary List repos visible to the connected admin GitHub account
+ */
+export const getAdminListGithubReposUrl = (
+  params?: AdminListGithubReposParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/github/repos?${stringifiedParams}`
+    : `/api/admin/github/repos`;
+};
+
+export const adminListGithubRepos = async (
+  params?: AdminListGithubReposParams,
+  options?: RequestInit,
+): Promise<GithubRepoSummary[]> => {
+  return customFetch<GithubRepoSummary[]>(getAdminListGithubReposUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListGithubReposQueryKey = (
+  params?: AdminListGithubReposParams,
+) => {
+  return [`/api/admin/github/repos`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListGithubReposQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListGithubRepos>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params?: AdminListGithubReposParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListGithubRepos>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListGithubReposQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListGithubRepos>>
+  > = ({ signal }) =>
+    adminListGithubRepos(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListGithubRepos>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListGithubReposQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListGithubRepos>>
+>;
+export type AdminListGithubReposQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary List repos visible to the connected admin GitHub account
+ */
+
+export function useAdminListGithubRepos<
+  TData = Awaited<ReturnType<typeof adminListGithubRepos>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params?: AdminListGithubReposParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListGithubRepos>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListGithubReposQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Pull rich metadata for a single repo (used by the create-tool flow)
+ */
+export const getAdminGetGithubRepoMetadataUrl = (
+  params: AdminGetGithubRepoMetadataParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/github/repo-metadata?${stringifiedParams}`
+    : `/api/admin/github/repo-metadata`;
+};
+
+export const adminGetGithubRepoMetadata = async (
+  params: AdminGetGithubRepoMetadataParams,
+  options?: RequestInit,
+): Promise<GithubRepoMetadata> => {
+  return customFetch<GithubRepoMetadata>(
+    getAdminGetGithubRepoMetadataUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminGetGithubRepoMetadataQueryKey = (
+  params?: AdminGetGithubRepoMetadataParams,
+) => {
+  return [
+    `/api/admin/github/repo-metadata`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getAdminGetGithubRepoMetadataQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: AdminGetGithubRepoMetadataParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminGetGithubRepoMetadataQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>
+  > = ({ signal }) =>
+    adminGetGithubRepoMetadata(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminGetGithubRepoMetadataQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>
+>;
+export type AdminGetGithubRepoMetadataQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Pull rich metadata for a single repo (used by the create-tool flow)
+ */
+
+export function useAdminGetGithubRepoMetadata<
+  TData = Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: AdminGetGithubRepoMetadataParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminGetGithubRepoMetadata>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminGetGithubRepoMetadataQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns a draft only — the admin must still click Save on the regular
+create/update endpoints to persist anything.
+
+ * @summary Generate a first-draft tool description with the LLM
+ */
+export const getDraftToolTextUrl = () => {
+  return `/api/admin/tools/draft-text`;
+};
+
+export const draftToolText = async (
+  draftToolTextRequest: DraftToolTextRequest,
+  options?: RequestInit,
+): Promise<DraftToolTextResult> => {
+  return customFetch<DraftToolTextResult>(getDraftToolTextUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(draftToolTextRequest),
+  });
+};
+
+export const getDraftToolTextMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof draftToolText>>,
+    TError,
+    { data: BodyType<DraftToolTextRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof draftToolText>>,
+  TError,
+  { data: BodyType<DraftToolTextRequest> },
+  TContext
+> => {
+  const mutationKey = ["draftToolText"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof draftToolText>>,
+    { data: BodyType<DraftToolTextRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return draftToolText(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DraftToolTextMutationResult = NonNullable<
+  Awaited<ReturnType<typeof draftToolText>>
+>;
+export type DraftToolTextMutationBody = BodyType<DraftToolTextRequest>;
+export type DraftToolTextMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Generate a first-draft tool description with the LLM
+ */
+export const useDraftToolText = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof draftToolText>>,
+    TError,
+    { data: BodyType<DraftToolTextRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof draftToolText>>,
+  TError,
+  { data: BodyType<DraftToolTextRequest> },
+  TContext
+> => {
+  return useMutation(getDraftToolTextMutationOptions(options));
+};
+
+/**
+ * @summary Mint a presigned upload URL for a tool installer file
+ */
+export const getRequestInstallerUploadUrlUrl = () => {
+  return `/api/admin/tools/installer-upload-url`;
+};
+
+export const requestInstallerUploadUrl = async (
+  installerUploadUrlRequest: InstallerUploadUrlRequest,
+  options?: RequestInit,
+): Promise<InstallerUploadUrlResponse> => {
+  return customFetch<InstallerUploadUrlResponse>(
+    getRequestInstallerUploadUrlUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(installerUploadUrlRequest),
+    },
+  );
+};
+
+export const getRequestInstallerUploadUrlMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestInstallerUploadUrl>>,
+    TError,
+    { data: BodyType<InstallerUploadUrlRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestInstallerUploadUrl>>,
+  TError,
+  { data: BodyType<InstallerUploadUrlRequest> },
+  TContext
+> => {
+  const mutationKey = ["requestInstallerUploadUrl"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestInstallerUploadUrl>>,
+    { data: BodyType<InstallerUploadUrlRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestInstallerUploadUrl(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestInstallerUploadUrlMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestInstallerUploadUrl>>
+>;
+export type RequestInstallerUploadUrlMutationBody =
+  BodyType<InstallerUploadUrlRequest>;
+export type RequestInstallerUploadUrlMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Mint a presigned upload URL for a tool installer file
+ */
+export const useRequestInstallerUploadUrl = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestInstallerUploadUrl>>,
+    TError,
+    { data: BodyType<InstallerUploadUrlRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestInstallerUploadUrl>>,
+  TError,
+  { data: BodyType<InstallerUploadUrlRequest> },
+  TContext
+> => {
+  return useMutation(getRequestInstallerUploadUrlMutationOptions(options));
 };
 
 /**

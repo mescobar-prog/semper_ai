@@ -379,6 +379,122 @@ export interface RagToolDescriptor {
   ragQueryTemplates?: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Admin tool-builder draft helper
+// ---------------------------------------------------------------------------
+
+export type DraftField =
+  | "shortDescription"
+  | "longDescription"
+  | "purpose"
+  | "ragQueryTemplates";
+
+export interface DraftSourceMaterial {
+  name?: string | null;
+  vendor?: string | null;
+  homepageUrl?: string | null;
+  githubReadme?: string | null;
+  existingText?: string | null;
+}
+
+export interface DraftToolTextResult {
+  field: DraftField;
+  text: string | null;
+  list: string[] | null;
+}
+
+const DRAFT_INSTRUCTIONS: Record<DraftField, string> = {
+  shortDescription:
+    "Write a single concise sentence (max 160 characters) that a service member skimming the catalog will read. Lead with the concrete capability, not buzzwords. No marketing fluff. No emoji. Plain text only.",
+  longDescription:
+    "Write 2–4 short paragraphs (under 200 words total) describing what the tool does, who it's for, and the kinds of inputs and outputs a service member should expect. Be specific. Avoid lists. Plain prose.",
+  purpose:
+    "Write ONE sentence describing what the tool actually does WITH the user's profile + RAG context. This sentence is fed to a query generator that pulls relevant snippets from the user's library — make it operationally specific (e.g. 'Drafts pre-mission ISR collection plans grounded in unit SOPs and current mission'). Plain text, single sentence.",
+  ragQueryTemplates:
+    'Output a JSON array of 3–5 short search-query templates (2–6 words each) that this tool would want from the user\'s personal doctrine library. Use {curlies} placeholders for profile fields available: {primaryMission}, {dutyTitle}, {mosCode}, {unit}, {branch}, {rank}, {baseLocation}. Example: ["{dutyTitle} SOPs", "{primaryMission} planning", "{mosCode} doctrine"]. Output ONLY the JSON array, no prose.',
+};
+
+function trimSource(s: string | null | undefined, max: number): string {
+  if (!s) return "";
+  const trimmed = s.trim();
+  if (trimmed.length <= max) return trimmed;
+  return trimmed.slice(0, max) + "\n…(truncated)";
+}
+
+export async function draftToolText(
+  field: DraftField,
+  source: DraftSourceMaterial,
+): Promise<DraftToolTextResult> {
+  const sourceLines: string[] = [];
+  if (source.name) sourceLines.push(`Name: ${source.name}`);
+  if (source.vendor) sourceLines.push(`Vendor: ${source.vendor}`);
+  if (source.homepageUrl) sourceLines.push(`Homepage: ${source.homepageUrl}`);
+  if (source.existingText)
+    sourceLines.push(
+      `Admin's existing draft (refine or rewrite):\n${trimSource(source.existingText, 2000)}`,
+    );
+  if (source.githubReadme)
+    sourceLines.push(
+      `GitHub README (markdown):\n${trimSource(source.githubReadme, 6000)}`,
+    );
+  if (sourceLines.length === 0) {
+    sourceLines.push("(no source material provided — draft from the field name alone)");
+  }
+
+  const systemPrompt = `You are helping a marketplace admin draft catalog copy for a DoD AI tool.
+Output rules:
+- Be factual. Do not invent capabilities the source material doesn't support.
+- Use plain text. No markdown headings, no emoji, no marketing superlatives.
+- ${DRAFT_INSTRUCTIONS[field]}`;
+
+  const userPrompt = `Field: ${field}\n\nSource material:\n${sourceLines.join("\n\n")}`;
+
+  let raw = "";
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: 4096,
+      },
+    });
+    raw = (response.text ?? "").trim();
+  } catch (err) {
+    logger.warn({ err, field }, "draftToolText generation failed");
+    return { field, text: null, list: null };
+  }
+
+  if (field === "ragQueryTemplates") {
+    const cleaned = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) {
+        const list = parsed
+          .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+          .map((q) => q.trim())
+          .slice(0, 8);
+        return { field, text: null, list };
+      }
+    } catch (err) {
+      logger.warn({ err, raw }, "Failed to parse ragQueryTemplates JSON; falling back to line split");
+    }
+    // Fallback: best-effort split lines
+    const lines = cleaned
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[-*\d.\s]+/, "").trim())
+      .filter((l) => l.length > 0)
+      .slice(0, 8);
+    return { field, text: null, list: lines };
+  }
+
+  return { field, text: raw, list: null };
+}
+
 export async function generateRagQueries(
   profile: Profile | null,
   toolDesc: RagToolDescriptor,

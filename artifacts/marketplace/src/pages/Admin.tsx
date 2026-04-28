@@ -12,8 +12,14 @@ import {
   useAdminListReviews,
   useAdminHideReview,
   useAdminUnhideReview,
+  useAdminListGithubRepos,
+  useDraftToolText,
+  useSyncToolFromGithub,
+  useRequestInstallerUploadUrl,
+  adminGetGithubRepoMetadata,
   getAdminListToolsQueryKey,
   getListToolsQueryKey,
+  getAdminListGithubReposQueryKey,
   getAdminListSubmissionsQueryKey,
   getListMySubmissionsQueryKey,
   getAdminListReviewsQueryKey,
@@ -23,6 +29,8 @@ import type {
   ToolDetail,
   SubmissionDetail,
   AdminToolReview,
+  GithubRepoMetadata,
+  GithubRepoSummary,
 } from "@workspace/api-client-react";
 import {
   PageContainer,
@@ -60,7 +68,23 @@ const EMPTY_TOOL: ToolUpsert = {
   homepageUrl: null,
   launchUrl: "/context-echo/",
   documentationUrl: null,
+  logoUrl: null,
   isActive: true,
+  hostingType: "cloud",
+  installerUrl: null,
+  installerObjectKey: null,
+  installerFilename: null,
+  installerSizeBytes: null,
+  installerPlatform: null,
+  installInstructions: null,
+  localLaunchUrlPattern: null,
+  gitRepoOwner: null,
+  gitRepoName: null,
+  gitDefaultBranch: null,
+  gitLatestReleaseTag: null,
+  gitLatestCommitSha: null,
+  gitLicenseSpdx: null,
+  gitStars: null,
 };
 
 export function Admin() {
@@ -621,7 +645,23 @@ function CatalogManagement() {
         homepageUrl: t.homepageUrl,
         launchUrl: t.launchUrl,
         documentationUrl: t.documentationUrl,
+        logoUrl: t.logoUrl,
         isActive: t.isActive,
+        hostingType: t.hostingType ?? "cloud",
+        installerUrl: t.installerUrl,
+        installerObjectKey: t.installerObjectKey,
+        installerFilename: t.installerFilename,
+        installerSizeBytes: t.installerSizeBytes,
+        installerPlatform: t.installerPlatform,
+        installInstructions: t.installInstructions,
+        localLaunchUrlPattern: t.localLaunchUrlPattern,
+        gitRepoOwner: t.gitRepoOwner,
+        gitRepoName: t.gitRepoName,
+        gitDefaultBranch: t.gitDefaultBranch,
+        gitLatestReleaseTag: t.gitLatestReleaseTag,
+        gitLatestCommitSha: t.gitLatestCommitSha,
+        gitLicenseSpdx: t.gitLicenseSpdx,
+        gitStars: t.gitStars,
       },
     });
   };
@@ -647,6 +687,7 @@ function CatalogManagement() {
         <ToolForm
           data={editing.data}
           mode={editing.mode}
+          editingId={editing.mode === "edit" ? editing.id : null}
           categories={categories ?? []}
           onChange={(data) =>
             setEditing(editing ? { ...editing, data } : null)
@@ -658,6 +699,25 @@ function CatalogManagement() {
           onSubmit={onSubmit}
           submitting={createMutation.isPending || updateMutation.isPending}
           formError={formError}
+          onSynced={(t) => {
+            // After a GitHub re-sync the server returns the canonical tool;
+            // hydrate the form so admin sees the refreshed metadata before
+            // saving (saving is still required to round-trip everything).
+            setEditing({
+              mode: "edit",
+              id: t.id,
+              data: {
+                ...editing.data,
+                gitDefaultBranch: t.gitDefaultBranch,
+                gitLatestReleaseTag: t.gitLatestReleaseTag,
+                gitLatestCommitSha: t.gitLatestCommitSha,
+                gitLicenseSpdx: t.gitLicenseSpdx,
+                gitStars: t.gitStars,
+                homepageUrl: t.homepageUrl,
+              },
+            });
+            invalidate();
+          }}
         />
       )}
 
@@ -746,29 +806,30 @@ function CatalogManagement() {
 function ToolForm({
   data,
   mode,
+  editingId,
   categories,
   onChange,
   onCancel,
   onSubmit,
   submitting,
   formError,
+  onSynced,
 }: {
   data: ToolUpsert;
   mode: "create" | "edit";
+  editingId: string | null;
   categories: Array<{ id: string; name: string }>;
   onChange: (next: ToolUpsert) => void;
   onCancel: () => void;
   onSubmit: (e: React.FormEvent) => void;
   submitting: boolean;
   formError: string | null;
+  onSynced: (tool: ToolDetail) => void;
 }) {
   const set = <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) =>
     onChange({ ...data, [key]: value });
 
-  const toggleArr = (
-    key: "impactLevels" | "badges",
-    value: string,
-  ) => {
+  const toggleArr = (key: "impactLevels" | "badges", value: string) => {
     const arr = data[key] || [];
     onChange({
       ...data,
@@ -778,135 +839,556 @@ function ToolForm({
     });
   };
 
+  // README is fetched once when the admin imports a repo and kept in local
+  // state (not on the tool record) so it can be reused across the per-field
+  // AI drafts without storing the entire markdown blob in the DB.
+  const [importedReadme, setImportedReadme] = useState<string | null>(null);
+
   return (
     <form
       onSubmit={onSubmit}
-      className="bg-card border border-primary/30 rounded-md p-5 mb-6 space-y-4"
+      className="bg-card border border-primary/30 rounded-md p-5 mb-6 space-y-6"
     >
-      <div className="text-[10px] uppercase tracking-wider text-primary font-mono font-semibold">
-        {mode === "create" ? "Add new tool" : "Edit tool"}
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-primary font-mono font-semibold">
+          {mode === "create" ? "Add new tool" : "Edit tool"}
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+          {data.hostingType === "local_install" ? "Runs locally" : "Cloud-hosted"}
+        </div>
       </div>
-      <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Name">
+
+      {/* ─── Source ────────────────────────────────────────────────────── */}
+      <Section title="1. Source" subtitle="Optionally seed the tool from a GitHub repo. Skip to fill in manually.">
+        <SourceSection
+          data={data}
+          onChange={onChange}
+          editingId={editingId}
+          onReadmeFetched={setImportedReadme}
+          onSynced={onSynced}
+        />
+      </Section>
+
+      {/* ─── Metadata ──────────────────────────────────────────────────── */}
+      <Section title="2. Metadata">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Name">
+            <input
+              required
+              value={data.name}
+              onChange={(e) => set("name", e.target.value)}
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Slug">
+            <input
+              required
+              value={data.slug}
+              onChange={(e) => set("slug", e.target.value)}
+              placeholder="kebab-case-id"
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Vendor">
+            <input
+              required
+              value={data.vendor}
+              onChange={(e) => set("vendor", e.target.value)}
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Category">
+            <select
+              value={data.categoryId ?? ""}
+              onChange={(e) => set("categoryId", e.target.value || null)}
+              className={inputCls}
+            >
+              <option value="">— uncategorized —</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="ATO status">
+            <select
+              value={data.atoStatus}
+              onChange={(e) => set("atoStatus", e.target.value)}
+              className={inputCls}
+            >
+              {ATO_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Data classification">
+            <select
+              value={data.dataClassification}
+              onChange={(e) => set("dataClassification", e.target.value)}
+              className={inputCls}
+            >
+              {DATA_CLASS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Version (optional)">
+            <input
+              value={data.version ?? ""}
+              onChange={(e) => set("version", e.target.value || null)}
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Homepage URL">
+            <input
+              value={data.homepageUrl ?? ""}
+              onChange={(e) => set("homepageUrl", e.target.value || null)}
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Documentation URL">
+            <input
+              value={data.documentationUrl ?? ""}
+              onChange={(e) =>
+                set("documentationUrl", e.target.value || null)
+              }
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Logo URL">
+            <input
+              value={data.logoUrl ?? ""}
+              onChange={(e) => set("logoUrl", e.target.value || null)}
+              className={inputCls}
+            />
+          </Field>
+        </div>
+        <Field label="Impact levels">
+          <div className="flex gap-2 flex-wrap">
+            {IMPACT_LEVELS.map((il) => {
+              const active = (data.impactLevels || []).includes(il);
+              return (
+                <button
+                  type="button"
+                  key={il}
+                  onClick={() => toggleArr("impactLevels", il)}
+                  className={`px-2 py-1 rounded border text-[11px] font-mono uppercase tracking-wider ${
+                    active
+                      ? "bg-primary/20 text-primary border-primary/50"
+                      : "bg-background text-muted-foreground border-border hover:border-primary/30"
+                  }`}
+                >
+                  {il}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="Badges (comma-separated)">
           <input
-            required
-            value={data.name}
-            onChange={(e) => set("name", e.target.value)}
+            value={(data.badges || []).join(", ")}
+            onChange={(e) =>
+              set(
+                "badges",
+                e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              )
+            }
+            placeholder="GovCloud, FedRAMP High"
             className={inputCls}
           />
         </Field>
-        <Field label="Slug">
+        <DescriptionFields
+          data={data}
+          set={set}
+          importedReadme={importedReadme}
+        />
+      </Section>
+
+      {/* ─── Hosting ───────────────────────────────────────────────────── */}
+      <Section
+        title="3. Hosting"
+        subtitle="How end users actually run this tool."
+      >
+        <HostingSection data={data} set={set} />
+      </Section>
+
+      {/* ─── Context & RAG ─────────────────────────────────────────────── */}
+      <Section
+        title="4. Context & RAG"
+        subtitle="Used to fetch relevant snippets from the operator's personal library at launch."
+      >
+        <ContextSection
+          data={data}
+          set={set}
+          importedReadme={importedReadme}
+        />
+      </Section>
+
+      {/* ─── Publish ───────────────────────────────────────────────────── */}
+      <Section title="5. Publish">
+        <div className="flex items-center gap-2">
           <input
-            required
-            value={data.slug}
-            onChange={(e) => set("slug", e.target.value)}
-            placeholder="kebab-case-id"
-            className={inputCls}
+            id="isActive"
+            type="checkbox"
+            checked={data.isActive}
+            onChange={(e) => set("isActive", e.target.checked)}
+            className="w-4 h-4 accent-primary"
           />
-        </Field>
-        <Field label="Vendor">
-          <input
-            required
-            value={data.vendor}
-            onChange={(e) => set("vendor", e.target.value)}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Category">
-          <select
-            value={data.categoryId ?? ""}
-            onChange={(e) => set("categoryId", e.target.value || null)}
-            className={inputCls}
-          >
-            <option value="">— uncategorized —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="ATO status">
-          <select
-            value={data.atoStatus}
-            onChange={(e) => set("atoStatus", e.target.value)}
-            className={inputCls}
-          >
-            {ATO_STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Data classification">
-          <select
-            value={data.dataClassification}
-            onChange={(e) => set("dataClassification", e.target.value)}
-            className={inputCls}
-          >
-            {DATA_CLASS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Launch URL">
-          <input
-            required
-            value={data.launchUrl}
-            onChange={(e) => set("launchUrl", e.target.value)}
-            placeholder="/context-echo/"
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Version (optional)">
-          <input
-            value={data.version ?? ""}
-            onChange={(e) => set("version", e.target.value || null)}
-            className={inputCls}
-          />
-        </Field>
+          <label htmlFor="isActive" className="text-sm">
+            Active in catalog (visible to end users)
+          </label>
+        </div>
+      </Section>
+
+      {formError && <ErrorBox>{formError}</ErrorBox>}
+      <div className="flex justify-end gap-2 pt-3 border-t border-border">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-9 px-4 rounded-md border border-border text-sm hover:bg-accent"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="h-9 px-5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+        >
+          {submitting ? "Saving…" : mode === "create" ? "Create" : "Save"}
+        </button>
       </div>
-      <Field label="Impact levels">
-        <div className="flex gap-2 flex-wrap">
-          {IMPACT_LEVELS.map((il) => {
-            const active = (data.impactLevels || []).includes(il);
-            return (
+    </form>
+  );
+}
+
+// ─── Section helper ───────────────────────────────────────────────────────
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3 pt-2 first:pt-0 border-t first:border-t-0 border-border">
+      <div>
+        <div className="text-sm font-semibold tracking-tight">{title}</div>
+        {subtitle && (
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            {subtitle}
+          </div>
+        )}
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+// ─── Source: GitHub picker + manual override ─────────────────────────────
+function SourceSection({
+  data,
+  onChange,
+  editingId,
+  onReadmeFetched,
+  onSynced,
+}: {
+  data: ToolUpsert;
+  onChange: (next: ToolUpsert) => void;
+  editingId: string | null;
+  onReadmeFetched: (readme: string | null) => void;
+  onSynced: (tool: ToolDetail) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const reposParams = { search: debouncedSearch || undefined, page: 1 };
+  const reposQuery = useAdminListGithubRepos(reposParams, {
+    query: {
+      enabled: pickerOpen,
+      retry: false,
+      queryKey: getAdminListGithubReposQueryKey(reposParams),
+    },
+  });
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const syncMutation = useSyncToolFromGithub();
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Tiny debounce: search ~ every 350ms after typing stops
+  function onSearchChange(v: string) {
+    setSearch(v);
+    if ((onSearchChange as unknown as { _t?: number })._t) {
+      clearTimeout((onSearchChange as unknown as { _t?: number })._t);
+    }
+    (onSearchChange as unknown as { _t?: number })._t = window.setTimeout(
+      () => setDebouncedSearch(v.trim()),
+      350,
+    );
+  }
+
+  async function importRepo(r: GithubRepoSummary) {
+    setImporting(true);
+    setImportError(null);
+    try {
+      const meta: GithubRepoMetadata = await adminGetGithubRepoMetadata({
+        owner: r.owner,
+        repo: r.name,
+      });
+      onReadmeFetched(meta.readmeMarkdown);
+      onChange({
+        ...data,
+        name: data.name || meta.name,
+        vendor: data.vendor || meta.owner,
+        slug:
+          data.slug ||
+          `${meta.owner}-${meta.name}`
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, "-"),
+        shortDescription: data.shortDescription || (meta.description ?? ""),
+        homepageUrl: data.homepageUrl ?? meta.homepageUrl ?? null,
+        gitRepoOwner: meta.owner,
+        gitRepoName: meta.name,
+        gitDefaultBranch: meta.defaultBranch,
+        gitLatestReleaseTag: meta.latestReleaseTag,
+        gitLatestCommitSha: meta.latestCommitSha,
+        gitLicenseSpdx: meta.licenseSpdx,
+        gitStars: meta.stars,
+      });
+      setPickerOpen(false);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function resync() {
+    if (!editingId) return;
+    setSyncError(null);
+    try {
+      const updated = (await syncMutation.mutateAsync({
+        id: editingId,
+      })) as ToolDetail;
+      // Refresh the README on demand so AI drafts remain current. Soft-fail:
+      // the sync mutation already updated the persisted fields, so a README
+      // miss isn't fatal to the round-trip.
+      try {
+        if (updated.gitRepoOwner && updated.gitRepoName) {
+          const meta = await adminGetGithubRepoMetadata({
+            owner: updated.gitRepoOwner,
+            repo: updated.gitRepoName,
+          });
+          onReadmeFetched(meta.readmeMarkdown);
+        }
+      } catch {
+        // intentionally suppressed
+      }
+      onSynced(updated);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "Sync failed");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2 items-center">
+        {!pickerOpen && (
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="h-9 px-4 rounded-md border border-primary/40 text-primary text-sm hover:bg-primary/10"
+          >
+            {data.gitRepoOwner ? "Switch GitHub repo" : "Import from GitHub"}
+          </button>
+        )}
+        {data.gitRepoOwner && data.gitRepoName && (
+          <>
+            <a
+              href={`https://github.com/${data.gitRepoOwner}/${data.gitRepoName}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-mono text-primary hover:underline"
+            >
+              {data.gitRepoOwner}/{data.gitRepoName}
+            </a>
+            {data.gitLatestReleaseTag && (
+              <span className="text-[10px] text-muted-foreground font-mono">
+                release {data.gitLatestReleaseTag}
+              </span>
+            )}
+            {typeof data.gitStars === "number" && (
+              <span className="text-[10px] text-muted-foreground font-mono">
+                ★ {data.gitStars}
+              </span>
+            )}
+            {editingId && (
               <button
                 type="button"
-                key={il}
-                onClick={() => toggleArr("impactLevels", il)}
-                className={`px-2 py-1 rounded border text-[11px] font-mono uppercase tracking-wider ${
-                  active
-                    ? "bg-primary/20 text-primary border-primary/50"
-                    : "bg-background text-muted-foreground border-border hover:border-primary/30"
-                }`}
+                onClick={resync}
+                disabled={syncMutation.isPending}
+                className="h-8 px-3 rounded-md border border-border text-xs hover:bg-accent disabled:opacity-50"
               >
-                {il}
+                {syncMutation.isPending ? "Re-syncing…" : "Re-sync from GitHub"}
               </button>
-            );
-          })}
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                onChange({
+                  ...data,
+                  gitRepoOwner: null,
+                  gitRepoName: null,
+                  gitDefaultBranch: null,
+                  gitLatestReleaseTag: null,
+                  gitLatestCommitSha: null,
+                  gitLicenseSpdx: null,
+                  gitStars: null,
+                });
+                onReadmeFetched(null);
+              }}
+              className="h-8 px-3 rounded-md border border-border text-xs text-rose-400 hover:bg-accent"
+            >
+              Unlink
+            </button>
+          </>
+        )}
+      </div>
+      {syncError && <ErrorBox>{syncError}</ErrorBox>}
+      {pickerOpen && (
+        <div className="bg-background/40 border border-border rounded-md p-3 space-y-2">
+          <div className="flex gap-2 items-center">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search repos…"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className={inputCls}
+            />
+            <button
+              type="button"
+              onClick={() => setPickerOpen(false)}
+              className="h-9 px-3 rounded-md border border-border text-xs"
+            >
+              Close
+            </button>
+          </div>
+          {reposQuery.isLoading && (
+            <div className="text-xs text-muted-foreground font-mono">
+              Loading repos…
+            </div>
+          )}
+          {reposQuery.error && (
+            <ErrorBox>
+              {(reposQuery.error as Error).message ||
+                "Could not reach GitHub. Is the integration connected?"}
+            </ErrorBox>
+          )}
+          {reposQuery.data && reposQuery.data.length === 0 && (
+            <div className="text-xs text-muted-foreground font-mono">
+              No repos found.
+            </div>
+          )}
+          {reposQuery.data && reposQuery.data.length > 0 && (
+            <ul className="max-h-72 overflow-y-auto divide-y divide-border">
+              {reposQuery.data.map((r) => (
+                <li
+                  key={r.fullName}
+                  className="py-2 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-mono truncate">
+                      {r.fullName}
+                      {r.private && (
+                        <span className="ml-2 text-[10px] uppercase text-amber-400">
+                          private
+                        </span>
+                      )}
+                    </div>
+                    {r.description && (
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {r.description}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={importing}
+                    onClick={() => importRepo(r)}
+                    className="h-8 px-3 rounded-md bg-primary/20 text-primary text-xs hover:bg-primary/30 disabled:opacity-50"
+                  >
+                    Import
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {importError && <ErrorBox>{importError}</ErrorBox>}
         </div>
-      </Field>
-      <Field label="Badges (comma-separated)">
-        <input
-          value={(data.badges || []).join(", ")}
-          onChange={(e) =>
-            set(
-              "badges",
-              e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            )
-          }
-          placeholder="GovCloud, FedRAMP High"
-          className={inputCls}
-        />
-      </Field>
-      <Field label="Short description">
+      )}
+    </div>
+  );
+}
+
+// ─── Description fields with per-field AI draft buttons ──────────────────
+function DescriptionFields({
+  data,
+  set,
+  importedReadme,
+}: {
+  data: ToolUpsert;
+  set: <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) => void;
+  importedReadme: string | null;
+}) {
+  const draftMutation = useDraftToolText();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function draft(field: "shortDescription" | "longDescription") {
+    setBusy(field);
+    setError(null);
+    try {
+      const result = await draftMutation.mutateAsync({
+        data: {
+          field,
+          sourceMaterial: {
+            name: data.name,
+            vendor: data.vendor,
+            homepageUrl: data.homepageUrl ?? undefined,
+            githubReadme: importedReadme ?? undefined,
+            existingText: data[field] || undefined,
+          },
+        },
+      });
+      if (result.text) set(field, result.text);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Draft failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field
+        label="Short description"
+        action={
+          <DraftBtn
+            busy={busy === "shortDescription"}
+            onClick={() => draft("shortDescription")}
+          />
+        }
+      >
         <input
           required
           value={data.shortDescription}
@@ -914,7 +1396,15 @@ function ToolForm({
           className={inputCls}
         />
       </Field>
-      <Field label="Long description">
+      <Field
+        label="Long description"
+        action={
+          <DraftBtn
+            busy={busy === "longDescription"}
+            onClick={() => draft("longDescription")}
+          />
+        }
+      >
         <textarea
           required
           rows={4}
@@ -923,17 +1413,292 @@ function ToolForm({
           className={`${inputCls} font-mono`}
         />
       </Field>
-      <Field label="Tool purpose (fed to RAG query generator)">
+      {error && <ErrorBox>{error}</ErrorBox>}
+    </div>
+  );
+}
+
+// ─── Hosting section: cloud vs local_install ─────────────────────────────
+function HostingSection({
+  data,
+  set,
+}: {
+  data: ToolUpsert;
+  set: <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) => void;
+}) {
+  const isLocal = data.hostingType === "local_install";
+  const installerMutation = useRequestInstallerUploadUrl();
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  async function uploadInstaller(file: File) {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const presigned = await installerMutation.mutateAsync({
+        data: {
+          filename: file.name,
+          sizeBytes: file.size,
+          contentType: file.type || "application/octet-stream",
+        },
+      });
+      const putResp = await fetch(presigned.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      });
+      if (!putResp.ok) {
+        throw new Error(`Upload failed (HTTP ${putResp.status})`);
+      }
+      set("installerObjectKey", presigned.objectKey);
+      set("installerFilename", file.name);
+      set("installerSizeBytes", file.size);
+      // Surface the installer download URL back to admins via installerUrl
+      // only when no external URL was set; the server prefers installerUrl
+      // first, so we keep that override path open.
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label="Hosting type">
+        <div className="flex gap-2">
+          <HostingPill
+            active={!isLocal}
+            label="Cloud-hosted"
+            onClick={() => set("hostingType", "cloud")}
+          />
+          <HostingPill
+            active={isLocal}
+            label="Runs on operator's machine"
+            onClick={() => set("hostingType", "local_install")}
+          />
+        </div>
+      </Field>
+
+      {!isLocal && (
+        <Field label="Launch URL (token will be appended automatically)">
+          <input
+            required
+            value={data.launchUrl}
+            onChange={(e) => set("launchUrl", e.target.value)}
+            placeholder="/context-echo/  or  https://tool.example.com/launch"
+            className={inputCls}
+          />
+        </Field>
+      )}
+
+      {isLocal && (
+        <>
+          <Field label="Local launch URL pattern">
+            <input
+              value={data.localLaunchUrlPattern ?? ""}
+              onChange={(e) =>
+                set("localLaunchUrlPattern", e.target.value || null)
+              }
+              placeholder="myapp://launch?token={token}  or  http://127.0.0.1:7777/launch?token={token}"
+              className={inputCls}
+            />
+            <div className="mt-1 text-[10px] font-mono text-muted-foreground">
+              {"{token}"} will be substituted with a fresh single-use launch token. Required so the local app can exchange it for the operator's context.
+            </div>
+          </Field>
+          <Field label="Launch URL (fallback shown to admin/QA)">
+            <input
+              required
+              value={data.launchUrl}
+              onChange={(e) => set("launchUrl", e.target.value)}
+              placeholder="myapp://launch"
+              className={inputCls}
+            />
+          </Field>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Installer platform">
+              <select
+                value={data.installerPlatform ?? ""}
+                onChange={(e) =>
+                  set("installerPlatform", e.target.value || null)
+                }
+                className={inputCls}
+              >
+                <option value="">— pick a platform —</option>
+                <option value="windows">Windows (.exe / .msi)</option>
+                <option value="macos">macOS (.dmg / .pkg)</option>
+                <option value="linux">Linux (.deb / .AppImage)</option>
+                <option value="cross-platform">Cross-platform</option>
+              </select>
+            </Field>
+            <Field label="External installer URL (optional)">
+              <input
+                value={data.installerUrl ?? ""}
+                onChange={(e) => set("installerUrl", e.target.value || null)}
+                placeholder="https://releases.example.com/v1.2/installer.dmg"
+                className={inputCls}
+              />
+            </Field>
+          </div>
+          <Field label="Installer file (uploaded to App Storage)">
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="file"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadInstaller(f);
+                  e.target.value = "";
+                }}
+                className="text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary/20 file:text-primary file:px-3 file:py-1.5 file:text-xs file:font-mono file:hover:bg-primary/30"
+              />
+              {uploading && (
+                <span className="text-xs font-mono text-primary">
+                  Uploading…
+                </span>
+              )}
+              {data.installerFilename && !uploading && (
+                <span className="text-xs font-mono text-muted-foreground">
+                  {data.installerFilename}
+                  {data.installerSizeBytes
+                    ? ` · ${(data.installerSizeBytes / 1024 / 1024).toFixed(1)} MB`
+                    : ""}
+                </span>
+              )}
+              {data.installerObjectKey && !uploading && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    set("installerObjectKey", null);
+                    set("installerFilename", null);
+                    set("installerSizeBytes", null);
+                  }}
+                  className="text-[11px] text-rose-400 hover:underline font-mono"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            {uploadError && (
+              <div className="mt-2">
+                <ErrorBox>{uploadError}</ErrorBox>
+              </div>
+            )}
+          </Field>
+          <Field label="Install instructions (Markdown plain text)">
+            <textarea
+              rows={4}
+              value={data.installInstructions ?? ""}
+              onChange={(e) =>
+                set("installInstructions", e.target.value || null)
+              }
+              placeholder={"1. Download the installer\n2. Open it and follow the prompts\n3. Click Open with my context — your browser will hand off the launch token to the desktop app."}
+              className={`${inputCls} font-mono`}
+            />
+          </Field>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HostingPill({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded border text-xs font-mono uppercase tracking-wider ${
+        active
+          ? "bg-primary/20 text-primary border-primary/50"
+          : "bg-background text-muted-foreground border-border hover:border-primary/30"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ─── Context & RAG section ───────────────────────────────────────────────
+function ContextSection({
+  data,
+  set,
+  importedReadme,
+}: {
+  data: ToolUpsert;
+  set: <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) => void;
+  importedReadme: string | null;
+}) {
+  const draftMutation = useDraftToolText();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function draft(field: "purpose" | "ragQueryTemplates") {
+    setBusy(field);
+    setError(null);
+    try {
+      const result = await draftMutation.mutateAsync({
+        data: {
+          field,
+          sourceMaterial: {
+            name: data.name,
+            vendor: data.vendor,
+            homepageUrl: data.homepageUrl ?? undefined,
+            githubReadme: importedReadme ?? undefined,
+            existingText:
+              field === "purpose"
+                ? data.purpose ?? undefined
+                : (data.ragQueryTemplates ?? []).join("\n") || undefined,
+          },
+        },
+      });
+      if (field === "purpose" && result.text) {
+        set("purpose", result.text);
+      } else if (field === "ragQueryTemplates" && result.list) {
+        set("ragQueryTemplates", result.list);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Draft failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field
+        label="Tool purpose (fed to RAG query generator)"
+        action={
+          <DraftBtn busy={busy === "purpose"} onClick={() => draft("purpose")} />
+        }
+      >
         <textarea
           rows={3}
           data-testid="textarea-purpose"
           value={data.purpose ?? ""}
           onChange={(e) => set("purpose", e.target.value)}
-          placeholder="One sentence on what this tool actually does with the operator's context (e.g. 'Drafts NCOER bullets anchored to the operator's library of past evals and award citations.'). The query generator weighs this heavily over marketing copy."
+          placeholder="One sentence on what this tool actually does with the operator's context (e.g. 'Drafts NCOER bullets anchored to the operator's library of past evals and award citations.')."
           className={`${inputCls} font-mono`}
         />
       </Field>
-      <Field label="RAG query templates (one per line; {curlies} = profile vars)">
+      <Field
+        label="RAG query templates (one per line; {curlies} = profile vars)"
+        action={
+          <DraftBtn
+            busy={busy === "ragQueryTemplates"}
+            onClick={() => draft("ragQueryTemplates")}
+          />
+        }
+      >
         <textarea
           rows={4}
           data-testid="textarea-rag-templates"
@@ -955,54 +1720,21 @@ function ToolForm({
           Templates with vars the operator hasn't filled in are skipped.
         </div>
       </Field>
-      <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Homepage URL">
-          <input
-            value={data.homepageUrl ?? ""}
-            onChange={(e) => set("homepageUrl", e.target.value || null)}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Documentation URL">
-          <input
-            value={data.documentationUrl ?? ""}
-            onChange={(e) =>
-              set("documentationUrl", e.target.value || null)
-            }
-            className={inputCls}
-          />
-        </Field>
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          id="isActive"
-          type="checkbox"
-          checked={data.isActive}
-          onChange={(e) => set("isActive", e.target.checked)}
-          className="w-4 h-4 accent-primary"
-        />
-        <label htmlFor="isActive" className="text-sm">
-          Active in catalog
-        </label>
-      </div>
-      {formError && <ErrorBox>{formError}</ErrorBox>}
-      <div className="flex justify-end gap-2 pt-2 border-t border-border">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="h-9 px-4 rounded-md border border-border text-sm hover:bg-accent"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="h-9 px-5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-        >
-          {submitting ? "Saving…" : mode === "create" ? "Create" : "Save"}
-        </button>
-      </div>
-    </form>
+      {error && <ErrorBox>{error}</ErrorBox>}
+    </div>
+  );
+}
+
+function DraftBtn({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      className="text-[10px] font-mono uppercase tracking-wider text-primary hover:underline disabled:opacity-50"
+    >
+      {busy ? "Drafting…" : "Generate with AI"}
+    </button>
   );
 }
 
@@ -1011,16 +1743,21 @@ const inputCls =
 
 function Field({
   label,
+  action,
   children,
 }: {
   label: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-        {label}
-      </label>
+      <div className="flex items-end justify-between mb-1.5 gap-3">
+        <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          {label}
+        </label>
+        {action}
+      </div>
       {children}
     </div>
   );

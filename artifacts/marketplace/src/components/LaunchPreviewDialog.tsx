@@ -7,6 +7,7 @@ import {
   getGetDashboardSummaryQueryKey,
   getGetMyProfileQueryKey,
   useUpdateMyProfile,
+  type LaunchInitiateResponse,
   type LaunchPreviewResponse,
   type RagSnippet,
 } from "@workspace/api-client-react";
@@ -26,7 +27,15 @@ export interface LaunchTrigger {
 interface Props {
   trigger: LaunchTrigger | null;
   onClose: () => void;
-  onLaunched: (result: { url: string; toolName: string }) => void;
+  /**
+   * Called after a successful mint. The full LaunchInitiateResponse is passed
+   * so callers can route cloud vs. local-install flows. The dialog only opens
+   * the launchUrl in a new tab for cloud-hosted tools; for local_install the
+   * caller is responsible for the install/handoff UI.
+   */
+  onLaunched: (
+    result: LaunchInitiateResponse & { toolName: string },
+  ) => void;
   /** When true (or undefined), open the preview UI. When false, mint immediately. */
   showPreview?: boolean;
 }
@@ -91,8 +100,10 @@ export function LaunchPreviewDialog({
             data: {},
           });
           if (cancelled) return;
-          window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
-          onLaunched({ url: resp.launchUrl, toolName: trigger.toolName });
+          if (resp.hostingType !== "local_install") {
+            window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
+          }
+          onLaunched({ ...resp, toolName: trigger.toolName });
           queryClient.invalidateQueries({
             queryKey: getListRecentLaunchesQueryKey(),
           });
@@ -179,8 +190,10 @@ export function LaunchPreviewDialog({
         toolId: trigger.toolId,
         data: { selectedFieldKeys, selectedSnippetIds, additionalNote },
       });
-      window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
-      onLaunched({ url: resp.launchUrl, toolName: trigger.toolName });
+      if (resp.hostingType !== "local_install") {
+        window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
+      }
+      onLaunched({ ...resp, toolName: trigger.toolName });
       queryClient.invalidateQueries({
         queryKey: getListRecentLaunchesQueryKey(),
       });

@@ -109,10 +109,52 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
   }
 });
 
-// Note: GET /storage/objects/* is intentionally NOT exposed.
-// Personal-library uploads are processed entirely server-side
-// (artifacts/api-server/src/lib/document-processing.ts uses
-// ObjectStorageService.getObjectEntityFile() via the SDK), so the browser
-// never needs to fetch raw private files from object storage.
+/**
+ * GET /storage/objects/*filePath
+ *
+ * Serve admin-uploaded installer binaries (and other private object-entity
+ * uploads) to authenticated marketplace users. Personal-library uploads are
+ * intentionally NOT served from here — those are processed entirely
+ * server-side via the SDK in lib/document-processing.ts.
+ *
+ * The Catalog API serializes installer download URLs as
+ * `/api/storage/objects/<objectKey>`, so this endpoint is the authenticated
+ * source for that link. We require auth so installer binaries don't leak to
+ * unauthenticated visitors.
+ */
+router.get(
+  "/storage/objects/*filePath",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const raw = req.params.filePath;
+      const filePath = Array.isArray(raw) ? raw.join("/") : raw;
+      const objectPath = `/objects/${filePath}`;
+      const file = await objectStorageService.getObjectEntityFile(objectPath);
+      const response = await objectStorageService.downloadObject(file);
+
+      res.status(response.status);
+      response.headers.forEach((value, key) => res.setHeader(key, value));
+
+      if (response.body) {
+        const nodeStream = Readable.fromWeb(
+          response.body as ReadableStream<Uint8Array>,
+        );
+        nodeStream.pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (error) {
+      req.log.error({ err: error }, "Error serving private object");
+      const status =
+        error instanceof Error && error.name === "ObjectNotFoundError"
+          ? 404
+          : 500;
+      res
+        .status(status)
+        .json({ error: status === 404 ? "File not found" : "Failed to serve object" });
+    }
+  },
+);
 
 export default router;

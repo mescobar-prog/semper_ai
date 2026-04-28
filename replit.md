@@ -65,6 +65,13 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 ### Profile autosave
 - Profile edits are debounced (400ms) and use a version counter to discard out-of-order responses, so rapid typing can't cause a stale PUT response to clobber newer input.
 
+### Admin tool builder + hosting modes
+- Tools have a `hostingType` of either `cloud` (existing behavior) or `local_install`. Cloud tools open `launchUrl` in a new tab; local tools render a "Runs locally" pill, and launching opens a modal with install instructions, an installer download link, and an "Open with my context" button that navigates to `localLaunchUrlPattern` with `{token}` substituted.
+- Admin form (`Admin.tsx` `ToolForm`) is sectioned: 1. Source (GitHub repo picker via `useAdminListGithubRepos` + `adminGetGithubRepoMetadata`, plus a re-sync button using `useSyncToolFromGithub`), 2. Metadata (with per-field "Generate with AI" buttons on short/long description), 3. Hosting (cloud-vs-local switch, installer file upload via presigned PUT through `/api/storage/upload-url`), 4. Context & RAG (purpose + RAG query templates, both AI-draftable), 5. Publish.
+- AI drafts are produced by `POST /api/admin/tools/draft-text` (Gemini helper `draftToolText`), seeded with the tool's name/vendor and the most recently imported GitHub README (held only in form-local state, never persisted).
+- GitHub access goes through `lib/github.ts`, which uses `@replit/connectors-sdk` to proxy authenticated requests via the connected GitHub integration (no PAT needed).
+- Installer files land in object storage under `uploads/<uuid>` keys; the catalog/launch responses serve them as `/api/storage/objects/uploads/<uuid>`.
+
 ### Smart Mission Context (Auto-ingest)
 - `lib/mil-data` is the curated source of truth for branches, MOS/rate/AFSC catalogs, units, and per-(branch, MOS|unit) doctrine package URLs (public DoD doctrine PDFs).
 - The Profile page's Branch dropdown drives MOS and Unit typeaheads; clearing or changing the branch resets the dependent fields.

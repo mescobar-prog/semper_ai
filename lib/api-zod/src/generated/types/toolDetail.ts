@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ToolDetailHostingType } from "./toolDetailHostingType";
 import type { ToolSummary } from "./toolSummary";
 
 export type ToolDetail = ToolSummary & {
@@ -27,6 +28,44 @@ export type ToolDetail = ToolSummary & {
   isActive: boolean;
   /** @nullable */
   categoryId: string | null;
+  /** How end users actually run this tool. */
+  hostingType: ToolDetailHostingType;
+  /** @nullable */
+  installerUrl: string | null;
+  /** @nullable */
+  installerObjectKey: string | null;
+  /** @nullable */
+  installerFilename: string | null;
+  /** @nullable */
+  installerSizeBytes: number | null;
+  /** @nullable */
+  installerPlatform: string | null;
+  /** @nullable */
+  installInstructions: string | null;
+  /** @nullable */
+  localLaunchUrlPattern: string | null;
+  /**
+   * Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.
+
+   * @nullable
+   */
+  installerDownloadUrl: string | null;
+  /** @nullable */
+  gitRepoOwner: string | null;
+  /** @nullable */
+  gitRepoName: string | null;
+  /** @nullable */
+  gitDefaultBranch: string | null;
+  /** @nullable */
+  gitLatestReleaseTag: string | null;
+  /** @nullable */
+  gitLatestCommitSha: string | null;
+  /** @nullable */
+  gitLicenseSpdx: string | null;
+  /** @nullable */
+  gitStars: number | null;
+  /** @nullable */
+  gitLastSyncedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

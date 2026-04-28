@@ -266,12 +266,35 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     "launch initiated",
   );
 
-  let launchUrl = tool.launchUrl;
-  if (launchUrl.startsWith("/")) {
-    launchUrl = `${getOrigin(req)}${launchUrl}`;
+  // Compute installer download URL the same way the admin route serializes it.
+  // The storage router serves "/objects/<x>" at "/api/storage/objects/<x>".
+  let installerDownloadUrl: string | null = tool.installerUrl;
+  if (!installerDownloadUrl && tool.installerObjectKey) {
+    installerDownloadUrl = tool.installerObjectKey.startsWith("/objects/")
+      ? `/api/storage/objects/${tool.installerObjectKey.slice("/objects/".length)}`
+      : tool.installerObjectKey;
   }
-  const sep = launchUrl.includes("?") ? "&" : "?";
-  launchUrl = `${launchUrl}${sep}token=${encodeURIComponent(token)}`;
+
+  let launchUrl: string;
+  if (tool.hostingType === "local_install") {
+    // Substitute {token} into the admin-defined local-launch pattern. Falls
+    // back to the regular launchUrl with ?token= when no pattern is set so
+    // tools that haven't migrated keep working.
+    const pattern = tool.localLaunchUrlPattern ?? tool.launchUrl;
+    if (pattern.includes("{token}")) {
+      launchUrl = pattern.replace(/\{token\}/g, encodeURIComponent(token));
+    } else {
+      const sep = pattern.includes("?") ? "&" : "?";
+      launchUrl = `${pattern}${sep}token=${encodeURIComponent(token)}`;
+    }
+  } else {
+    launchUrl = tool.launchUrl;
+    if (launchUrl.startsWith("/")) {
+      launchUrl = `${getOrigin(req)}${launchUrl}`;
+    }
+    const sep = launchUrl.includes("?") ? "&" : "?";
+    launchUrl = `${launchUrl}${sep}token=${encodeURIComponent(token)}`;
+  }
 
   res.json({
     launchId: launch.id,
@@ -280,6 +303,10 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     expiresAt: expiresAt.toISOString(),
     sharedFieldKeys,
     sharedSnippetCount: sharedSnippets.length,
+    hostingType: tool.hostingType,
+    installerDownloadUrl,
+    installerFilename: tool.installerFilename ?? null,
+    installInstructions: tool.installInstructions ?? null,
   });
 });
 

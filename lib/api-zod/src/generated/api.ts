@@ -722,6 +722,7 @@ export const ListToolsResponseItem = zod.object({
       "Average star rating across visible reviews, or null when there are no reviews.",
     ),
   reviewCount: zod.number().describe("Number of visible reviews."),
+  hostingType: zod.enum(["cloud", "local_install"]),
 });
 export const ListToolsResponse = zod.array(ListToolsResponseItem);
 
@@ -756,6 +757,7 @@ export const GetToolBySlugResponse = zod
         "Average star rating across visible reviews, or null when there are no reviews.",
       ),
     reviewCount: zod.number().describe("Number of visible reviews."),
+    hostingType: zod.enum(["cloud", "local_install"]),
   })
   .and(
     zod.object({
@@ -777,6 +779,30 @@ export const GetToolBySlugResponse = zod
       logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
+      hostingType: zod
+        .enum(["cloud", "local_install"])
+        .describe("How end users actually run this tool."),
+      installerUrl: zod.string().nullable(),
+      installerObjectKey: zod.string().nullable(),
+      installerFilename: zod.string().nullable(),
+      installerSizeBytes: zod.number().nullable(),
+      installerPlatform: zod.string().nullable(),
+      installInstructions: zod.string().nullable(),
+      localLaunchUrlPattern: zod.string().nullable(),
+      installerDownloadUrl: zod
+        .string()
+        .nullable()
+        .describe(
+          "Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.\n",
+        ),
+      gitRepoOwner: zod.string().nullable(),
+      gitRepoName: zod.string().nullable(),
+      gitDefaultBranch: zod.string().nullable(),
+      gitLatestReleaseTag: zod.string().nullable(),
+      gitLatestCommitSha: zod.string().nullable(),
+      gitLicenseSpdx: zod.string().nullable(),
+      gitStars: zod.number().nullable(),
+      gitLastSyncedAt: zod.coerce.date().nullable(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
     }),
@@ -1388,10 +1414,21 @@ export const LaunchToolBody = zod.object({
 export const LaunchToolResponse = zod.object({
   launchId: zod.string(),
   launchToken: zod.string(),
-  launchUrl: zod.string(),
+  launchUrl: zod
+    .string()
+    .describe(
+      "For cloud tools, the absolute URL to redirect the browser to. For local_install tools, the substituted launch URL (e.g. a custom protocol or http:\/\/localhost URL with the token interpolated) that the locally-installed app handles.\n",
+    ),
   expiresAt: zod.coerce.date(),
   sharedFieldKeys: zod.array(zod.string()),
   sharedSnippetCount: zod.number(),
+  hostingType: zod.enum(["cloud", "local_install"]),
+  installerDownloadUrl: zod
+    .string()
+    .nullable()
+    .describe("Stable download URL for the installer (local_install only)."),
+  installerFilename: zod.string().nullable(),
+  installInstructions: zod.string().nullable(),
 });
 
 /**
@@ -1680,6 +1717,7 @@ export const AdminListToolsResponseItem = zod
         "Average star rating across visible reviews, or null when there are no reviews.",
       ),
     reviewCount: zod.number().describe("Number of visible reviews."),
+    hostingType: zod.enum(["cloud", "local_install"]),
   })
   .and(
     zod.object({
@@ -1701,6 +1739,30 @@ export const AdminListToolsResponseItem = zod
       logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
+      hostingType: zod
+        .enum(["cloud", "local_install"])
+        .describe("How end users actually run this tool."),
+      installerUrl: zod.string().nullable(),
+      installerObjectKey: zod.string().nullable(),
+      installerFilename: zod.string().nullable(),
+      installerSizeBytes: zod.number().nullable(),
+      installerPlatform: zod.string().nullable(),
+      installInstructions: zod.string().nullable(),
+      localLaunchUrlPattern: zod.string().nullable(),
+      installerDownloadUrl: zod
+        .string()
+        .nullable()
+        .describe(
+          "Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.\n",
+        ),
+      gitRepoOwner: zod.string().nullable(),
+      gitRepoName: zod.string().nullable(),
+      gitDefaultBranch: zod.string().nullable(),
+      gitLatestReleaseTag: zod.string().nullable(),
+      gitLatestCommitSha: zod.string().nullable(),
+      gitLicenseSpdx: zod.string().nullable(),
+      gitStars: zod.number().nullable(),
+      gitLastSyncedAt: zod.coerce.date().nullable(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
     }),
@@ -1730,6 +1792,21 @@ export const CreateToolBody = zod.object({
   documentationUrl: zod.string().nullish(),
   logoUrl: zod.string().nullish(),
   isActive: zod.boolean(),
+  hostingType: zod.enum(["cloud", "local_install"]),
+  installerUrl: zod.string().nullish(),
+  installerObjectKey: zod.string().nullish(),
+  installerFilename: zod.string().nullish(),
+  installerSizeBytes: zod.number().nullish(),
+  installerPlatform: zod.string().nullish(),
+  installInstructions: zod.string().nullish(),
+  localLaunchUrlPattern: zod.string().nullish(),
+  gitRepoOwner: zod.string().nullish(),
+  gitRepoName: zod.string().nullish(),
+  gitDefaultBranch: zod.string().nullish(),
+  gitLatestReleaseTag: zod.string().nullish(),
+  gitLatestCommitSha: zod.string().nullish(),
+  gitLicenseSpdx: zod.string().nullish(),
+  gitStars: zod.number().nullish(),
 });
 
 export const CreateToolResponse = zod
@@ -1756,6 +1833,7 @@ export const CreateToolResponse = zod
         "Average star rating across visible reviews, or null when there are no reviews.",
       ),
     reviewCount: zod.number().describe("Number of visible reviews."),
+    hostingType: zod.enum(["cloud", "local_install"]),
   })
   .and(
     zod.object({
@@ -1777,6 +1855,30 @@ export const CreateToolResponse = zod
       logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
+      hostingType: zod
+        .enum(["cloud", "local_install"])
+        .describe("How end users actually run this tool."),
+      installerUrl: zod.string().nullable(),
+      installerObjectKey: zod.string().nullable(),
+      installerFilename: zod.string().nullable(),
+      installerSizeBytes: zod.number().nullable(),
+      installerPlatform: zod.string().nullable(),
+      installInstructions: zod.string().nullable(),
+      localLaunchUrlPattern: zod.string().nullable(),
+      installerDownloadUrl: zod
+        .string()
+        .nullable()
+        .describe(
+          "Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.\n",
+        ),
+      gitRepoOwner: zod.string().nullable(),
+      gitRepoName: zod.string().nullable(),
+      gitDefaultBranch: zod.string().nullable(),
+      gitLatestReleaseTag: zod.string().nullable(),
+      gitLatestCommitSha: zod.string().nullable(),
+      gitLicenseSpdx: zod.string().nullable(),
+      gitStars: zod.number().nullable(),
+      gitLastSyncedAt: zod.coerce.date().nullable(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
     }),
@@ -1808,6 +1910,21 @@ export const UpdateToolBody = zod.object({
   documentationUrl: zod.string().nullish(),
   logoUrl: zod.string().nullish(),
   isActive: zod.boolean(),
+  hostingType: zod.enum(["cloud", "local_install"]),
+  installerUrl: zod.string().nullish(),
+  installerObjectKey: zod.string().nullish(),
+  installerFilename: zod.string().nullish(),
+  installerSizeBytes: zod.number().nullish(),
+  installerPlatform: zod.string().nullish(),
+  installInstructions: zod.string().nullish(),
+  localLaunchUrlPattern: zod.string().nullish(),
+  gitRepoOwner: zod.string().nullish(),
+  gitRepoName: zod.string().nullish(),
+  gitDefaultBranch: zod.string().nullish(),
+  gitLatestReleaseTag: zod.string().nullish(),
+  gitLatestCommitSha: zod.string().nullish(),
+  gitLicenseSpdx: zod.string().nullish(),
+  gitStars: zod.number().nullish(),
 });
 
 export const UpdateToolResponse = zod
@@ -1834,6 +1951,7 @@ export const UpdateToolResponse = zod
         "Average star rating across visible reviews, or null when there are no reviews.",
       ),
     reviewCount: zod.number().describe("Number of visible reviews."),
+    hostingType: zod.enum(["cloud", "local_install"]),
   })
   .and(
     zod.object({
@@ -1855,6 +1973,30 @@ export const UpdateToolResponse = zod
       logoUrl: zod.string().nullable(),
       isActive: zod.boolean(),
       categoryId: zod.string().nullable(),
+      hostingType: zod
+        .enum(["cloud", "local_install"])
+        .describe("How end users actually run this tool."),
+      installerUrl: zod.string().nullable(),
+      installerObjectKey: zod.string().nullable(),
+      installerFilename: zod.string().nullable(),
+      installerSizeBytes: zod.number().nullable(),
+      installerPlatform: zod.string().nullable(),
+      installInstructions: zod.string().nullable(),
+      localLaunchUrlPattern: zod.string().nullable(),
+      installerDownloadUrl: zod
+        .string()
+        .nullable()
+        .describe(
+          "Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.\n",
+        ),
+      gitRepoOwner: zod.string().nullable(),
+      gitRepoName: zod.string().nullable(),
+      gitDefaultBranch: zod.string().nullable(),
+      gitLatestReleaseTag: zod.string().nullable(),
+      gitLatestCommitSha: zod.string().nullable(),
+      gitLicenseSpdx: zod.string().nullable(),
+      gitStars: zod.number().nullable(),
+      gitLastSyncedAt: zod.coerce.date().nullable(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
     }),
@@ -1869,6 +2011,192 @@ export const DeleteToolParams = zod.object({
 
 export const DeleteToolResponse = zod.object({
   success: zod.boolean(),
+});
+
+/**
+ * @summary Re-pull README/release/license/stars from the linked GitHub repo
+ */
+export const SyncToolFromGithubParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SyncToolFromGithubResponse = zod
+  .object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+    shortDescription: zod.string(),
+    atoStatus: zod.string(),
+    impactLevels: zod.array(zod.string()),
+    dataClassification: zod.string(),
+    badges: zod.array(zod.string()),
+    isFavorite: zod.boolean(),
+    favoriteCount: zod.number(),
+    launchCount: zod.number(),
+    categorySlug: zod.string().nullable(),
+    categoryName: zod.string().nullable(),
+    isVendorSubmitted: zod.boolean(),
+    avgRating: zod
+      .number()
+      .nullable()
+      .describe(
+        "Average star rating across visible reviews, or null when there are no reviews.",
+      ),
+    reviewCount: zod.number().describe("Number of visible reviews."),
+    hostingType: zod.enum(["cloud", "local_install"]),
+  })
+  .and(
+    zod.object({
+      longDescription: zod.string(),
+      purpose: zod
+        .string()
+        .describe(
+          "Admin-authored sentence describing what the tool actually does with the user's context. Fed to the RAG query generator so the primer queries match the tool's true intent (not just its marketing copy).\n",
+        ),
+      ragQueryTemplates: zod
+        .array(zod.string())
+        .describe(
+          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+        ),
+      version: zod.string().nullable(),
+      homepageUrl: zod.string().nullable(),
+      launchUrl: zod.string(),
+      documentationUrl: zod.string().nullable(),
+      logoUrl: zod.string().nullable(),
+      isActive: zod.boolean(),
+      categoryId: zod.string().nullable(),
+      hostingType: zod
+        .enum(["cloud", "local_install"])
+        .describe("How end users actually run this tool."),
+      installerUrl: zod.string().nullable(),
+      installerObjectKey: zod.string().nullable(),
+      installerFilename: zod.string().nullable(),
+      installerSizeBytes: zod.number().nullable(),
+      installerPlatform: zod.string().nullable(),
+      installInstructions: zod.string().nullable(),
+      localLaunchUrlPattern: zod.string().nullable(),
+      installerDownloadUrl: zod
+        .string()
+        .nullable()
+        .describe(
+          "Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.\n",
+        ),
+      gitRepoOwner: zod.string().nullable(),
+      gitRepoName: zod.string().nullable(),
+      gitDefaultBranch: zod.string().nullable(),
+      gitLatestReleaseTag: zod.string().nullable(),
+      gitLatestCommitSha: zod.string().nullable(),
+      gitLicenseSpdx: zod.string().nullable(),
+      gitStars: zod.number().nullable(),
+      gitLastSyncedAt: zod.coerce.date().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  );
+
+/**
+ * @summary List repos visible to the connected admin GitHub account
+ */
+export const adminListGithubReposQueryPageDefault = 1;
+
+export const AdminListGithubReposQueryParams = zod.object({
+  search: zod.coerce.string().optional(),
+  page: zod.coerce
+    .number()
+    .min(1)
+    .default(adminListGithubReposQueryPageDefault),
+});
+
+export const AdminListGithubReposResponseItem = zod.object({
+  owner: zod.string(),
+  name: zod.string(),
+  fullName: zod.string(),
+  description: zod.string().nullable(),
+  defaultBranch: zod.string(),
+  private: zod.boolean(),
+  stars: zod.number(),
+  language: zod.string().nullable(),
+});
+export const AdminListGithubReposResponse = zod.array(
+  AdminListGithubReposResponseItem,
+);
+
+/**
+ * @summary Pull rich metadata for a single repo (used by the create-tool flow)
+ */
+export const AdminGetGithubRepoMetadataQueryParams = zod.object({
+  owner: zod.coerce.string(),
+  repo: zod.coerce.string(),
+});
+
+export const AdminGetGithubRepoMetadataResponse = zod.object({
+  owner: zod.string(),
+  name: zod.string(),
+  fullName: zod.string(),
+  description: zod.string().nullable(),
+  defaultBranch: zod.string(),
+  private: zod.boolean(),
+  stars: zod.number(),
+  language: zod.string().nullable(),
+  licenseSpdx: zod.string().nullable(),
+  latestReleaseTag: zod.string().nullable(),
+  latestCommitSha: zod.string().nullable(),
+  homepageUrl: zod.string().nullable(),
+  readmeMarkdown: zod.string().nullable(),
+});
+
+/**
+ * Returns a draft only — the admin must still click Save on the regular
+create/update endpoints to persist anything.
+
+ * @summary Generate a first-draft tool description with the LLM
+ */
+export const DraftToolTextBody = zod.object({
+  field: zod.enum([
+    "shortDescription",
+    "longDescription",
+    "purpose",
+    "ragQueryTemplates",
+  ]),
+  sourceMaterial: zod.object({
+    name: zod.string().optional(),
+    vendor: zod.string().optional(),
+    homepageUrl: zod.string().optional(),
+    githubReadme: zod.string().optional(),
+    existingText: zod.string().optional(),
+  }),
+});
+
+export const DraftToolTextResponse = zod.object({
+  field: zod.enum([
+    "shortDescription",
+    "longDescription",
+    "purpose",
+    "ragQueryTemplates",
+  ]),
+  text: zod.string().nullable(),
+  list: zod.array(zod.string()).nullable(),
+});
+
+/**
+ * @summary Mint a presigned upload URL for a tool installer file
+ */
+
+export const RequestInstallerUploadUrlBody = zod.object({
+  filename: zod.string().min(1),
+  sizeBytes: zod.number().min(1),
+  contentType: zod.string().min(1),
+});
+
+export const RequestInstallerUploadUrlResponse = zod.object({
+  uploadUrl: zod.string(),
+  objectKey: zod
+    .string()
+    .describe("Persist this on the tool record as installerObjectKey."),
+  downloadUrl: zod
+    .string()
+    .describe("Stable URL the marketplace can serve to end users."),
 });
 
 /**
@@ -2255,6 +2583,7 @@ export const GetDashboardSummaryResponse = zod.object({
           "Average star rating across visible reviews, or null when there are no reviews.",
         ),
       reviewCount: zod.number().describe("Number of visible reviews."),
+      hostingType: zod.enum(["cloud", "local_install"]),
     }),
   ),
 });

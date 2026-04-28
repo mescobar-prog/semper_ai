@@ -1236,6 +1236,135 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /admin/tools/{id}/sync-github:
+    post:
+      tags: [Admin]
+      operationId: syncToolFromGithub
+      summary: Re-pull README/release/license/stars from the linked GitHub repo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tool refreshed from GitHub
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ToolDetail' }
+        '400':
+          description: Tool is not linked to a GitHub repo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/github/repos:
+    get:
+      tags: [Admin]
+      operationId: adminListGithubRepos
+      summary: List repos visible to the connected admin GitHub account
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Repo list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GithubRepoSummary' }
+        '503':
+          description: GitHub integration not available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/github/repo-metadata:
+    get:
+      tags: [Admin]
+      operationId: adminGetGithubRepoMetadata
+      summary: Pull rich metadata for a single repo (used by the create-tool flow)
+      parameters:
+        - name: owner
+          in: query
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Repo metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GithubRepoMetadata' }
+        '404':
+          description: Repo not found or access denied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '503':
+          description: GitHub integration not available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/tools/draft-text:
+    post:
+      tags: [Admin]
+      operationId: draftToolText
+      summary: Generate a first-draft tool description with the LLM
+      description: |
+        Returns a draft only — the admin must still click Save on the regular
+        create/update endpoints to persist anything.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DraftToolTextRequest' }
+      responses:
+        '200':
+          description: Draft generated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DraftToolTextResult' }
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/tools/installer-upload-url:
+    post:
+      tags: [Admin]
+      operationId: requestInstallerUploadUrl
+      summary: Mint a presigned upload URL for a tool installer file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstallerUploadUrlRequest' }
+      responses:
+        '200':
+          description: Upload URL minted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallerUploadUrlResponse' }
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   # ---------- Submissions ----------
   /submissions:
     get:
@@ -1735,7 +1864,7 @@ components:
         [id, slug, name, vendor, shortDescription, atoStatus, impactLevels,
          dataClassification, badges, isFavorite, favoriteCount,
          launchCount, categorySlug, categoryName, isVendorSubmitted,
-         avgRating, reviewCount]
+         avgRating, reviewCount, hostingType]
       properties:
         id: { type: string }
         slug: { type: string }
@@ -1762,6 +1891,9 @@ components:
         reviewCount:
           type: integer
           description: Number of visible reviews.
+        hostingType:
+          type: string
+          enum: [cloud, local_install]
 
     ToolDetail:
       allOf:
@@ -1770,6 +1902,11 @@ components:
           required:
             [longDescription, purpose, ragQueryTemplates, version, homepageUrl,
              launchUrl, documentationUrl, logoUrl, isActive, categoryId,
+             hostingType, installerUrl, installerObjectKey, installerFilename,
+             installerSizeBytes, installerPlatform, installInstructions,
+             localLaunchUrlPattern, installerDownloadUrl,
+             gitRepoOwner, gitRepoName, gitDefaultBranch, gitLatestReleaseTag,
+             gitLatestCommitSha, gitLicenseSpdx, gitStars, gitLastSyncedAt,
              createdAt, updatedAt]
           properties:
             longDescription: { type: string }
@@ -1796,6 +1933,30 @@ components:
             logoUrl: { type: [string, 'null'] }
             isActive: { type: boolean }
             categoryId: { type: [string, 'null'] }
+            hostingType:
+              type: string
+              enum: [cloud, local_install]
+              description: How end users actually run this tool.
+            installerUrl: { type: [string, 'null'] }
+            installerObjectKey: { type: [string, 'null'] }
+            installerFilename: { type: [string, 'null'] }
+            installerSizeBytes: { type: [integer, 'null'] }
+            installerPlatform: { type: [string, 'null'] }
+            installInstructions: { type: [string, 'null'] }
+            localLaunchUrlPattern: { type: [string, 'null'] }
+            installerDownloadUrl:
+              type: [string, 'null']
+              description: >
+                Stable download URL the end user can hit to fetch the installer.
+                Set when an installer file is attached via object storage.
+            gitRepoOwner: { type: [string, 'null'] }
+            gitRepoName: { type: [string, 'null'] }
+            gitDefaultBranch: { type: [string, 'null'] }
+            gitLatestReleaseTag: { type: [string, 'null'] }
+            gitLatestCommitSha: { type: [string, 'null'] }
+            gitLicenseSpdx: { type: [string, 'null'] }
+            gitStars: { type: [integer, 'null'] }
+            gitLastSyncedAt: { type: [string, 'null'], format: date-time }
             createdAt: { type: string, format: date-time }
             updatedAt: { type: string, format: date-time }
 
@@ -1804,7 +1965,7 @@ components:
       required:
         [slug, name, vendor, shortDescription, longDescription, purpose,
          ragQueryTemplates, atoStatus, impactLevels, dataClassification, badges,
-         launchUrl, isActive]
+         launchUrl, isActive, hostingType]
       properties:
         slug: { type: string, minLength: 1 }
         name: { type: string, minLength: 1 }
@@ -1830,6 +1991,105 @@ components:
         documentationUrl: { type: [string, 'null'] }
         logoUrl: { type: [string, 'null'] }
         isActive: { type: boolean }
+        hostingType:
+          type: string
+          enum: [cloud, local_install]
+        installerUrl: { type: [string, 'null'] }
+        installerObjectKey: { type: [string, 'null'] }
+        installerFilename: { type: [string, 'null'] }
+        installerSizeBytes: { type: [integer, 'null'] }
+        installerPlatform: { type: [string, 'null'] }
+        installInstructions: { type: [string, 'null'] }
+        localLaunchUrlPattern: { type: [string, 'null'] }
+        gitRepoOwner: { type: [string, 'null'] }
+        gitRepoName: { type: [string, 'null'] }
+        gitDefaultBranch: { type: [string, 'null'] }
+        gitLatestReleaseTag: { type: [string, 'null'] }
+        gitLatestCommitSha: { type: [string, 'null'] }
+        gitLicenseSpdx: { type: [string, 'null'] }
+        gitStars: { type: [integer, 'null'] }
+
+    GithubRepoSummary:
+      type: object
+      required: [owner, name, fullName, description, defaultBranch, private, stars, language]
+      properties:
+        owner: { type: string }
+        name: { type: string }
+        fullName: { type: string }
+        description: { type: [string, 'null'] }
+        defaultBranch: { type: string }
+        private: { type: boolean }
+        stars: { type: integer }
+        language: { type: [string, 'null'] }
+
+    GithubRepoMetadata:
+      type: object
+      required:
+        [owner, name, fullName, description, defaultBranch, private, stars,
+         language, licenseSpdx, latestReleaseTag, latestCommitSha, homepageUrl,
+         readmeMarkdown]
+      properties:
+        owner: { type: string }
+        name: { type: string }
+        fullName: { type: string }
+        description: { type: [string, 'null'] }
+        defaultBranch: { type: string }
+        private: { type: boolean }
+        stars: { type: integer }
+        language: { type: [string, 'null'] }
+        licenseSpdx: { type: [string, 'null'] }
+        latestReleaseTag: { type: [string, 'null'] }
+        latestCommitSha: { type: [string, 'null'] }
+        homepageUrl: { type: [string, 'null'] }
+        readmeMarkdown: { type: [string, 'null'] }
+
+    DraftToolTextRequest:
+      type: object
+      required: [field, sourceMaterial]
+      properties:
+        field:
+          type: string
+          enum: [shortDescription, longDescription, purpose, ragQueryTemplates]
+        sourceMaterial:
+          type: object
+          properties:
+            name: { type: string }
+            vendor: { type: string }
+            homepageUrl: { type: string }
+            githubReadme: { type: string }
+            existingText: { type: string }
+
+    DraftToolTextResult:
+      type: object
+      required: [field, text, list]
+      properties:
+        field:
+          type: string
+          enum: [shortDescription, longDescription, purpose, ragQueryTemplates]
+        text: { type: [string, 'null'] }
+        list:
+          type: [array, 'null']
+          items: { type: string }
+
+    InstallerUploadUrlRequest:
+      type: object
+      required: [filename, sizeBytes, contentType]
+      properties:
+        filename: { type: string, minLength: 1 }
+        sizeBytes: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+
+    InstallerUploadUrlResponse:
+      type: object
+      required: [uploadUrl, objectKey, downloadUrl]
+      properties:
+        uploadUrl: { type: string }
+        objectKey:
+          type: string
+          description: Persist this on the tool record as installerObjectKey.
+        downloadUrl:
+          type: string
+          description: Stable URL the marketplace can serve to end users.
 
     SubmissionUpsert:
       type: object
@@ -2071,16 +2331,31 @@ components:
       type: object
       required:
         [launchId, launchToken, launchUrl, expiresAt,
-         sharedFieldKeys, sharedSnippetCount]
+         sharedFieldKeys, sharedSnippetCount, hostingType,
+         installerDownloadUrl, installerFilename, installInstructions]
       properties:
         launchId: { type: string }
         launchToken: { type: string }
-        launchUrl: { type: string }
+        launchUrl:
+          type: string
+          description: >
+            For cloud tools, the absolute URL to redirect the browser to.
+            For local_install tools, the substituted launch URL (e.g. a custom
+            protocol or http://localhost URL with the token interpolated)
+            that the locally-installed app handles.
         expiresAt: { type: string, format: date-time }
         sharedFieldKeys:
           type: array
           items: { type: string }
         sharedSnippetCount: { type: integer }
+        hostingType:
+          type: string
+          enum: [cloud, local_install]
+        installerDownloadUrl:
+          type: [string, 'null']
+          description: Stable download URL for the installer (local_install only).
+        installerFilename: { type: [string, 'null'] }
+        installInstructions: { type: [string, 'null'] }
 
     ContextExchangeRequest:
       type: object

@@ -234,6 +234,14 @@ export interface Category {
   sortOrder: number;
 }
 
+export type ToolSummaryHostingType =
+  (typeof ToolSummaryHostingType)[keyof typeof ToolSummaryHostingType];
+
+export const ToolSummaryHostingType = {
+  cloud: "cloud",
+  local_install: "local_install",
+} as const;
+
 export interface ToolSummary {
   id: string;
   slug: string;
@@ -259,7 +267,19 @@ export interface ToolSummary {
   avgRating: number | null;
   /** Number of visible reviews. */
   reviewCount: number;
+  hostingType: ToolSummaryHostingType;
 }
+
+/**
+ * How end users actually run this tool.
+ */
+export type ToolDetailHostingType =
+  (typeof ToolDetailHostingType)[keyof typeof ToolDetailHostingType];
+
+export const ToolDetailHostingType = {
+  cloud: "cloud",
+  local_install: "local_install",
+} as const;
 
 export type ToolDetail = ToolSummary & {
   longDescription: string;
@@ -281,9 +301,55 @@ export type ToolDetail = ToolSummary & {
   isActive: boolean;
   /** @nullable */
   categoryId: string | null;
+  /** How end users actually run this tool. */
+  hostingType: ToolDetailHostingType;
+  /** @nullable */
+  installerUrl: string | null;
+  /** @nullable */
+  installerObjectKey: string | null;
+  /** @nullable */
+  installerFilename: string | null;
+  /** @nullable */
+  installerSizeBytes: number | null;
+  /** @nullable */
+  installerPlatform: string | null;
+  /** @nullable */
+  installInstructions: string | null;
+  /** @nullable */
+  localLaunchUrlPattern: string | null;
+  /**
+   * Stable download URL the end user can hit to fetch the installer. Set when an installer file is attached via object storage.
+
+   * @nullable
+   */
+  installerDownloadUrl: string | null;
+  /** @nullable */
+  gitRepoOwner: string | null;
+  /** @nullable */
+  gitRepoName: string | null;
+  /** @nullable */
+  gitDefaultBranch: string | null;
+  /** @nullable */
+  gitLatestReleaseTag: string | null;
+  /** @nullable */
+  gitLatestCommitSha: string | null;
+  /** @nullable */
+  gitLicenseSpdx: string | null;
+  /** @nullable */
+  gitStars: number | null;
+  /** @nullable */
+  gitLastSyncedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type ToolUpsertHostingType =
+  (typeof ToolUpsertHostingType)[keyof typeof ToolUpsertHostingType];
+
+export const ToolUpsertHostingType = {
+  cloud: "cloud",
+  local_install: "local_install",
+} as const;
 
 export interface ToolUpsert {
   /** @minLength 1 */
@@ -315,6 +381,129 @@ export interface ToolUpsert {
   /** @nullable */
   logoUrl?: string | null;
   isActive: boolean;
+  hostingType: ToolUpsertHostingType;
+  /** @nullable */
+  installerUrl?: string | null;
+  /** @nullable */
+  installerObjectKey?: string | null;
+  /** @nullable */
+  installerFilename?: string | null;
+  /** @nullable */
+  installerSizeBytes?: number | null;
+  /** @nullable */
+  installerPlatform?: string | null;
+  /** @nullable */
+  installInstructions?: string | null;
+  /** @nullable */
+  localLaunchUrlPattern?: string | null;
+  /** @nullable */
+  gitRepoOwner?: string | null;
+  /** @nullable */
+  gitRepoName?: string | null;
+  /** @nullable */
+  gitDefaultBranch?: string | null;
+  /** @nullable */
+  gitLatestReleaseTag?: string | null;
+  /** @nullable */
+  gitLatestCommitSha?: string | null;
+  /** @nullable */
+  gitLicenseSpdx?: string | null;
+  /** @nullable */
+  gitStars?: number | null;
+}
+
+export interface GithubRepoSummary {
+  owner: string;
+  name: string;
+  fullName: string;
+  /** @nullable */
+  description: string | null;
+  defaultBranch: string;
+  private: boolean;
+  stars: number;
+  /** @nullable */
+  language: string | null;
+}
+
+export interface GithubRepoMetadata {
+  owner: string;
+  name: string;
+  fullName: string;
+  /** @nullable */
+  description: string | null;
+  defaultBranch: string;
+  private: boolean;
+  stars: number;
+  /** @nullable */
+  language: string | null;
+  /** @nullable */
+  licenseSpdx: string | null;
+  /** @nullable */
+  latestReleaseTag: string | null;
+  /** @nullable */
+  latestCommitSha: string | null;
+  /** @nullable */
+  homepageUrl: string | null;
+  /** @nullable */
+  readmeMarkdown: string | null;
+}
+
+export type DraftToolTextRequestField =
+  (typeof DraftToolTextRequestField)[keyof typeof DraftToolTextRequestField];
+
+export const DraftToolTextRequestField = {
+  shortDescription: "shortDescription",
+  longDescription: "longDescription",
+  purpose: "purpose",
+  ragQueryTemplates: "ragQueryTemplates",
+} as const;
+
+export type DraftToolTextRequestSourceMaterial = {
+  name?: string;
+  vendor?: string;
+  homepageUrl?: string;
+  githubReadme?: string;
+  existingText?: string;
+};
+
+export interface DraftToolTextRequest {
+  field: DraftToolTextRequestField;
+  sourceMaterial: DraftToolTextRequestSourceMaterial;
+}
+
+export type DraftToolTextResultField =
+  (typeof DraftToolTextResultField)[keyof typeof DraftToolTextResultField];
+
+export const DraftToolTextResultField = {
+  shortDescription: "shortDescription",
+  longDescription: "longDescription",
+  purpose: "purpose",
+  ragQueryTemplates: "ragQueryTemplates",
+} as const;
+
+export interface DraftToolTextResult {
+  field: DraftToolTextResultField;
+  /** @nullable */
+  text: string | null;
+  /** @nullable */
+  list: string[] | null;
+}
+
+export interface InstallerUploadUrlRequest {
+  /** @minLength 1 */
+  filename: string;
+  /** @minimum 1 */
+  sizeBytes: number;
+  /** @minLength 1 */
+  contentType: string;
+}
+
+export interface InstallerUploadUrlResponse {
+  uploadUrl: string;
+  /** Persist this on the tool record as installerObjectKey. */
+  objectKey: string;
+  /** Stable URL the marketplace can serve to end users. */
+  downloadUrl: string;
 }
 
 export interface SubmissionUpsert {
@@ -525,13 +714,33 @@ export interface LaunchToolRequest {
   additionalNote?: string | null;
 }
 
+export type LaunchInitiateResponseHostingType =
+  (typeof LaunchInitiateResponseHostingType)[keyof typeof LaunchInitiateResponseHostingType];
+
+export const LaunchInitiateResponseHostingType = {
+  cloud: "cloud",
+  local_install: "local_install",
+} as const;
+
 export interface LaunchInitiateResponse {
   launchId: string;
   launchToken: string;
+  /** For cloud tools, the absolute URL to redirect the browser to. For local_install tools, the substituted launch URL (e.g. a custom protocol or http://localhost URL with the token interpolated) that the locally-installed app handles.
+   */
   launchUrl: string;
   expiresAt: string;
   sharedFieldKeys: string[];
   sharedSnippetCount: number;
+  hostingType: LaunchInitiateResponseHostingType;
+  /**
+   * Stable download URL for the installer (local_install only).
+   * @nullable
+   */
+  installerDownloadUrl: string | null;
+  /** @nullable */
+  installerFilename: string | null;
+  /** @nullable */
+  installInstructions: string | null;
 }
 
 export interface ContextExchangeRequest {
@@ -943,4 +1152,17 @@ export type ListDocumentsParams = {
 
 export type GetAutoIngestStatusParams = {
   source: string;
+};
+
+export type AdminListGithubReposParams = {
+  search?: string;
+  /**
+   * @minimum 1
+   */
+  page?: number;
+};
+
+export type AdminGetGithubRepoMetadataParams = {
+  owner: string;
+  repo: string;
 };

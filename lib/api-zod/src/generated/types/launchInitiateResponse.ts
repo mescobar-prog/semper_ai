@@ -5,12 +5,25 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { LaunchInitiateResponseHostingType } from "./launchInitiateResponseHostingType";
 
 export interface LaunchInitiateResponse {
   launchId: string;
   launchToken: string;
+  /** For cloud tools, the absolute URL to redirect the browser to. For local_install tools, the substituted launch URL (e.g. a custom protocol or http://localhost URL with the token interpolated) that the locally-installed app handles.
+   */
   launchUrl: string;
   expiresAt: Date;
   sharedFieldKeys: string[];
   sharedSnippetCount: number;
+  hostingType: LaunchInitiateResponseHostingType;
+  /**
+   * Stable download URL for the installer (local_install only).
+   * @nullable
+   */
+  installerDownloadUrl: string | null;
+  /** @nullable */
+  installerFilename: string | null;
+  /** @nullable */
+  installInstructions: string | null;
 }

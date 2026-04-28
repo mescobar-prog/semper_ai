@@ -55,6 +55,14 @@ export function CatalogDetail() {
   const [launchState, setLaunchState] = useState<
     | { status: "idle" }
     | { status: "launched"; url: string; toolName: string }
+    | {
+        status: "local_ready";
+        url: string;
+        toolName: string;
+        installerDownloadUrl: string | null;
+        installerFilename: string | null;
+        installInstructions: string | null;
+      }
     | { status: "error"; message: string }
   >({ status: "idle" });
 
@@ -100,6 +108,7 @@ export function CatalogDetail() {
 
   const launchPref = profile?.launchPreference ?? "preview";
   const showPreview = forcePreview || launchPref !== "direct";
+  const isLocal = tool.hostingType === "local_install";
 
   return (
     <PageContainer>
@@ -153,6 +162,7 @@ export function CatalogDetail() {
             {tool.dataClassification && (
               <Pill tone="neutral">{tool.dataClassification}</Pill>
             )}
+            {isLocal && <Pill tone="warn">Runs locally</Pill>}
             {tool.badges.map((b) => (
               <Pill key={b} tone="info">
                 {b}
@@ -212,15 +222,19 @@ export function CatalogDetail() {
                 ? showPreview
                   ? "Reviewing…"
                   : "Launching…"
-                : tool.isActive
-                  ? "Launch with my context"
-                  : "Tool inactive"}
+                : !tool.isActive
+                  ? "Tool inactive"
+                  : isLocal
+                    ? "Launch local app with my context"
+                    : "Launch with my context"}
             </button>
             <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-              {launchPref === "direct"
-                ? "Your default is to launch directly. Want to choose what to share?"
-                : "You'll preview your profile and library snippets before they're sent."}{" "}
-              {launchPref === "direct" && tool.isActive && (
+              {isLocal
+                ? "We'll mint a one-time launch token and hand it to your locally-installed copy of the tool. Install the app first if you haven't already. "
+                : launchPref === "direct"
+                  ? "Your default is to launch directly. Want to choose what to share? "
+                  : "You'll preview your profile and library snippets before they're sent. "}
+              {!isLocal && launchPref === "direct" && tool.isActive && (
                 <button
                   type="button"
                   onClick={() => launch({ forcePreview: true })}
@@ -242,6 +256,16 @@ export function CatalogDetail() {
                   Reopen
                 </a>
               </div>
+            )}
+            {launchState.status === "local_ready" && (
+              <LocalLaunchPanel
+                toolName={launchState.toolName}
+                url={launchState.url}
+                installerDownloadUrl={launchState.installerDownloadUrl}
+                installerFilename={launchState.installerFilename}
+                installInstructions={launchState.installInstructions}
+                onClose={() => setLaunchState({ status: "idle" })}
+              />
             )}
             {launchState.status === "error" && (
               <div className="mt-3 rounded border border-rose-500/40 bg-rose-500/5 p-3 text-xs text-rose-300">
@@ -310,13 +334,24 @@ export function CatalogDetail() {
           setLaunchTrigger(null);
           setForcePreview(false);
         }}
-        onLaunched={(r) =>
-          setLaunchState({
-            status: "launched",
-            url: r.url,
-            toolName: r.toolName,
-          })
-        }
+        onLaunched={(r) => {
+          if (r.hostingType === "local_install") {
+            setLaunchState({
+              status: "local_ready",
+              url: r.launchUrl,
+              toolName: r.toolName,
+              installerDownloadUrl: r.installerDownloadUrl,
+              installerFilename: r.installerFilename,
+              installInstructions: r.installInstructions,
+            });
+          } else {
+            setLaunchState({
+              status: "launched",
+              url: r.launchUrl,
+              toolName: r.toolName,
+            });
+          }
+        }}
       />
 
       <ReviewsSection toolId={tool.id} toolSlug={tool.slug} />
@@ -680,6 +715,91 @@ function DetailRow({
         {label}
       </span>
       <span className="text-right text-foreground font-medium">{value}</span>
+    </div>
+  );
+}
+
+function LocalLaunchPanel({
+  toolName,
+  url,
+  installerDownloadUrl,
+  installerFilename,
+  installInstructions,
+  onClose,
+}: {
+  toolName: string;
+  url: string;
+  installerDownloadUrl: string | null;
+  installerFilename: string | null;
+  installInstructions: string | null;
+  onClose: () => void;
+}) {
+  const handoff = () => {
+    window.location.href = url;
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-card border border-border rounded-md w-full max-w-lg max-h-[85vh] overflow-y-auto">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-amber-300 font-mono">
+              Local install
+            </div>
+            <div className="text-base font-semibold mt-0.5">
+              Launch {toolName}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-muted-foreground hover:text-foreground text-lg"
+          >
+            ×
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {toolName} runs on your workstation. Install it once, then click the
+            handoff button to open it with a fresh marketplace context token.
+          </p>
+
+          {installInstructions && (
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+                Install instructions
+              </div>
+              <div className="text-xs whitespace-pre-wrap leading-relaxed text-foreground bg-background border border-border rounded-md p-3 max-h-48 overflow-y-auto">
+                {installInstructions}
+              </div>
+            </div>
+          )}
+
+          {installerDownloadUrl && (
+            <a
+              href={installerDownloadUrl}
+              download={installerFilename ?? undefined}
+              className="block w-full h-10 leading-10 text-center rounded-md border border-border text-sm hover:border-primary/50 transition-colors"
+            >
+              ⬇ Download installer
+              {installerFilename && (
+                <span className="text-muted-foreground ml-1">
+                  ({installerFilename})
+                </span>
+              )}
+            </a>
+          )}
+
+          <button
+            onClick={handoff}
+            className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors"
+          >
+            Open with my context →
+          </button>
+          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-center">
+            One-time token expires after first use
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

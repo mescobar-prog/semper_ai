@@ -66,6 +66,7 @@ router.get("/catalog/tools", async (req, res) => {
       impactLevels: toolsTable.impactLevels,
       dataClassification: toolsTable.dataClassification,
       badges: toolsTable.badges,
+      hostingType: toolsTable.hostingType,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
       submitterId: toolsTable.submitterId,
@@ -137,6 +138,24 @@ router.get("/catalog/tools/:slug", async (req, res) => {
       logoUrl: toolsTable.logoUrl,
       isActive: toolsTable.isActive,
       categoryId: toolsTable.categoryId,
+      hostingType: toolsTable.hostingType,
+      installerUrl: toolsTable.installerUrl,
+      installerObjectKey: toolsTable.installerObjectKey,
+      installerFilename: toolsTable.installerFilename,
+      installerSizeBytes: toolsTable.installerSizeBytes,
+      installerPlatform: toolsTable.installerPlatform,
+      installInstructions: toolsTable.installInstructions,
+      localLaunchUrlPattern: toolsTable.localLaunchUrlPattern,
+      gitRepoOwner: toolsTable.gitRepoOwner,
+      gitRepoName: toolsTable.gitRepoName,
+      gitDefaultBranch: toolsTable.gitDefaultBranch,
+      gitLatestReleaseTag: toolsTable.gitLatestReleaseTag,
+      gitLatestCommitSha: toolsTable.gitLatestCommitSha,
+      gitLicenseSpdx: toolsTable.gitLicenseSpdx,
+      gitStars: toolsTable.gitStars,
+      gitLastSyncedAt: toolsTable.gitLastSyncedAt,
+      purpose: toolsTable.purpose,
+      ragQueryTemplates: toolsTable.ragQueryTemplates,
       categorySlug: categoriesTable.slug,
       categoryName: categoriesTable.name,
       submitterId: toolsTable.submitterId,
@@ -162,6 +181,14 @@ router.get("/catalog/tools/:slug", async (req, res) => {
   }
 
   const { submitterId, submissionStatus, ...rest } = row;
+  // Compute the public download URL for the installer the same way the admin
+  // route does (storage router serves /objects/<x> at /api/storage/objects/<x>).
+  let installerDownloadUrl: string | null = row.installerUrl ?? null;
+  if (!installerDownloadUrl && row.installerObjectKey) {
+    installerDownloadUrl = row.installerObjectKey.startsWith("/objects/")
+      ? `/api/storage/objects/${row.installerObjectKey.slice("/objects/".length)}`
+      : row.installerObjectKey;
+  }
   res.json({
     ...rest,
     isActive: row.isActive === "true",
@@ -174,6 +201,12 @@ router.get("/catalog/tools/:slug", async (req, res) => {
         ? null
         : Number(row.avgRating),
     reviewCount: Number(row.reviewCount ?? 0),
+    purpose: row.purpose ?? "",
+    ragQueryTemplates: row.ragQueryTemplates ?? [],
+    installerDownloadUrl,
+    gitLastSyncedAt: row.gitLastSyncedAt
+      ? row.gitLastSyncedAt.toISOString()
+      : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });

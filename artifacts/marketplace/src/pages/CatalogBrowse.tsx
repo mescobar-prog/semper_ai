@@ -240,6 +240,9 @@ function ToolCard({
         {tool.dataClassification && (
           <Pill tone="neutral">{tool.dataClassification}</Pill>
         )}
+        {tool.hostingType === "local_install" && (
+          <Pill tone="warn">Runs locally</Pill>
+        )}
       </div>
       <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
         <RatingBadge
