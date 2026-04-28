@@ -187,6 +187,45 @@ export function Profile() {
     queueSave({ ...draft, ...suggestion });
   };
 
+  const exportProfile = useCallback(
+    async (format: "md" | "json") => {
+      // Flush any pending debounced save so the export reflects the latest edits.
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+        await flush();
+      }
+      const latest =
+        queryClient.getQueryData<UserProfile>(getGetMyProfileQueryKey()) ??
+        profile;
+      if (!latest) return;
+
+      const date = new Date().toISOString().slice(0, 10);
+      let content: string;
+      let mime: string;
+      let ext: string;
+      if (format === "md") {
+        content = profileToMarkdown(latest);
+        mime = "text/markdown;charset=utf-8";
+        ext = "md";
+      } else {
+        content = JSON.stringify(latest, null, 2);
+        mime = "application/json;charset=utf-8";
+        ext = "json";
+      }
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `operator-profile-${date}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    [flush, profile, queryClient],
+  );
+
   if (error) {
     return (
       <PageContainer>
@@ -211,18 +250,21 @@ export function Profile() {
           </p>
         </div>
         {profile && (
-          <div className="text-right">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-              Completeness
-            </div>
-            <div className="text-3xl font-semibold tabular-nums">
-              {profile.completenessPct}%
-            </div>
-            <div className="w-32 h-1 bg-border rounded-full overflow-hidden mt-1">
-              <div
-                className="h-full bg-primary"
-                style={{ width: `${profile.completenessPct}%` }}
-              />
+          <div className="flex items-end gap-5">
+            <ExportMenu onExport={exportProfile} />
+            <div className="text-right">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                Completeness
+              </div>
+              <div className="text-3xl font-semibold tabular-nums">
+                {profile.completenessPct}%
+              </div>
+              <div className="w-32 h-1 bg-border rounded-full overflow-hidden mt-1">
+                <div
+                  className="h-full bg-primary"
+                  style={{ width: `${profile.completenessPct}%` }}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -315,6 +357,150 @@ export function Profile() {
       </div>
     </PageContainer>
   );
+}
+
+function ExportMenu({
+  onExport,
+}: {
+  onExport: (format: "md" | "json") => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const choose = (fmt: "md" | "json") => {
+    setOpen(false);
+    void onExport(fmt);
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-background hover:bg-accent text-sm font-medium"
+      >
+        Export
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          aria-hidden="true"
+          className="opacity-70"
+        >
+          <path
+            d="M2 3.5l3 3 3-3"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1 w-48 rounded-md border border-border bg-card shadow-lg z-10 py-1"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose("md")}
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent flex items-center justify-between"
+          >
+            <span>Markdown</span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              .md
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose("json")}
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent flex items-center justify-between"
+          >
+            <span>JSON</span>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              .json
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function profileToMarkdown(p: UserProfile): string {
+  const dash = (v: string | null | undefined) =>
+    v && v.trim() ? v.trim() : "—";
+  const block = (v: string | null | undefined) =>
+    v && v.trim() ? v.trim() : "—";
+
+  const lines: string[] = [];
+  lines.push("# Operator Profile");
+  lines.push("");
+  lines.push(`_Exported ${new Date().toISOString()}_`);
+  lines.push("");
+  lines.push(`**Completeness:** ${p.completenessPct}%`);
+  lines.push("");
+
+  lines.push("## Service info");
+  lines.push("");
+  lines.push(`- **Branch:** ${dash(p.branch)}`);
+  lines.push(`- **Rank:** ${dash(p.rank)}`);
+  lines.push(`- **MOS / Rate / AFSC:** ${dash(p.mosCode)}`);
+  lines.push("");
+
+  lines.push("## Duty");
+  lines.push("");
+  lines.push(`- **Duty title:** ${dash(p.dutyTitle)}`);
+  lines.push(`- **Unit:** ${dash(p.unit)}`);
+  lines.push(`- **Base / location:** ${dash(p.baseLocation)}`);
+  lines.push("");
+
+  lines.push("## Readiness & security");
+  lines.push("");
+  lines.push(`- **Clearance:** ${dash(p.securityClearance)}`);
+  lines.push(`- **Deployment status:** ${dash(p.deploymentStatus)}`);
+  lines.push("");
+
+  lines.push("## Narrative");
+  lines.push("");
+  lines.push("### Primary mission");
+  lines.push("");
+  lines.push(block(p.primaryMission));
+  lines.push("");
+  lines.push("### Narrative context");
+  lines.push("");
+  lines.push(block(p.freeFormContext));
+  lines.push("");
+
+  lines.push("## AI use cases");
+  lines.push("");
+  if (!p.aiUseCases || p.aiUseCases.length === 0) {
+    lines.push("—");
+  } else {
+    for (const uc of p.aiUseCases) lines.push(`- ${uc}`);
+  }
+  lines.push("");
+
+  return lines.join("\n");
 }
 
 function profileToDraft(p: UserProfile): ProfileUpdate {
