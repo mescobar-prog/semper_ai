@@ -38,7 +38,7 @@ export function Landing() {
         <div className="flex items-center gap-2.5">
           <div className="w-2.5 h-2.5 rounded-sm bg-primary" />
           <span className="text-xs uppercase tracking-[0.3em] text-primary font-mono font-semibold">
-            DoD AI Marketplace
+            DoW AI Marketplace
           </span>
         </div>
         <a
@@ -157,7 +157,7 @@ export function Landing() {
 
       <footer className="relative border-t border-border">
         <div className="max-w-5xl mx-auto px-8 py-6 flex items-center justify-between text-xs text-muted-foreground font-mono uppercase tracking-wider">
-          <span>DoD AI Marketplace · MVP</span>
+          <span>DoW AI Marketplace · MVP</span>
           <a
             href="/api/login?returnTo=/"
             className="hover:text-foreground transition-colors"

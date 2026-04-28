@@ -68,7 +68,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-sm bg-primary" />
             <span className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold">
-              DoD AI
+              DoW AI
             </span>
           </div>
           <h1 className="text-base font-semibold tracking-tight mt-1.5">

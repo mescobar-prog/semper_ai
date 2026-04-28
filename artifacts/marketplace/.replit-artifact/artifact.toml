@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "DoD AI Tool Marketplace"
+title = "DoW AI Tool Marketplace"
 version = "1.0.0"
 id = "artifacts/marketplace"
 router = "path"
