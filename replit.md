@@ -102,3 +102,46 @@ The project is structured as a pnpm workspace monorepo utilizing TypeScript (v5.
 - **Claude**: AI model (`claude-sonnet-4-6`) used in `brief-drafter`.
 - **Authentication**: Replit OIDC via `@workspace/replit-auth-web`.
 
+### Admin tool builder + hosting modes
+- Tools have a `hostingType` of either `cloud` (existing behavior) or `local_install`. Cloud tools open `launchUrl` in a new tab; local tools render a "Runs locally" pill, and launching opens a modal with install instructions, an installer download link, and an "Open with my context" button that navigates to `localLaunchUrlPattern` with `{token}` substituted.
+- Admin form (`Admin.tsx` `ToolForm`) is sectioned: 1. Source (GitHub repo picker via `useAdminListGithubRepos` + `adminGetGithubRepoMetadata`, plus a re-sync button using `useSyncToolFromGithub`), 2. Metadata (with per-field "Generate with AI" buttons on short/long description), 3. Hosting (cloud-vs-local switch, resumable installer upload — see below), 4. Context & RAG (purpose + RAG query templates, both AI-draftable), 5. Publish.
+- Installer uploads are resumable: client init → `POST /api/admin/tools/installer-upload-init` (with `fileFingerprint = name|size|lastModified`) returns `{ uploadId, bytesUploaded, chunkSize, resumed }`. Client then PUTs 8 MB chunks of the file Blob to `/api/admin/tools/installer-upload/:id/chunk?offset=N` (raw octet-stream). The server proxies each chunk to a GCS resumable session URI with the appropriate `Content-Range`, persisting `bytesUploaded` in the `installer_uploads` table after each chunk. A re-init with the same `(userId, fileFingerprint)` returns the existing in-progress session so the upload resumes from the last persisted offset (verified at runtime against GCS via `Range: bytes=`). On offset drift the chunk endpoint returns 409 with `expectedOffset` so the client can resync. `POST /api/admin/tools/installer-upload/:id/complete` finalises the row and returns the durable `objectKey`. The legacy presigned-URL endpoint is kept for back-compat but marked deprecated.
+- AI drafts are produced by `POST /api/admin/tools/draft-text` (Gemini helper `draftToolText`), seeded with the tool's name/vendor and the most recently imported GitHub README (held only in form-local state, never persisted).
+- GitHub access goes through `lib/github.ts`, which uses `@replit/connectors-sdk` to proxy authenticated requests via the connected GitHub integration (no PAT needed).
+- Installer files land in object storage under `uploads/<uuid>` keys; the catalog/launch responses serve them as `/api/storage/objects/uploads/<uuid>`.
+
+### Smart Mission Context (Auto-ingest)
+- `lib/mil-data` is the curated source of truth for branches, MOS/rate/AFSC catalogs, units, and per-(branch, MOS|unit) doctrine package URLs (public DoD doctrine PDFs).
+- The Profile page's Branch dropdown drives MOS and Unit typeaheads; clearing or changing the branch resets the dependent fields.
+- When `PUT /api/profile` resolves the branch+MOS or unit to a curated package, the server fires `startIngestPackage` (fire-and-forget) which downloads each PDF with bounded concurrency, dedups against existing `documents.source_url`, and records progress in `ingest_jobs`.
+- Documents created this way carry `auto_source` (e.g. `mos:army:11B`, `unit:army:1id`) and `source_url`. The Library page renders an `AutoSourceBadge` next to such docs and a filter chip row (All / Uploaded / Auto-ingested) for quick triage.
+- Endpoints: `POST /api/library/auto-ingest` (synchronous trigger by source string) and `GET /api/library/auto-ingest/status?source=...` (poll job state). The Profile page's `IngestStatusPanel` polls the latter every 1.5s while a job is running.
+
+### Mission context presets
+- Each user has one or more **presets** (named profile snapshot + scoped library doc IDs). Tables: `presets` (jsonb `profileSnapshot`, unique `[userId,name]`) and `preset_documents` (composite PK `[presetId,documentId]`). `profiles.activePresetId` points at the user's current preset.
+- `ensureActivePreset(userId)` lazy-backfills a "Default" preset from the existing profile + all the user's existing docs whenever `activePresetId` is null. Used at every preset-aware entry point so existing users get migrated transparently. There is no migrations dir — schema is `drizzle-kit push`'d.
+- API: `GET/POST /api/profile/presets`, `PUT/DELETE /api/profile/presets/:id`, `POST /api/profile/presets/:id/duplicate`, `POST /api/profile/presets/:id/activate`. Per-doc tagging: `PUT /api/library/documents/:id/presets`. `DocumentSummary.presetIds` and `UserProfile.activePresetId` are part of the API surface.
+- Launches and library-query use `getActiveContext(userId)` to read the snapshot back as a profile and pass `preset.documentIds` to RAG. RAG's `documentIds` filter early-returns `[]` on an empty list so a deliberately empty preset returns no chunks (instead of falling back to all docs).
+- Frontend: header switcher in `Layout.tsx`, presets management section in `Profile.tsx`, per-doc tag editor + "active preset only" filter in `Library.tsx`. Switching invalidates profile, presets, library, and dashboard query keys.
+- Invariant: a user can never have zero presets — DELETE rejects when only one remains, and deleting the active preset hands off `activePresetId` to another preset before removing the row.
+
+### Pre-launch context preview & redaction
+- `POST /api/tools/:toolId/launch-preview` returns the candidate payload (profile fields with redactable display values, top RAG snippets, the queries that produced them, and the user's `launchPreference`) WITHOUT minting a token or recording a launch. Profile fields and snippets reflect the user's **active preset** (snapshot + preset doc scope) so the preview matches what would actually be sent.
+- `POST /api/tools/:toolId/launch` accepts an optional body `{selectedFieldKeys?, selectedSnippetIds?, additionalNote?}`. When present, only those keys/snippets are stored on the launch row and surfaced via context-exchange. When omitted (e.g. preference="direct"), the server includes everything (full snapshot profile, top snippets scoped to preset docs).
+- Snippets are snapshotted into `launches.shared_snippets` (jsonb) at mint time, so the context-exchange step is fully deterministic and library edits after launch don't change what the tool sees.
+- At `/api/tools/context-exchange`, the snapshot profile is passed through `redactProfileForLaunch(snapshotProfile, sharedFieldKeys)` so excluded fields are nulled out before being serialized. The Context Block (cb_*) rides on the live profile and is not subject to redaction. Primer queries are empty (no fresh RAG) — only the user-approved snippets are sent.
+- `profiles.launchPreference` ("preview" | "direct", default "preview") controls whether the marketplace shows the redaction dialog or launches immediately. Toggle lives on /profile and inside the dialog.
+- /launches surfaces `sharedFieldKeys`, `sharedSnippets`, and `additionalNote` per row so users can audit exactly what each tool received.
+
+### Dependencies summary
+- **Database**: PostgreSQL (with `pgvector` extension)
+- **Object Storage**: App Storage / Google Cloud Storage (GCS)
+- **AI Models**:
+    - `Xenova/all-MiniLM-L6-v2` (for in-process embeddings)
+    - Replit Gemini AI integration (for `gemini-3-flash-preview` to generate RAG primer queries and power profile intake chat)
+    - Claude (`claude-sonnet-4-6`) (used by `brief-drafter` for generating briefs)
+- **GitHub**: Integrated via `@replit/connectors-sdk` for tool source management.
+- **Document Parsing Libraries**:
+    - `pdf-parse` (for PDF text extraction)
+    - `mammoth` (for DOCX text extraction)
+- **Authentication**: Replit OIDC via `@workspace/replit-auth-web`

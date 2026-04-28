@@ -2369,6 +2369,10 @@ export const DraftToolTextResponse = zod.object({
 });
 
 /**
+ * Legacy single-PUT presigned URL flow. New clients should prefer the
+resumable flow (initInstallerUpload + chunked PUTs) so that an
+interrupted upload can resume rather than restarting from byte 0.
+
  * @summary Mint a presigned upload URL for a tool installer file
  */
 
@@ -2386,6 +2390,73 @@ export const RequestInstallerUploadUrlResponse = zod.object({
   downloadUrl: zod
     .string()
     .describe("Stable URL the marketplace can serve to end users."),
+});
+
+/**
+ * Returns an upload session that the client can stream chunks into via
+PUT /admin/tools/installer-upload/{uploadId}/chunk. If a pending
+session already exists for the same user + fileFingerprint, that
+session is returned (with its current `bytesUploaded`) so the client
+can resume rather than restart.
+
+ * @summary Start or resume a chunked installer upload session
+ */
+
+export const InitInstallerUploadBody = zod.object({
+  filename: zod.string().min(1),
+  sizeBytes: zod.number().min(1),
+  contentType: zod.string().min(1),
+  fileFingerprint: zod
+    .string()
+    .min(1)
+    .describe(
+      "Stable identifier for the file picked locally — typically\n`${name}|${size}|${lastModified}`. Lets the server look up an\nexisting in-progress upload and return its current\n`bytesUploaded` so the client can resume.\n",
+    ),
+});
+
+export const InitInstallerUploadResponse = zod.object({
+  uploadId: zod.string(),
+  objectKey: zod
+    .string()
+    .describe("Persist this on the tool record as installerObjectKey."),
+  downloadUrl: zod
+    .string()
+    .describe("Stable URL the marketplace can serve to end users."),
+  sizeBytes: zod.number(),
+  bytesUploaded: zod
+    .number()
+    .describe("How many bytes are already on GCS for this session."),
+  chunkSize: zod
+    .number()
+    .describe(
+      "The chunk size, in bytes, the client should use for each PUT to\nthe chunk endpoint. Must be a multiple of 256 KB except for the\nfinal chunk.\n",
+    ),
+  resumed: zod
+    .boolean()
+    .describe("True when an existing pending session was returned."),
+});
+
+/**
+ * @summary Finalize a resumable installer upload
+ */
+export const CompleteInstallerUploadParams = zod.object({
+  uploadId: zod.coerce.string(),
+});
+
+export const CompleteInstallerUploadResponse = zod.object({
+  objectKey: zod
+    .string()
+    .describe("Persist this on the tool record as installerObjectKey."),
+  downloadUrl: zod.string(),
+  sizeBytes: zod.number(),
+  filename: zod.string(),
+});
+
+/**
+ * @summary Discard an in-progress installer upload session
+ */
+export const AbortInstallerUploadParams = zod.object({
+  uploadId: zod.coerce.string(),
 });
 
 /**

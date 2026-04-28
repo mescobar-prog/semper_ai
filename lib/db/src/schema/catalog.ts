@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -111,7 +113,50 @@ export const favoritesTable = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.toolId] })],
 );
 
+// Tracks in-progress installer uploads so that an admin can resume after a
+// network drop or page reload without re-uploading bytes that already made
+// it to GCS. The (user_id, file_fingerprint) combination is unique among
+// rows that haven't completed yet, which lets the client reconnect to a
+// session by re-presenting the same file. fingerprint = `${name}|${size}|${lastModified}`.
+export const installerUploadsTable = pgTable(
+  "installer_uploads",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    objectKey: varchar("object_key").notNull(),
+    sessionUri: text("session_uri").notNull(),
+    filename: varchar("filename").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    contentType: varchar("content_type").notNull(),
+    fileFingerprint: varchar("file_fingerprint").notNull(),
+    bytesUploaded: bigint("bytes_uploaded", { mode: "number" })
+      .notNull()
+      .default(0),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // Partial-style uniqueness simulated by adding completed_at to the key:
+    // two completed rows with the same fingerprint coexist, but only one
+    // pending row (completed_at IS NULL → distinct in btree across rows).
+    uniqueIndex("installer_uploads_pending_idx")
+      .on(t.userId, t.fileFingerprint)
+      .where(sql`completed_at IS NULL`),
+    index("installer_uploads_user_idx").on(t.userId),
+  ],
+);
+
 export type Category = typeof categoriesTable.$inferSelect;
 export type Tool = typeof toolsTable.$inferSelect;
 export type InsertTool = typeof toolsTable.$inferInsert;
 export type Favorite = typeof favoritesTable.$inferSelect;
+export type InstallerUpload = typeof installerUploadsTable.$inferSelect;
+export type InsertInstallerUpload = typeof installerUploadsTable.$inferInsert;

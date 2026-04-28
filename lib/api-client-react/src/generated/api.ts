@@ -51,6 +51,9 @@ import type {
   GithubRepoSummary,
   HandleBrowserLoginCallbackParams,
   HealthStatus,
+  InitInstallerUploadRequest,
+  InstallerUploadResult,
+  InstallerUploadSession,
   InstallerUploadUrlRequest,
   InstallerUploadUrlResponse,
   LaunchHistoryItem,
@@ -4848,6 +4851,10 @@ export const useDraftToolText = <
 };
 
 /**
+ * Legacy single-PUT presigned URL flow. New clients should prefer the
+resumable flow (initInstallerUpload + chunked PUTs) so that an
+interrupted upload can resume rather than restarting from byte 0.
+
  * @summary Mint a presigned upload URL for a tool installer file
  */
 export const getRequestInstallerUploadUrlUrl = () => {
@@ -4935,6 +4942,270 @@ export const useRequestInstallerUploadUrl = <
   TContext
 > => {
   return useMutation(getRequestInstallerUploadUrlMutationOptions(options));
+};
+
+/**
+ * Returns an upload session that the client can stream chunks into via
+PUT /admin/tools/installer-upload/{uploadId}/chunk. If a pending
+session already exists for the same user + fileFingerprint, that
+session is returned (with its current `bytesUploaded`) so the client
+can resume rather than restart.
+
+ * @summary Start or resume a chunked installer upload session
+ */
+export const getInitInstallerUploadUrl = () => {
+  return `/api/admin/tools/installer-upload-init`;
+};
+
+export const initInstallerUpload = async (
+  initInstallerUploadRequest: InitInstallerUploadRequest,
+  options?: RequestInit,
+): Promise<InstallerUploadSession> => {
+  return customFetch<InstallerUploadSession>(getInitInstallerUploadUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(initInstallerUploadRequest),
+  });
+};
+
+export const getInitInstallerUploadMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof initInstallerUpload>>,
+    TError,
+    { data: BodyType<InitInstallerUploadRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof initInstallerUpload>>,
+  TError,
+  { data: BodyType<InitInstallerUploadRequest> },
+  TContext
+> => {
+  const mutationKey = ["initInstallerUpload"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof initInstallerUpload>>,
+    { data: BodyType<InitInstallerUploadRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return initInstallerUpload(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type InitInstallerUploadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof initInstallerUpload>>
+>;
+export type InitInstallerUploadMutationBody =
+  BodyType<InitInstallerUploadRequest>;
+export type InitInstallerUploadMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Start or resume a chunked installer upload session
+ */
+export const useInitInstallerUpload = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof initInstallerUpload>>,
+    TError,
+    { data: BodyType<InitInstallerUploadRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof initInstallerUpload>>,
+  TError,
+  { data: BodyType<InitInstallerUploadRequest> },
+  TContext
+> => {
+  return useMutation(getInitInstallerUploadMutationOptions(options));
+};
+
+/**
+ * @summary Finalize a resumable installer upload
+ */
+export const getCompleteInstallerUploadUrl = (uploadId: string) => {
+  return `/api/admin/tools/installer-upload/${uploadId}/complete`;
+};
+
+export const completeInstallerUpload = async (
+  uploadId: string,
+  options?: RequestInit,
+): Promise<InstallerUploadResult> => {
+  return customFetch<InstallerUploadResult>(
+    getCompleteInstallerUploadUrl(uploadId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getCompleteInstallerUploadMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof completeInstallerUpload>>,
+    TError,
+    { uploadId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof completeInstallerUpload>>,
+  TError,
+  { uploadId: string },
+  TContext
+> => {
+  const mutationKey = ["completeInstallerUpload"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof completeInstallerUpload>>,
+    { uploadId: string }
+  > = (props) => {
+    const { uploadId } = props ?? {};
+
+    return completeInstallerUpload(uploadId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CompleteInstallerUploadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof completeInstallerUpload>>
+>;
+
+export type CompleteInstallerUploadMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Finalize a resumable installer upload
+ */
+export const useCompleteInstallerUpload = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof completeInstallerUpload>>,
+    TError,
+    { uploadId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof completeInstallerUpload>>,
+  TError,
+  { uploadId: string },
+  TContext
+> => {
+  return useMutation(getCompleteInstallerUploadMutationOptions(options));
+};
+
+/**
+ * @summary Discard an in-progress installer upload session
+ */
+export const getAbortInstallerUploadUrl = (uploadId: string) => {
+  return `/api/admin/tools/installer-upload/${uploadId}/abort`;
+};
+
+export const abortInstallerUpload = async (
+  uploadId: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getAbortInstallerUploadUrl(uploadId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAbortInstallerUploadMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof abortInstallerUpload>>,
+    TError,
+    { uploadId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof abortInstallerUpload>>,
+  TError,
+  { uploadId: string },
+  TContext
+> => {
+  const mutationKey = ["abortInstallerUpload"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof abortInstallerUpload>>,
+    { uploadId: string }
+  > = (props) => {
+    const { uploadId } = props ?? {};
+
+    return abortInstallerUpload(uploadId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AbortInstallerUploadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof abortInstallerUpload>>
+>;
+
+export type AbortInstallerUploadMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Discard an in-progress installer upload session
+ */
+export const useAbortInstallerUpload = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof abortInstallerUpload>>,
+    TError,
+    { uploadId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof abortInstallerUpload>>,
+  TError,
+  { uploadId: string },
+  TContext
+> => {
+  return useMutation(getAbortInstallerUploadMutationOptions(options));
 };
 
 /**

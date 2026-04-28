@@ -17,7 +17,9 @@ import {
   useAdminListContextBlockConfirmations,
   useDraftToolText,
   useSyncToolFromGithub,
-  useRequestInstallerUploadUrl,
+  useInitInstallerUpload,
+  useCompleteInstallerUpload,
+  useAbortInstallerUpload,
   adminGetGithubRepoMetadata,
   getAdminListToolsQueryKey,
   getListToolsQueryKey,
@@ -1472,33 +1474,74 @@ const MAX_INSTALLER_UPLOAD_SIZE_MB = Math.floor(
   MAX_INSTALLER_UPLOAD_SIZE_BYTES / (1024 * 1024),
 );
 
-function putWithProgress(
-  url: string,
-  file: File,
-  contentType: string,
-  onProgress: (pct: number) => void,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", contentType);
-    xhr.upload.onprogress = (ev) => {
-      if (ev.lengthComputable) {
-        onProgress(Math.round((ev.loaded / ev.total) * 100));
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(100);
-        resolve();
-      } else {
-        reject(new Error(`Upload failed (HTTP ${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new Error("Upload failed (network error)"));
-    xhr.onabort = () => reject(new Error("Upload aborted"));
-    xhr.send(file);
+// Stable identifier for the picked file used to look up an in-progress
+// upload session on the server. Same shape as the server expects.
+function fileFingerprint(file: File): string {
+  return `${file.name}|${file.size}|${file.lastModified}`;
+}
+
+// Slice the picked file. Returning a Blob lets `fetch` stream the chunk
+// without materialising another ArrayBuffer copy.
+function sliceFile(file: File, start: number, end: number): Blob {
+  return file.slice(start, end);
+}
+
+interface ChunkResponse {
+  bytesUploaded: number;
+  sizeBytes: number;
+  complete: boolean;
+}
+
+interface OffsetMismatchError {
+  expectedOffset: number;
+  bytesUploaded: number;
+  error?: string;
+}
+
+// Push a single chunk to the server. Returns the new bytesUploaded after
+// the chunk lands (which may differ from `offset + chunk.length` if the
+// server resynced from GCS). Throws on network / non-recoverable errors;
+// returns an "offsetMismatch" payload on 409 so the caller can resync.
+async function pushInstallerChunk(
+  uploadId: string,
+  offset: number,
+  chunk: Blob,
+  signal: AbortSignal,
+): Promise<
+  | { kind: "ok"; data: ChunkResponse }
+  | { kind: "offsetMismatch"; data: OffsetMismatchError }
+> {
+  const url = `/api/admin/tools/installer-upload/${encodeURIComponent(
+    uploadId,
+  )}/chunk?offset=${offset}`;
+  const response = await fetch(url, {
+    method: "PUT",
+    body: chunk,
+    headers: { "Content-Type": "application/octet-stream" },
+    credentials: "include",
+    signal,
   });
+  if (response.status === 409) {
+    const data = (await response.json().catch(() => ({}))) as
+      | OffsetMismatchError
+      | Record<string, unknown>;
+    if (typeof (data as OffsetMismatchError).bytesUploaded === "number") {
+      return { kind: "offsetMismatch", data: data as OffsetMismatchError };
+    }
+    throw new Error(
+      typeof (data as { error?: string }).error === "string"
+        ? (data as { error?: string }).error!
+        : `Upload chunk rejected (HTTP 409)`,
+    );
+  }
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(data.error ?? `Upload chunk failed (HTTP ${response.status})`);
+  }
+  const data = (await response.json()) as ChunkResponse;
+  return { kind: "ok", data };
 }
 
 function HostingSection({
@@ -1509,13 +1552,19 @@ function HostingSection({
   set: <K extends keyof ToolUpsert>(key: K, value: ToolUpsert[K]) => void;
 }) {
   const isLocal = data.hostingType === "local_install";
-  const installerMutation = useRequestInstallerUploadUrl();
+  const initMutation = useInitInstallerUpload();
+  const completeMutation = useCompleteInstallerUpload();
+  const abortMutation = useAbortInstallerUpload();
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [resumed, setResumed] = useState(false);
+  const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   async function uploadInstaller(file: File) {
     setUploadError(null);
+    setResumed(false);
 
     if (file.size > MAX_INSTALLER_UPLOAD_SIZE_BYTES) {
       setUploadError(
@@ -1526,38 +1575,102 @@ function HostingSection({
 
     setUploading(true);
     setUploadProgress(0);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       const contentType = file.type || "application/octet-stream";
-      const presigned = await installerMutation.mutateAsync({
+      const session = await initMutation.mutateAsync({
         data: {
           filename: file.name,
           sizeBytes: file.size,
           contentType,
+          fileFingerprint: fileFingerprint(file),
         },
       });
-      await putWithProgress(
-        presigned.uploadUrl,
-        file,
-        contentType,
-        (pct) => setUploadProgress(pct),
+
+      setActiveUploadId(session.uploadId);
+      let bytesUploaded = session.bytesUploaded;
+      const chunkSize = session.chunkSize;
+      const totalSize = session.sizeBytes;
+      if (session.resumed && bytesUploaded > 0) {
+        setResumed(true);
+      }
+      setUploadProgress(
+        totalSize > 0 ? Math.round((bytesUploaded / totalSize) * 100) : 0,
       );
-      set("installerObjectKey", presigned.objectKey);
-      set("installerFilename", file.name);
-      set("installerSizeBytes", file.size);
+
+      // Already complete (a same-fingerprint upload finished previously
+      // and the row was returned to us) — go straight to finalize.
+      if (bytesUploaded < totalSize) {
+        while (bytesUploaded < totalSize) {
+          if (ctrl.signal.aborted) throw new DOMException("aborted", "AbortError");
+          const end = Math.min(bytesUploaded + chunkSize, totalSize);
+          const chunk = sliceFile(file, bytesUploaded, end);
+          const result = await pushInstallerChunk(
+            session.uploadId,
+            bytesUploaded,
+            chunk,
+            ctrl.signal,
+          );
+          if (result.kind === "offsetMismatch") {
+            // Server is ahead of us — re-sync and continue from the new
+            // offset rather than re-sending the same chunk.
+            bytesUploaded = result.data.bytesUploaded;
+          } else {
+            bytesUploaded = result.data.bytesUploaded;
+          }
+          setUploadProgress(
+            totalSize > 0 ? Math.round((bytesUploaded / totalSize) * 100) : 100,
+          );
+        }
+      }
+
+      const finalized = await completeMutation.mutateAsync({
+        uploadId: session.uploadId,
+      });
+
+      set("installerObjectKey", finalized.objectKey);
+      set("installerFilename", finalized.filename);
+      set("installerSizeBytes", finalized.sizeBytes);
+      setActiveUploadId(null);
       // Surface the installer download URL back to admins via installerUrl
       // only when no external URL was set; the server prefers installerUrl
       // first, so we keep that override path open.
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Upload failed";
-      // Surface the server's 413 message verbatim when present.
-      const detail =
-        (err as { response?: { data?: { error?: string } } } | null)?.response
-          ?.data?.error;
-      setUploadError(detail ?? msg);
+      if ((err as DOMException)?.name === "AbortError") {
+        setUploadError("Upload paused — pick the same file again to resume.");
+      } else {
+        const msg =
+          err instanceof Error ? err.message : "Upload failed";
+        // Surface the server's 413 message verbatim when present.
+        const detail =
+          (err as { response?: { data?: { error?: string } } } | null)?.response
+            ?.data?.error;
+        setUploadError(detail ?? msg);
+      }
     } finally {
       setUploading(false);
+      abortRef.current = null;
     }
+  }
+
+  function cancelUpload() {
+    abortRef.current?.abort();
+  }
+
+  async function discardUpload() {
+    cancelUpload();
+    if (activeUploadId) {
+      try {
+        await abortMutation.mutateAsync({ uploadId: activeUploadId });
+      } catch {
+        // Best-effort — server-side row is harmless if it lingers.
+      }
+      setActiveUploadId(null);
+    }
+    setUploadProgress(0);
+    setUploadError(null);
+    setResumed(false);
   }
 
   return (
@@ -1668,7 +1781,28 @@ function HostingSection({
                   <span className="text-xs font-mono text-primary tabular-nums">
                     {uploadProgress}%
                   </span>
+                  <button
+                    type="button"
+                    onClick={cancelUpload}
+                    className="text-[11px] text-amber-400 hover:underline font-mono"
+                  >
+                    Pause
+                  </button>
                 </div>
+              )}
+              {resumed && uploading && (
+                <span className="text-[11px] font-mono text-emerald-400">
+                  Resuming from {uploadProgress}%
+                </span>
+              )}
+              {!uploading && activeUploadId && uploadError && (
+                <button
+                  type="button"
+                  onClick={discardUpload}
+                  className="text-[11px] text-rose-400 hover:underline font-mono"
+                >
+                  Discard partial upload
+                </button>
               )}
               {data.installerFilename && !uploading && (
                 <span className="text-xs font-mono text-muted-foreground">

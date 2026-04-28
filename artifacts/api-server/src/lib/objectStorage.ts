@@ -122,6 +122,45 @@ export class ObjectStorageService {
     });
   }
 
+  /**
+   * Initiate a GCS resumable upload session for a fresh object under
+   * `<PRIVATE_OBJECT_DIR>/uploads/<uuid>`. Returns the session URI (which
+   * carries its own auth token in its query string and is valid for ~7 days)
+   * and the canonical objectKey that should later be persisted on the tool
+   * record as `installerObjectKey`.
+   *
+   * The session URI is what the server proxies chunked PUT requests to —
+   * the client never sees it directly. See routes/admin.ts for the chunk
+   * proxy.
+   */
+  async createResumableUploadSession(opts: {
+    contentType: string;
+  }): Promise<{ sessionUri: string; objectKey: string }> {
+    const privateObjectDir = this.getPrivateObjectDir();
+    if (!privateObjectDir) {
+      throw new Error(
+        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
+          "tool and set PRIVATE_OBJECT_DIR env var.",
+      );
+    }
+
+    const objectId = randomUUID();
+    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [sessionUri] = await file.createResumableUpload({
+      metadata: { contentType: opts.contentType },
+    });
+
+    // Mirror normalizeObjectEntityPath for consistency with the existing
+    // upload flow: the stored key is "/objects/uploads/<uuid>" relative to
+    // PRIVATE_OBJECT_DIR.
+    const objectKey = `/objects/uploads/${objectId}`;
+
+    return { sessionUri, objectKey };
+  }
+
   async getObjectEntityFile(objectPath: string): Promise<File> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();

@@ -1,5 +1,5 @@
-import { Router, type IRouter } from "express";
-import { and, asc, eq, sql } from "drizzle-orm";
+import express, { Router, type IRouter } from "express";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import {
   db,
   toolsTable,
@@ -9,6 +9,7 @@ import {
   toolReviewsTable,
   usersTable,
   profilesTable,
+  installerUploadsTable,
   type Tool,
 } from "@workspace/db";
 import {
@@ -16,6 +17,7 @@ import {
   UpdateToolBody,
   DraftToolTextBody,
   RequestInstallerUploadUrlBody,
+  InitInstallerUploadBody,
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
@@ -714,5 +716,447 @@ router.post(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Resumable installer upload (chunked)
+// ---------------------------------------------------------------------------
+//
+// The flow is:
+//   1. POST /admin/tools/installer-upload-init       → start or resume
+//   2. PUT  /admin/tools/installer-upload/:id/chunk  → push 8 MB chunk
+//   3. POST /admin/tools/installer-upload/:id/complete (after final chunk)
+//      POST /admin/tools/installer-upload/:id/abort  (give up cleanly)
+//
+// We proxy chunks through the API server (rather than letting the browser
+// PUT directly to GCS) so that we don't depend on the bucket's CORS config
+// allowing `Content-Range` request headers, and so the API server can be
+// the single source of truth on `bytesUploaded` (persisted in DB) for
+// resume-after-page-reload.
+//
+// Chunk size MUST be a multiple of 256 KB except for the final chunk —
+// that's a GCS resumable-upload requirement.
+
+const INSTALLER_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB
+// Allow a little headroom over the chunk size for HTTP overhead.
+const INSTALLER_UPLOAD_CHUNK_LIMIT = INSTALLER_UPLOAD_CHUNK_SIZE + 64 * 1024;
+
+router.post(
+  "/admin/tools/installer-upload-init",
+  requireAdmin,
+  async (req, res) => {
+    const parsed = InitInstallerUploadBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid installer upload request" });
+      return;
+    }
+    const { filename, sizeBytes, contentType, fileFingerprint } = parsed.data;
+    if (sizeBytes > MAX_INSTALLER_UPLOAD_SIZE_BYTES) {
+      res.status(413).json({
+        error: `Installer too large. Maximum size is ${Math.floor(
+          MAX_INSTALLER_UPLOAD_SIZE_BYTES / (1024 * 1024),
+        )} MB.`,
+      });
+      return;
+    }
+    const userId = req.user!.id;
+
+    try {
+      const [existing] = await db
+        .select()
+        .from(installerUploadsTable)
+        .where(
+          and(
+            eq(installerUploadsTable.userId, userId),
+            eq(installerUploadsTable.fileFingerprint, fileFingerprint),
+            isNull(installerUploadsTable.completedAt),
+          ),
+        )
+        .limit(1);
+
+      // Reuse an in-progress session when the same user is uploading the
+      // same file (matched by fingerprint). Refresh `bytesUploaded` from
+      // GCS so the client gets an authoritative resume offset even if the
+      // last successful chunk's DB write was lost.
+      if (existing && existing.sizeBytes === sizeBytes) {
+        const liveOffset = await queryGcsResumableOffset(
+          existing.sessionUri,
+          existing.sizeBytes,
+        );
+        let bytesUploaded = existing.bytesUploaded;
+        if (liveOffset.kind === "in_progress") {
+          bytesUploaded = liveOffset.bytesUploaded;
+          if (bytesUploaded !== existing.bytesUploaded) {
+            await db
+              .update(installerUploadsTable)
+              .set({ bytesUploaded })
+              .where(eq(installerUploadsTable.id, existing.id));
+          }
+          res.json({
+            uploadId: existing.id,
+            objectKey: existing.objectKey,
+            downloadUrl:
+              buildInstallerDownloadUrl(existing.objectKey) ??
+              existing.objectKey,
+            sizeBytes: existing.sizeBytes,
+            bytesUploaded,
+            chunkSize: INSTALLER_UPLOAD_CHUNK_SIZE,
+            resumed: true,
+          });
+          return;
+        }
+        if (liveOffset.kind === "complete") {
+          await db
+            .update(installerUploadsTable)
+            .set({
+              bytesUploaded: existing.sizeBytes,
+              completedAt: new Date(),
+            })
+            .where(eq(installerUploadsTable.id, existing.id));
+          res.json({
+            uploadId: existing.id,
+            objectKey: existing.objectKey,
+            downloadUrl:
+              buildInstallerDownloadUrl(existing.objectKey) ??
+              existing.objectKey,
+            sizeBytes: existing.sizeBytes,
+            bytesUploaded: existing.sizeBytes,
+            chunkSize: INSTALLER_UPLOAD_CHUNK_SIZE,
+            resumed: true,
+          });
+          return;
+        }
+        // liveOffset.kind === "expired" → session no longer valid. Mark
+        // this row completed (so it stops blocking the unique index) and
+        // fall through to mint a fresh session.
+        await db
+          .update(installerUploadsTable)
+          .set({ completedAt: new Date() })
+          .where(eq(installerUploadsTable.id, existing.id));
+      } else if (existing) {
+        // Same fingerprint but different sizeBytes → file was modified or
+        // a different file collided. Retire the old session and mint a
+        // new one.
+        await db
+          .update(installerUploadsTable)
+          .set({ completedAt: new Date() })
+          .where(eq(installerUploadsTable.id, existing.id));
+      }
+
+      const { sessionUri, objectKey } =
+        await objectStorageService.createResumableUploadSession({ contentType });
+
+      const [created] = await db
+        .insert(installerUploadsTable)
+        .values({
+          userId,
+          objectKey,
+          sessionUri,
+          filename,
+          sizeBytes,
+          contentType,
+          fileFingerprint,
+          bytesUploaded: 0,
+        })
+        .returning();
+
+      res.json({
+        uploadId: created.id,
+        objectKey: created.objectKey,
+        downloadUrl:
+          buildInstallerDownloadUrl(created.objectKey) ?? created.objectKey,
+        sizeBytes: created.sizeBytes,
+        bytesUploaded: 0,
+        chunkSize: INSTALLER_UPLOAD_CHUNK_SIZE,
+        resumed: false,
+      });
+    } catch (err) {
+      req.log.error({ err }, "Installer upload init failed");
+      res.status(500).json({ error: "Failed to start installer upload" });
+    }
+  },
+);
+
+router.put(
+  "/admin/tools/installer-upload/:uploadId/chunk",
+  requireAdmin,
+  express.raw({
+    type: () => true,
+    limit: INSTALLER_UPLOAD_CHUNK_LIMIT,
+  }),
+  async (req, res) => {
+    const uploadId = String(req.params.uploadId);
+    const userId = req.user!.id;
+
+    const offsetParam = req.query.offset;
+    const offset = Number(
+      Array.isArray(offsetParam) ? offsetParam[0] : offsetParam,
+    );
+    if (!Number.isFinite(offset) || offset < 0 || !Number.isInteger(offset)) {
+      res.status(400).json({ error: "offset query param required" });
+      return;
+    }
+
+    const chunk = req.body as Buffer;
+    if (!Buffer.isBuffer(chunk) || chunk.length === 0) {
+      res.status(400).json({ error: "Empty chunk body" });
+      return;
+    }
+
+    try {
+      const [session] = await db
+        .select()
+        .from(installerUploadsTable)
+        .where(
+          and(
+            eq(installerUploadsTable.id, uploadId),
+            eq(installerUploadsTable.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!session) {
+        res.status(404).json({ error: "Upload session not found" });
+        return;
+      }
+      if (session.completedAt) {
+        res.status(409).json({
+          error: "Upload session already completed",
+          bytesUploaded: session.sizeBytes,
+        });
+        return;
+      }
+      if (offset !== session.bytesUploaded) {
+        // Client and server drifted (likely a duplicate retry). Tell the
+        // client where to resume from rather than corrupting the upload.
+        res.status(409).json({
+          error: "Offset mismatch",
+          expectedOffset: session.bytesUploaded,
+          bytesUploaded: session.bytesUploaded,
+        });
+        return;
+      }
+      if (offset + chunk.length > session.sizeBytes) {
+        res.status(400).json({
+          error: "Chunk extends past declared file size",
+        });
+        return;
+      }
+
+      const result = await pushChunkToGcs(
+        session.sessionUri,
+        chunk,
+        offset,
+        session.sizeBytes,
+      );
+
+      if (result.kind === "error") {
+        req.log.error(
+          { uploadId, status: result.status, body: result.body },
+          "GCS chunk PUT failed",
+        );
+        res.status(502).json({
+          error: `Storage chunk upload failed (HTTP ${result.status})`,
+        });
+        return;
+      }
+
+      const newBytesUploaded =
+        result.kind === "complete" ? session.sizeBytes : result.bytesUploaded;
+
+      await db
+        .update(installerUploadsTable)
+        .set({
+          bytesUploaded: newBytesUploaded,
+          completedAt: result.kind === "complete" ? new Date() : null,
+        })
+        .where(eq(installerUploadsTable.id, uploadId));
+
+      res.json({
+        bytesUploaded: newBytesUploaded,
+        sizeBytes: session.sizeBytes,
+        complete: result.kind === "complete",
+      });
+    } catch (err) {
+      req.log.error({ err, uploadId }, "Installer upload chunk failed");
+      res.status(500).json({ error: "Failed to upload chunk" });
+    }
+  },
+);
+
+router.post(
+  "/admin/tools/installer-upload/:uploadId/complete",
+  requireAdmin,
+  async (req, res) => {
+    const uploadId = String(req.params.uploadId);
+    const userId = req.user!.id;
+    try {
+      const [session] = await db
+        .select()
+        .from(installerUploadsTable)
+        .where(
+          and(
+            eq(installerUploadsTable.id, uploadId),
+            eq(installerUploadsTable.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!session) {
+        res.status(404).json({ error: "Upload session not found" });
+        return;
+      }
+      if (session.bytesUploaded !== session.sizeBytes) {
+        res.status(409).json({
+          error: "Upload not yet fully received",
+          bytesUploaded: session.bytesUploaded,
+          sizeBytes: session.sizeBytes,
+        });
+        return;
+      }
+      if (!session.completedAt) {
+        await db
+          .update(installerUploadsTable)
+          .set({ completedAt: new Date() })
+          .where(eq(installerUploadsTable.id, uploadId));
+      }
+      res.json({
+        objectKey: session.objectKey,
+        downloadUrl:
+          buildInstallerDownloadUrl(session.objectKey) ?? session.objectKey,
+        sizeBytes: session.sizeBytes,
+        filename: session.filename,
+      });
+    } catch (err) {
+      req.log.error({ err, uploadId }, "Installer upload complete failed");
+      res.status(500).json({ error: "Failed to complete installer upload" });
+    }
+  },
+);
+
+router.post(
+  "/admin/tools/installer-upload/:uploadId/abort",
+  requireAdmin,
+  async (req, res) => {
+    const uploadId = String(req.params.uploadId);
+    const userId = req.user!.id;
+    try {
+      const [session] = await db
+        .select()
+        .from(installerUploadsTable)
+        .where(
+          and(
+            eq(installerUploadsTable.id, uploadId),
+            eq(installerUploadsTable.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!session) {
+        res.status(404).json({ error: "Upload session not found" });
+        return;
+      }
+      // Best-effort tell GCS to drop the resumable session so the bytes
+      // already uploaded don't linger as orphaned data.
+      void cancelGcsResumableSession(session.sessionUri).catch((err) => {
+        req.log.warn({ err, uploadId }, "GCS cancel failed; ignoring");
+      });
+      await db
+        .update(installerUploadsTable)
+        .set({ completedAt: new Date() })
+        .where(eq(installerUploadsTable.id, uploadId));
+      res.status(204).end();
+    } catch (err) {
+      req.log.error({ err, uploadId }, "Installer upload abort failed");
+      res.status(500).json({ error: "Failed to abort installer upload" });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// GCS resumable upload helpers
+// ---------------------------------------------------------------------------
+
+type ChunkPushResult =
+  | { kind: "in_progress"; bytesUploaded: number }
+  | { kind: "complete" }
+  | { kind: "error"; status: number; body: string };
+
+async function pushChunkToGcs(
+  sessionUri: string,
+  chunk: Buffer,
+  offset: number,
+  totalSize: number,
+): Promise<ChunkPushResult> {
+  const start = offset;
+  const end = offset + chunk.length - 1;
+  const response = await fetch(sessionUri, {
+    method: "PUT",
+    headers: {
+      "Content-Length": String(chunk.length),
+      "Content-Range": `bytes ${start}-${end}/${totalSize}`,
+    },
+    // Buffer is accepted by undici/Node fetch at runtime; the lib.dom
+    // BodyInit shape doesn't include Node Buffer so cast through unknown.
+    body: chunk as unknown as ArrayBuffer,
+  });
+
+  // 308 Resume Incomplete → more chunks expected. The Range response
+  // header tells us the inclusive last byte GCS has stored.
+  if (response.status === 308) {
+    const range = response.headers.get("range");
+    let bytesUploaded = 0;
+    if (range) {
+      const m = range.match(/bytes=0-(\d+)/);
+      if (m) bytesUploaded = Number(m[1]) + 1;
+    }
+    return { kind: "in_progress", bytesUploaded };
+  }
+
+  if (response.status >= 200 && response.status < 300) {
+    return { kind: "complete" };
+  }
+
+  const body = await response.text().catch(() => "");
+  return { kind: "error", status: response.status, body };
+}
+
+type GcsOffsetResult =
+  | { kind: "in_progress"; bytesUploaded: number }
+  | { kind: "complete" }
+  | { kind: "expired" };
+
+async function queryGcsResumableOffset(
+  sessionUri: string,
+  totalSize: number,
+): Promise<GcsOffsetResult> {
+  const response = await fetch(sessionUri, {
+    method: "PUT",
+    headers: {
+      "Content-Length": "0",
+      "Content-Range": `bytes */${totalSize}`,
+    },
+  });
+
+  if (response.status === 308) {
+    const range = response.headers.get("range");
+    let bytesUploaded = 0;
+    if (range) {
+      const m = range.match(/bytes=0-(\d+)/);
+      if (m) bytesUploaded = Number(m[1]) + 1;
+    }
+    return { kind: "in_progress", bytesUploaded };
+  }
+
+  if (response.status >= 200 && response.status < 300) {
+    return { kind: "complete" };
+  }
+
+  // 404 / 410 / 499 etc. → session URI no longer valid (commonly because
+  // it expired or was cancelled).
+  return { kind: "expired" };
+}
+
+async function cancelGcsResumableSession(sessionUri: string): Promise<void> {
+  // Per the GCS XML API resumable-upload protocol, sending DELETE to the
+  // session URI cancels it.
+  await fetch(sessionUri, { method: "DELETE" });
+}
 
 export default router;

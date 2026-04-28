@@ -567,6 +567,50 @@ export interface InstallerUploadUrlResponse {
   downloadUrl: string;
 }
 
+export interface InitInstallerUploadRequest {
+  /** @minLength 1 */
+  filename: string;
+  /** @minimum 1 */
+  sizeBytes: number;
+  /** @minLength 1 */
+  contentType: string;
+  /**
+   * Stable identifier for the file picked locally — typically
+`${name}|${size}|${lastModified}`. Lets the server look up an
+existing in-progress upload and return its current
+`bytesUploaded` so the client can resume.
+
+   * @minLength 1
+   */
+  fileFingerprint: string;
+}
+
+export interface InstallerUploadSession {
+  uploadId: string;
+  /** Persist this on the tool record as installerObjectKey. */
+  objectKey: string;
+  /** Stable URL the marketplace can serve to end users. */
+  downloadUrl: string;
+  sizeBytes: number;
+  /** How many bytes are already on GCS for this session. */
+  bytesUploaded: number;
+  /** The chunk size, in bytes, the client should use for each PUT to
+the chunk endpoint. Must be a multiple of 256 KB except for the
+final chunk.
+ */
+  chunkSize: number;
+  /** True when an existing pending session was returned. */
+  resumed: boolean;
+}
+
+export interface InstallerUploadResult {
+  /** Persist this on the tool record as installerObjectKey. */
+  objectKey: string;
+  downloadUrl: string;
+  sizeBytes: number;
+  filename: string;
+}
+
 export interface SubmissionUpsert {
   /** @minLength 1 */
   name: string;

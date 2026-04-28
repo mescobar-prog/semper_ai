@@ -1399,6 +1399,10 @@ paths:
       tags: [Admin]
       operationId: requestInstallerUploadUrl
       summary: Mint a presigned upload URL for a tool installer file
+      description: |
+        Legacy single-PUT presigned URL flow. New clients should prefer the
+        resumable flow (initInstallerUpload + chunked PUTs) so that an
+        interrupted upload can resume rather than restarting from byte 0.
       requestBody:
         required: true
         content:
@@ -1412,6 +1416,82 @@ paths:
               schema: { $ref: '#/components/schemas/InstallerUploadUrlResponse' }
         '400':
           description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/tools/installer-upload-init:
+    post:
+      tags: [Admin]
+      operationId: initInstallerUpload
+      summary: Start or resume a chunked installer upload session
+      description: |
+        Returns an upload session that the client can stream chunks into via
+        PUT /admin/tools/installer-upload/{uploadId}/chunk. If a pending
+        session already exists for the same user + fileFingerprint, that
+        session is returned (with its current `bytesUploaded`) so the client
+        can resume rather than restart.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InitInstallerUploadRequest' }
+      responses:
+        '200':
+          description: Upload session ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallerUploadSession' }
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '413':
+          description: File exceeds the maximum installer size
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/tools/installer-upload/{uploadId}/complete:
+    post:
+      tags: [Admin]
+      operationId: completeInstallerUpload
+      summary: Finalize a resumable installer upload
+      parameters:
+        - in: path
+          name: uploadId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Upload finalized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallerUploadResult' }
+        '404':
+          description: Upload session not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: Upload not yet fully received
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/tools/installer-upload/{uploadId}/abort:
+    post:
+      tags: [Admin]
+      operationId: abortInstallerUpload
+      summary: Discard an in-progress installer upload session
+      parameters:
+        - in: path
+          name: uploadId
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Aborted
+        '404':
+          description: Upload session not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -2213,6 +2293,60 @@ components:
         downloadUrl:
           type: string
           description: Stable URL the marketplace can serve to end users.
+
+    InitInstallerUploadRequest:
+      type: object
+      required: [filename, sizeBytes, contentType, fileFingerprint]
+      properties:
+        filename: { type: string, minLength: 1 }
+        sizeBytes: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+        fileFingerprint:
+          type: string
+          minLength: 1
+          description: |
+            Stable identifier for the file picked locally — typically
+            `${name}|${size}|${lastModified}`. Lets the server look up an
+            existing in-progress upload and return its current
+            `bytesUploaded` so the client can resume.
+
+    InstallerUploadSession:
+      type: object
+      required:
+        [uploadId, objectKey, downloadUrl, sizeBytes, bytesUploaded,
+         chunkSize, resumed]
+      properties:
+        uploadId: { type: string }
+        objectKey:
+          type: string
+          description: Persist this on the tool record as installerObjectKey.
+        downloadUrl:
+          type: string
+          description: Stable URL the marketplace can serve to end users.
+        sizeBytes: { type: integer }
+        bytesUploaded:
+          type: integer
+          description: How many bytes are already on GCS for this session.
+        chunkSize:
+          type: integer
+          description: |
+            The chunk size, in bytes, the client should use for each PUT to
+            the chunk endpoint. Must be a multiple of 256 KB except for the
+            final chunk.
+        resumed:
+          type: boolean
+          description: True when an existing pending session was returned.
+
+    InstallerUploadResult:
+      type: object
+      required: [objectKey, downloadUrl, sizeBytes, filename]
+      properties:
+        objectKey:
+          type: string
+          description: Persist this on the tool record as installerObjectKey.
+        downloadUrl: { type: string }
+        sizeBytes: { type: integer }
+        filename: { type: string }
 
     SubmissionUpsert:
       type: object
