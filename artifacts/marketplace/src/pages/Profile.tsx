@@ -360,6 +360,63 @@ export function Profile() {
                   className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
                 />
               </div>
+              <div className="col-span-3 border-t border-border pt-4 mt-2">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
+                  Launch behavior
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label
+                    className={`cursor-pointer border rounded-md p-3 text-xs ${
+                      (draft.launchPreference ?? "preview") === "preview"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="launchPref"
+                      className="sr-only"
+                      checked={
+                        (draft.launchPreference ?? "preview") === "preview"
+                      }
+                      onChange={() =>
+                        queueSave({ ...draft, launchPreference: "preview" })
+                      }
+                    />
+                    <div className="font-semibold text-foreground mb-0.5">
+                      Preview before launching
+                    </div>
+                    <div className="text-muted-foreground">
+                      Show a redaction screen so you can deselect fields or
+                      snippets before they are sent.
+                    </div>
+                  </label>
+                  <label
+                    className={`cursor-pointer border rounded-md p-3 text-xs ${
+                      draft.launchPreference === "direct"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="launchPref"
+                      className="sr-only"
+                      checked={draft.launchPreference === "direct"}
+                      onChange={() =>
+                        queueSave({ ...draft, launchPreference: "direct" })
+                      }
+                    />
+                    <div className="font-semibold text-foreground mb-0.5">
+                      Launch directly
+                    </div>
+                    <div className="text-muted-foreground">
+                      Skip the preview and send your full profile and top
+                      snippets every time.
+                    </div>
+                  </label>
+                </div>
+              </div>
               <div className="col-span-3 space-y-2">
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   {updateMutation.isPending
@@ -1338,6 +1395,7 @@ function profileToDraft(p: UserProfile): ProfileUpdate {
     primaryMission: p.primaryMission,
     aiUseCases: p.aiUseCases,
     freeFormContext: p.freeFormContext,
+    launchPreference: p.launchPreference,
   };
 }
 

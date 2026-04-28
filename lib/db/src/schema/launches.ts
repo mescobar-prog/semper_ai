@@ -1,7 +1,23 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
+import {
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { usersTable } from "./auth";
 import { toolsTable } from "./catalog";
+
+export interface LaunchSharedSnippet {
+  chunkId: string;
+  documentId: string;
+  documentTitle: string;
+  chunkIndex: number;
+  content: string;
+  score: number;
+}
 
 export const launchesTable = pgTable(
   "launches",
@@ -14,6 +30,20 @@ export const launchesTable = pgTable(
       .notNull()
       .references(() => toolsTable.id, { onDelete: "cascade" }),
     status: varchar("status").notNull().default("token_issued"),
+    // Profile field keys the user approved for this launch (e.g. ["branch", "rank"]).
+    sharedFieldKeys: jsonb("shared_field_keys")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Frozen snapshot of the snippets the user approved for this launch. We
+    // snapshot rather than re-querying so the audit trail and the eventual
+    // context-exchange payload are deterministic.
+    sharedSnippets: jsonb("shared_snippets")
+      .$type<LaunchSharedSnippet[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Optional freeform note the user appended at preview time.
+    additionalNote: text("additional_note"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

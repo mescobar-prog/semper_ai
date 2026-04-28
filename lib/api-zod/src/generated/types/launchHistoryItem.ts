@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { RagSnippet } from "./ragSnippet";
 
 export interface LaunchHistoryItem {
   id: string;
@@ -13,4 +14,8 @@ export interface LaunchHistoryItem {
   toolSlug: string;
   status: string;
   createdAt: Date;
+  sharedFieldKeys: string[];
+  sharedSnippets: RagSnippet[];
+  /** @nullable */
+  additionalNote: string | null;
 }

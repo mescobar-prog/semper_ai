@@ -110,6 +110,7 @@ export const GetMyProfileResponse = zod.object({
   aiUseCases: zod.array(zod.string()),
   freeFormContext: zod.string().nullable(),
   isAdmin: zod.boolean(),
+  launchPreference: zod.enum(["preview", "direct"]),
   completenessPct: zod.number(),
   contextBlock: zod.object({
     doctrine: zod.string().nullable(),
@@ -176,6 +177,7 @@ export const UpdateMyProfileBody = zod.object({
   primaryMission: zod.string().nullish(),
   aiUseCases: zod.array(zod.string()).optional(),
   freeFormContext: zod.string().nullish(),
+  launchPreference: zod.enum(["preview", "direct"]).optional(),
 });
 
 export const UpdateMyProfileResponse = zod.object({
@@ -192,6 +194,7 @@ export const UpdateMyProfileResponse = zod.object({
   aiUseCases: zod.array(zod.string()),
   freeFormContext: zod.string().nullable(),
   isAdmin: zod.boolean(),
+  launchPreference: zod.enum(["preview", "direct"]),
   completenessPct: zod.number(),
   contextBlock: zod.object({
     doctrine: zod.string().nullable(),
@@ -279,6 +282,7 @@ export const SendProfileChatResponse = zod.object({
       primaryMission: zod.string().nullish(),
       aiUseCases: zod.array(zod.string()).optional(),
       freeFormContext: zod.string().nullish(),
+      launchPreference: zod.enum(["preview", "direct"]).optional(),
     }),
     zod.null(),
   ]),
@@ -376,6 +380,7 @@ export const ConfirmContextBlockResponse = zod.object({
     aiUseCases: zod.array(zod.string()),
     freeFormContext: zod.string().nullable(),
     isAdmin: zod.boolean(),
+    launchPreference: zod.enum(["preview", "direct"]),
     completenessPct: zod.number(),
     contextBlock: zod.object({
       doctrine: zod.string().nullable(),
@@ -1090,10 +1095,56 @@ export const SetDocumentPresetTagsResponse = zod.object({
 });
 
 /**
- * @summary Initiate a tool launch (issues a single-use launch token)
+ * @summary Compute the candidate launch payload (profile fields + RAG snippets) without minting a token
+ */
+export const PreviewLaunchContextParams = zod.object({
+  toolId: zod.coerce.string(),
+});
+
+export const PreviewLaunchContextResponse = zod.object({
+  tool: zod.object({
+    id: zod.string(),
+    slug: zod.string(),
+    name: zod.string(),
+    vendor: zod.string(),
+  }),
+  profileFields: zod.array(
+    zod.object({
+      key: zod.string(),
+      label: zod.string(),
+      value: zod.string(),
+      hasValue: zod.boolean(),
+    }),
+  ),
+  candidateSnippets: zod.array(
+    zod.object({
+      chunkId: zod.string(),
+      documentId: zod.string(),
+      documentTitle: zod.string(),
+      chunkIndex: zod.number(),
+      content: zod.string(),
+      score: zod.number(),
+    }),
+  ),
+  queries: zod.array(zod.string()),
+  launchPreference: zod.enum(["preview", "direct"]),
+});
+
+/**
+ * @summary Initiate a tool launch (issues a single-use launch token, with optional redaction)
  */
 export const LaunchToolParams = zod.object({
   toolId: zod.coerce.string(),
+});
+
+export const LaunchToolBody = zod.object({
+  selectedFieldKeys: zod
+    .union([zod.array(zod.string()), zod.null()])
+    .optional(),
+  selectedSnippetIds: zod
+    .union([zod.array(zod.string()), zod.null()])
+    .optional(),
+  additionalNote: zod.string().nullish(),
 });
 
 export const LaunchToolResponse = zod.object({
@@ -1101,6 +1152,8 @@ export const LaunchToolResponse = zod.object({
   launchToken: zod.string(),
   launchUrl: zod.string(),
   expiresAt: zod.coerce.date(),
+  sharedFieldKeys: zod.array(zod.string()),
+  sharedSnippetCount: zod.number(),
 });
 
 /**
@@ -1140,6 +1193,7 @@ export const ExchangeContextTokenResponse = zod.object({
     aiUseCases: zod.array(zod.string()),
     freeFormContext: zod.string().nullable(),
     isAdmin: zod.boolean(),
+    launchPreference: zod.enum(["preview", "direct"]),
     completenessPct: zod.number(),
     contextBlock: zod.object({
       doctrine: zod.string().nullable(),
@@ -1267,6 +1321,8 @@ export const ExchangeContextTokenResponse = zod.object({
       }),
     ),
   }),
+  additionalNote: zod.string().nullable(),
+  sharedFieldKeys: zod.array(zod.string()),
 });
 
 /**
@@ -1342,6 +1398,18 @@ export const ListRecentLaunchesResponseItem = zod.object({
   toolSlug: zod.string(),
   status: zod.string(),
   createdAt: zod.coerce.date(),
+  sharedFieldKeys: zod.array(zod.string()),
+  sharedSnippets: zod.array(
+    zod.object({
+      chunkId: zod.string(),
+      documentId: zod.string(),
+      documentTitle: zod.string(),
+      chunkIndex: zod.number(),
+      content: zod.string(),
+      score: zod.number(),
+    }),
+  ),
+  additionalNote: zod.string().nullable(),
 });
 export const ListRecentLaunchesResponse = zod.array(
   ListRecentLaunchesResponseItem,
@@ -1884,6 +1952,18 @@ export const GetDashboardSummaryResponse = zod.object({
       toolSlug: zod.string(),
       status: zod.string(),
       createdAt: zod.coerce.date(),
+      sharedFieldKeys: zod.array(zod.string()),
+      sharedSnippets: zod.array(
+        zod.object({
+          chunkId: zod.string(),
+          documentId: zod.string(),
+          documentTitle: zod.string(),
+          chunkIndex: zod.number(),
+          content: zod.string(),
+          score: zod.number(),
+        }),
+      ),
+      additionalNote: zod.string().nullable(),
     }),
   ),
   atoStatusBreakdown: zod.array(

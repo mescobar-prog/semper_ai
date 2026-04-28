@@ -51,6 +51,9 @@ export const profilesTable = pgTable("profiles", {
   cbSubmissionId: varchar("cb_submission_id"),
   cbOpsecFlag: varchar("cb_opsec_flag").notNull().default("false"),
   // ----------------------------------------------------------------------
+  // "preview" (default) or "direct" — controls whether the launch flow opens
+  // the pre-launch context preview panel or mints a token immediately.
+  launchPreference: varchar("launch_preference").notNull().default("preview"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow()

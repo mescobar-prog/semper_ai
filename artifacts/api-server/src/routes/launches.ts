@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from "express";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import {
   db,
   toolsTable,
@@ -7,10 +7,14 @@ import {
   launchTokensTable,
   sessionTokensTable,
   usersTable,
+  docChunksTable,
+  documentsTable,
+  type LaunchSharedSnippet,
 } from "@workspace/db";
 import {
   DraftBriefBody,
   ExchangeContextTokenBody,
+  LaunchToolBody,
   QueryLibraryBody,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -30,6 +34,9 @@ import {
   serializeContextBlock,
   serializeProfile,
   snapshotAsProfile,
+  redactProfileForLaunch,
+  SHAREABLE_PROFILE_FIELDS,
+  profileFieldDisplayValue,
 } from "../lib/profile-helpers";
 import { logger } from "../lib/logger";
 
@@ -45,28 +52,195 @@ function getOrigin(req: Request): string {
   return `${proto}://${host}`;
 }
 
-router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
+async function loadActiveTool(toolId: string) {
   const [tool] = await db
     .select()
     .from(toolsTable)
-    .where(eq(toolsTable.id, String(req.params.toolId)))
+    .where(eq(toolsTable.id, toolId))
     .limit(1);
+  return tool;
+}
+
+// POST /tools/:toolId/launch-preview
+// Returns the candidate context bundle (profile fields + RAG snippets) the
+// user is about to send, *without* minting a launch token. The marketplace
+// frontend uses this to render the pre-launch preview / redaction panel.
+router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
+  const tool = await loadActiveTool(String(req.params.toolId));
   if (!tool) {
     res.status(404).json({ error: "Tool not found" });
     return;
   }
-  // isActive is stored as a varchar "true"|"false" in the catalog schema, so
-  // a literal "false" is truthy. Compare against the string explicitly to
-  // mirror catalog-list filtering (eq(toolsTable.isActive, "true")).
   if (tool.isActive !== "true") {
     res.status(403).json({ error: "Tool is not active" });
     return;
   }
 
-  // Ensure the user has an active mission preset before issuing a launch
-  // token, so by the time the tool calls /tools/context-exchange we have a
-  // consistent preset to pull from.
-  const { preset } = await ensureActivePreset(req.user!.id);
+  // Resolve the user's active mission preset; the snapshot drives identity
+  // for the preview (so the candidate list reflects what would actually be
+  // sent on launch), and the preset's document set scopes RAG so the user
+  // doesn't see snippets from outside their chosen mission scope.
+  const ctx = await getActiveContext(req.user!.id);
+  const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
+
+  let queries: string[] = [];
+  let snippets: Awaited<ReturnType<typeof searchChunksMultiQuery>> = [];
+  try {
+    queries = await generateRagQueries(snapshotProfile, {
+      name: tool.name,
+      vendor: tool.vendor,
+      shortDescription: tool.shortDescription,
+      longDescription: tool.longDescription,
+      purpose: tool.purpose,
+      ragQueryTemplates: tool.ragQueryTemplates,
+    });
+    snippets = await searchChunksMultiQuery(req.user!.id, queries, 4, 12, {
+      documentIds: ctx.documentIds,
+    });
+  } catch (err) {
+    logger.warn({ err }, "RAG preview failed; returning empty candidates");
+  }
+
+  const profileFields = SHAREABLE_PROFILE_FIELDS.map(({ key, label }) => {
+    const { value, hasValue } = profileFieldDisplayValue(snapshotProfile, key);
+    return { key: key as string, label, value, hasValue };
+  });
+
+  res.json({
+    tool: {
+      id: tool.id,
+      slug: tool.slug,
+      name: tool.name,
+      vendor: tool.vendor,
+    },
+    profileFields,
+    candidateSnippets: snippets,
+    queries,
+    launchPreference:
+      ctx.profile.launchPreference === "direct" ? "direct" : "preview",
+  });
+});
+
+// POST /tools/:toolId/launch
+// Mints a single-use launch token. Accepts an optional allowlist of profile
+// field keys + RAG chunk IDs + a freeform note. When the body is omitted (or
+// arrays are null), behaves like the legacy direct-launch flow: include all
+// populated profile fields and run RAG to pick snippets server-side.
+router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
+  const tool = await loadActiveTool(String(req.params.toolId));
+  if (!tool) {
+    res.status(404).json({ error: "Tool not found" });
+    return;
+  }
+  if (tool.isActive !== "true") {
+    res.status(403).json({ error: "Tool is not active" });
+    return;
+  }
+
+  // Body is optional; an empty body is equivalent to "include everything".
+  const body = req.body && Object.keys(req.body).length > 0 ? req.body : {};
+  const parsed = LaunchToolBody.safeParse(body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid launch selection" });
+    return;
+  }
+  const { selectedFieldKeys, selectedSnippetIds, additionalNote } = parsed.data;
+
+  // Ensure an active preset exists and use its snapshot as the profile basis;
+  // RAG is scoped to the preset's documents so launches stay within mission.
+  const ctx = await getActiveContext(req.user!.id);
+  const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
+  const preset = ctx.activePreset;
+
+  // Decide which profile field keys to share. Null/undefined => all populated.
+  const allFieldKeys = SHAREABLE_PROFILE_FIELDS.map(({ key }) => key as string);
+  let sharedFieldKeys: string[];
+  if (selectedFieldKeys == null) {
+    sharedFieldKeys = allFieldKeys.filter((k) => {
+      const { hasValue } = profileFieldDisplayValue(
+        snapshotProfile,
+        k as keyof typeof snapshotProfile,
+      );
+      return hasValue;
+    });
+  } else {
+    const allowSet = new Set(allFieldKeys);
+    sharedFieldKeys = Array.from(new Set(selectedFieldKeys)).filter((k) =>
+      allowSet.has(k),
+    );
+  }
+
+  // Decide which snippets to share. Null/undefined => run RAG and include all
+  // selected snippets. Otherwise, look up the requested chunk IDs (scoped to
+  // this user + preset doc set so a caller can't peek at someone else's
+  // library or snippets outside the active mission).
+  let sharedSnippets: LaunchSharedSnippet[] = [];
+  try {
+    if (selectedSnippetIds == null) {
+      const queries = await generateRagQueries(snapshotProfile, {
+        name: tool.name,
+        vendor: tool.vendor,
+        shortDescription: tool.shortDescription,
+        longDescription: tool.longDescription,
+        purpose: tool.purpose,
+        ragQueryTemplates: tool.ragQueryTemplates,
+      });
+      sharedSnippets = await searchChunksMultiQuery(
+        req.user!.id,
+        queries,
+        4,
+        12,
+        { documentIds: ctx.documentIds },
+      );
+    } else if (selectedSnippetIds.length > 0) {
+      const presetDocIds = new Set(ctx.documentIds);
+      const rows = await db
+        .select({
+          chunkId: docChunksTable.id,
+          documentId: docChunksTable.documentId,
+          documentTitle: documentsTable.title,
+          chunkIndex: docChunksTable.chunkIndex,
+          content: docChunksTable.content,
+        })
+        .from(docChunksTable)
+        .innerJoin(
+          documentsTable,
+          eq(documentsTable.id, docChunksTable.documentId),
+        )
+        .where(
+          and(
+            eq(docChunksTable.userId, req.user!.id),
+            inArray(docChunksTable.id, selectedSnippetIds),
+          ),
+        );
+      // Preserve the order the client sent so highest-relevance hits stay first.
+      const byId = new Map(rows.map((r) => [r.chunkId, r]));
+      sharedSnippets = selectedSnippetIds
+        .map((id) => byId.get(id))
+        .filter((r): r is NonNullable<typeof r> => !!r)
+        .filter(
+          (r) => presetDocIds.size === 0 || presetDocIds.has(r.documentId),
+        )
+        .map((r) => ({
+          chunkId: r.chunkId,
+          documentId: r.documentId,
+          documentTitle: r.documentTitle,
+          chunkIndex: r.chunkIndex,
+          content: r.content,
+          score: 0,
+        }));
+    }
+  } catch (err) {
+    logger.warn(
+      { err },
+      "Failed to resolve launch snippets; proceeding with what we have",
+    );
+  }
+
+  const note =
+    typeof additionalNote === "string" && additionalNote.trim().length > 0
+      ? additionalNote.trim()
+      : null;
 
   const [launch] = await db
     .insert(launchesTable)
@@ -74,6 +248,9 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
       userId: req.user!.id,
       toolId: tool.id,
       status: "token_issued",
+      sharedFieldKeys,
+      sharedSnippets,
+      additionalNote: note,
     })
     .returning();
 
@@ -101,6 +278,8 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     launchToken: token,
     launchUrl,
     expiresAt: expiresAt.toISOString(),
+    sharedFieldKeys,
+    sharedSnippetCount: sharedSnippets.length,
   });
 });
 
@@ -130,7 +309,6 @@ router.post("/tools/context-exchange", async (req, res) => {
     .returning();
 
   if (!tokenRow) {
-    // Either the token does not exist, was already consumed, or is expired.
     res.status(401).json({ error: "Invalid, used, or expired launch token" });
     return;
   }
@@ -160,30 +338,20 @@ router.post("/tools/context-exchange", async (req, res) => {
     return;
   }
 
-  // Resolve the active mission preset for this user — its snapshot becomes
-  // the "profile" the tool sees, and its document set scopes RAG. The live
-  // profile is still kept around so the user's confirmed Context Block
-  // (cb_* fields) and other live-only fields ride along.
+  // Resolve the active mission preset — its snapshot becomes the "profile"
+  // the tool sees (so cross-mission contamination is prevented), and the
+  // live profile rides along for cb_* (Context Block) fields. We then apply
+  // the user's preview-time redaction so any field they excluded at preview
+  // is stripped from what's actually sent to the tool. Snippets come from
+  // the launch row's audit-time snapshot, never re-run RAG here.
   const ctx = await getActiveContext(user.id);
   const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
-
-  let queries: string[] = [];
-  let snippets: Awaited<ReturnType<typeof searchChunksMultiQuery>> = [];
-  try {
-    queries = await generateRagQueries(snapshotProfile, {
-      name: tool.name,
-      vendor: tool.vendor,
-      shortDescription: tool.shortDescription,
-      longDescription: tool.longDescription,
-      purpose: tool.purpose,
-      ragQueryTemplates: tool.ragQueryTemplates,
-    });
-    snippets = await searchChunksMultiQuery(user.id, queries, 4, 12, {
-      documentIds: ctx.documentIds,
-    });
-  } catch (err) {
-    logger.warn({ err }, "RAG primer failed; returning empty primer");
-  }
+  const sharedFieldKeys = launch.sharedFieldKeys ?? [];
+  const redactedProfile = redactProfileForLaunch(
+    snapshotProfile,
+    sharedFieldKeys,
+  );
+  const snippets = launch.sharedSnippets ?? [];
 
   const now = new Date();
   const sessionToken = generateOpaqueToken();
@@ -224,16 +392,21 @@ router.post("/tools/context-exchange", async (req, res) => {
       atoStatus: tool.atoStatus,
     },
     user: userPayload,
-    profile: serializeProfile(snapshotProfile, ctx.activePreset.id),
-    contextBlock: buildContextBlock(userPayload, snapshotProfile),
+    profile: serializeProfile(redactedProfile, ctx.activePreset.id),
+    contextBlock: buildContextBlock(userPayload, redactedProfile),
     // Per spec: structuredContextBlock is null when the operator has not
     // confirmed a Context Block yet; otherwise it carries the full state
     // including the most recent evaluation. The cb_* fields ride on the
-    // live profile (snapshotAsProfile carries them through from fallback).
+    // live profile (snapshotAsProfile carries them through from fallback)
+    // and are not subject to redactProfileForLaunch.
     structuredContextBlock: hasConfirmedContextBlock(snapshotProfile)
       ? serializeContextBlock(snapshotProfile)
       : null,
-    primer: { queries, snippets },
+    // Snippets are the user-approved set captured at preview time; queries
+    // are intentionally empty here because we did not re-run RAG.
+    primer: { queries: [], snippets },
+    additionalNote: launch.additionalNote ?? null,
+    sharedFieldKeys,
   });
 });
 
@@ -375,6 +548,9 @@ router.get("/launches/recent", requireAuth, async (req, res) => {
       toolSlug: toolsTable.slug,
       status: launchesTable.status,
       createdAt: launchesTable.createdAt,
+      sharedFieldKeys: launchesTable.sharedFieldKeys,
+      sharedSnippets: launchesTable.sharedSnippets,
+      additionalNote: launchesTable.additionalNote,
     })
     .from(launchesTable)
     .innerJoin(toolsTable, eq(launchesTable.toolId, toolsTable.id))
@@ -390,6 +566,9 @@ router.get("/launches/recent", requireAuth, async (req, res) => {
       toolSlug: r.toolSlug,
       status: r.status,
       createdAt: r.createdAt.toISOString(),
+      sharedFieldKeys: r.sharedFieldKeys ?? [],
+      sharedSnippets: r.sharedSnippets ?? [],
+      additionalNote: r.additionalNote ?? null,
     })),
   );
 });

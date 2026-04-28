@@ -55,6 +55,14 @@ export const LogoutSuccessValue = {
 } as const;
 export type LogoutSuccess = typeof LogoutSuccessValue;
 
+export type UserProfileLaunchPreference =
+  (typeof UserProfileLaunchPreference)[keyof typeof UserProfileLaunchPreference];
+
+export const UserProfileLaunchPreference = {
+  preview: "preview",
+  direct: "direct",
+} as const;
+
 export interface ContextBlockScores {
   /** Criterion 1 score (1-3). */
   doctrine: number;
@@ -124,6 +132,7 @@ export interface UserProfile {
   /** @nullable */
   freeFormContext: string | null;
   isAdmin: boolean;
+  launchPreference: UserProfileLaunchPreference;
   completenessPct: number;
   contextBlock: ContextBlockState;
   /** @nullable */
@@ -156,6 +165,14 @@ export interface ConfirmContextBlockRejection {
   evaluation: ContextBlockEvaluation;
 }
 
+export type ProfileUpdateLaunchPreference =
+  (typeof ProfileUpdateLaunchPreference)[keyof typeof ProfileUpdateLaunchPreference];
+
+export const ProfileUpdateLaunchPreference = {
+  preview: "preview",
+  direct: "direct",
+} as const;
+
 export interface ProfileUpdate {
   /** @nullable */
   branch?: string | null;
@@ -178,6 +195,7 @@ export interface ProfileUpdate {
   aiUseCases?: string[];
   /** @nullable */
   freeFormContext?: string | null;
+  launchPreference?: ProfileUpdateLaunchPreference;
 }
 
 export type ChatMessageRole =
@@ -463,11 +481,50 @@ export interface LibraryTestQueryResponse {
   snippets: RagSnippet[];
 }
 
+export interface LaunchPreviewProfileField {
+  key: string;
+  label: string;
+  value: string;
+  hasValue: boolean;
+}
+
+export type LaunchPreviewResponseTool = {
+  id: string;
+  slug: string;
+  name: string;
+  vendor: string;
+};
+
+export type LaunchPreviewResponseLaunchPreference =
+  (typeof LaunchPreviewResponseLaunchPreference)[keyof typeof LaunchPreviewResponseLaunchPreference];
+
+export const LaunchPreviewResponseLaunchPreference = {
+  preview: "preview",
+  direct: "direct",
+} as const;
+
+export interface LaunchPreviewResponse {
+  tool: LaunchPreviewResponseTool;
+  profileFields: LaunchPreviewProfileField[];
+  candidateSnippets: RagSnippet[];
+  queries: string[];
+  launchPreference: LaunchPreviewResponseLaunchPreference;
+}
+
+export interface LaunchToolRequest {
+  selectedFieldKeys?: string[] | null;
+  selectedSnippetIds?: string[] | null;
+  /** @nullable */
+  additionalNote?: string | null;
+}
+
 export interface LaunchInitiateResponse {
   launchId: string;
   launchToken: string;
   launchUrl: string;
   expiresAt: string;
+  sharedFieldKeys: string[];
+  sharedSnippetCount: number;
 }
 
 export interface ContextExchangeRequest {
@@ -508,6 +565,9 @@ export interface ContextExchangeResponse {
    */
   structuredContextBlock: ContextBlockState | null;
   primer: RagPrimer;
+  /** @nullable */
+  additionalNote: string | null;
+  sharedFieldKeys: string[];
 }
 
 export interface LibraryQueryRequest {
@@ -606,6 +666,10 @@ export interface LaunchHistoryItem {
   toolSlug: string;
   status: string;
   createdAt: string;
+  sharedFieldKeys: string[];
+  sharedSnippets: RagSnippet[];
+  /** @nullable */
+  additionalNote: string | null;
 }
 
 export interface UploadUrlRequest {

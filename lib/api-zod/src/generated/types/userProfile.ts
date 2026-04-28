@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ContextBlockState } from "./contextBlockState";
+import type { UserProfileLaunchPreference } from "./userProfileLaunchPreference";
 
 export interface UserProfile {
   userId: string;
@@ -31,6 +32,7 @@ export interface UserProfile {
   /** @nullable */
   freeFormContext: string | null;
   isAdmin: boolean;
+  launchPreference: UserProfileLaunchPreference;
   completenessPct: number;
   contextBlock: ContextBlockState;
   /** @nullable */

@@ -11,4 +11,6 @@ export interface LaunchInitiateResponse {
   launchToken: string;
   launchUrl: string;
   expiresAt: Date;
+  sharedFieldKeys: string[];
+  sharedSnippetCount: number;
 }

@@ -800,16 +800,47 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   # ---------- Launch ----------
-  /tools/{toolId}/launch:
+  /tools/{toolId}/launch-preview:
     post:
       tags: [Launch]
-      operationId: launchTool
-      summary: Initiate a tool launch (issues a single-use launch token)
+      operationId: previewLaunchContext
+      summary: Compute the candidate launch payload (profile fields + RAG snippets) without minting a token
       parameters:
         - name: toolId
           in: path
           required: true
           schema: { type: string }
+      responses:
+        '200':
+          description: Candidate context bundle the user can review and edit before launch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchPreviewResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /tools/{toolId}/launch:
+    post:
+      tags: [Launch]
+      operationId: launchTool
+      summary: Initiate a tool launch (issues a single-use launch token, with optional redaction)
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LaunchToolRequest' }
       responses:
         '200':
           description: Launch initiated
@@ -1339,8 +1370,8 @@ components:
       required:
         [userId, branch, rank, mosCode, dutyTitle, unit, baseLocation,
          securityClearance, deploymentStatus, primaryMission,
-         aiUseCases, freeFormContext, isAdmin, completenessPct,
-         contextBlock, activePresetId, updatedAt]
+         aiUseCases, freeFormContext, isAdmin, launchPreference,
+         completenessPct, contextBlock, activePresetId, updatedAt]
       properties:
         userId: { type: string }
         branch: { type: [string, 'null'] }
@@ -1357,6 +1388,7 @@ components:
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
         isAdmin: { type: boolean }
+        launchPreference: { type: string, enum: [preview, direct] }
         completenessPct: { type: integer }
         contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
         activePresetId: { type: [string, 'null'] }
@@ -1468,6 +1500,7 @@ components:
           type: array
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
+        launchPreference: { type: string, enum: [preview, direct] }
 
     ChatMessage:
       type: object
@@ -1782,14 +1815,74 @@ components:
           type: array
           items: { $ref: '#/components/schemas/RagSnippet' }
 
+    LaunchPreviewProfileField:
+      type: object
+      required: [key, label, value, hasValue]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        # Stringified value (arrays joined, nulls/empty become "").
+        value: { type: string }
+        hasValue: { type: boolean }
+
+    LaunchPreviewResponse:
+      type: object
+      required:
+        [tool, profileFields, candidateSnippets, queries, launchPreference]
+      properties:
+        tool:
+          type: object
+          required: [id, slug, name, vendor]
+          properties:
+            id: { type: string }
+            slug: { type: string }
+            name: { type: string }
+            vendor: { type: string }
+        profileFields:
+          type: array
+          items: { $ref: '#/components/schemas/LaunchPreviewProfileField' }
+        candidateSnippets:
+          type: array
+          items: { $ref: '#/components/schemas/RagSnippet' }
+        queries:
+          type: array
+          items: { type: string }
+        launchPreference: { type: string, enum: [preview, direct] }
+
+    LaunchToolRequest:
+      type: object
+      properties:
+        # Allowlist of profile field keys to include. If omitted/null, all
+        # populated fields are included (legacy "direct launch" behavior).
+        selectedFieldKeys:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: 'null'
+        # Allowlist of RAG chunk IDs to include. If omitted/null, the server
+        # runs RAG selection itself and includes all selected snippets.
+        selectedSnippetIds:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: 'null'
+        # Optional freeform text the user wants appended to the bundle.
+        additionalNote: { type: [string, 'null'] }
+
     LaunchInitiateResponse:
       type: object
-      required: [launchId, launchToken, launchUrl, expiresAt]
+      required:
+        [launchId, launchToken, launchUrl, expiresAt,
+         sharedFieldKeys, sharedSnippetCount]
       properties:
         launchId: { type: string }
         launchToken: { type: string }
         launchUrl: { type: string }
         expiresAt: { type: string, format: date-time }
+        sharedFieldKeys:
+          type: array
+          items: { type: string }
+        sharedSnippetCount: { type: integer }
 
     ContextExchangeRequest:
       type: object
@@ -1801,7 +1894,7 @@ components:
       type: object
       required:
         [sessionToken, sessionExpiresAt, tool, user, profile, contextBlock,
-         structuredContextBlock, primer]
+         structuredContextBlock, primer, additionalNote, sharedFieldKeys]
       properties:
         sessionToken: { type: string }
         sessionExpiresAt: { type: string, format: date-time }
@@ -1821,6 +1914,8 @@ components:
             id: { type: string }
             displayName: { type: string }
             email: { type: [string, 'null'] }
+        # Profile object — keys excluded by the user are returned as null
+        # (or empty arrays), so the receiving tool keeps a stable shape.
         profile: { $ref: '#/components/schemas/UserProfile' }
         contextBlock:
           type: string
@@ -1837,6 +1932,12 @@ components:
             Structured 6-element Context Block as last confirmed by the
             operator, or null when they have not yet confirmed one.
         primer: { $ref: '#/components/schemas/RagPrimer' }
+        # User-supplied freeform note appended at preview time.
+        additionalNote: { type: [string, 'null'] }
+        # Field keys the user explicitly approved (so tools can audit/log).
+        sharedFieldKeys:
+          type: array
+          items: { type: string }
 
     RagPrimer:
       type: object
@@ -1960,7 +2061,9 @@ components:
 
     LaunchHistoryItem:
       type: object
-      required: [id, toolId, toolName, toolSlug, status, createdAt]
+      required:
+        [id, toolId, toolName, toolSlug, status, createdAt,
+         sharedFieldKeys, sharedSnippets, additionalNote]
       properties:
         id: { type: string }
         toolId: { type: string }
@@ -1968,6 +2071,13 @@ components:
         toolSlug: { type: string }
         status: { type: string }
         createdAt: { type: string, format: date-time }
+        sharedFieldKeys:
+          type: array
+          items: { type: string }
+        sharedSnippets:
+          type: array
+          items: { $ref: '#/components/schemas/RagSnippet' }
+        additionalNote: { type: [string, 'null'] }
 
     UploadUrlRequest:
       type: object

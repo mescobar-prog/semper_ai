@@ -1,5 +1,8 @@
 import { Link } from "wouter";
-import { useListRecentLaunches } from "@workspace/api-client-react";
+import {
+  useListRecentLaunches,
+  type LaunchHistoryItem,
+} from "@workspace/api-client-react";
 import {
   PageContainer,
   ErrorBox,
@@ -20,8 +23,8 @@ export function Launches() {
           Recent activity
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Every time you launch an authorized tool, the marketplace logs the
-          event and returns a one-time token. Tokens expire after 5 minutes.
+          Every launch records exactly which profile fields and library
+          snippets were sent to the tool, so you can audit past sessions.
         </p>
       </div>
 
@@ -32,7 +35,7 @@ export function Launches() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="bg-card border border-border rounded-md h-14 animate-pulse"
+              className="bg-card border border-border rounded-md h-24 animate-pulse"
             />
           ))}
         </div>
@@ -50,51 +53,113 @@ export function Launches() {
           }
         />
       ) : (
-        <div className="bg-card border border-border rounded-md overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-background/50">
-                <th className="text-left px-5 py-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-medium">
-                  Tool
-                </th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-medium">
-                  Status
-                </th>
-                <th className="text-right px-5 py-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-medium">
-                  Timestamp
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((l) => (
-                <tr
-                  key={l.id}
-                  className="border-b border-border last:border-b-0 hover:bg-accent/30"
-                >
-                  <td className="px-5 py-3">
-                    <Link
-                      href={`/catalog/${l.toolSlug}`}
-                      className="font-medium hover:text-primary"
-                    >
-                      {l.toolName}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3">
-                    <Pill
-                      tone={l.status === "exchanged" ? "good" : "neutral"}
-                    >
-                      {l.status}
-                    </Pill>
-                  </td>
-                  <td className="px-5 py-3 text-right text-xs text-muted-foreground font-mono">
-                    {formatDate(l.createdAt)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul className="space-y-3">
+          {data.map((l) => (
+            <LaunchRow key={l.id} launch={l} />
+          ))}
+        </ul>
       )}
     </PageContainer>
+  );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  branch: "Branch",
+  rank: "Rank",
+  mosCode: "MOS / Rate / AFSC",
+  dutyTitle: "Duty title",
+  unit: "Unit",
+  baseLocation: "Base / location",
+  securityClearance: "Security clearance",
+  deploymentStatus: "Deployment status",
+  primaryMission: "Primary mission",
+  aiUseCases: "AI use cases",
+  freeFormContext: "Free-form context",
+};
+
+function LaunchRow({ launch: l }: { launch: LaunchHistoryItem }) {
+  const fields = l.sharedFieldKeys ?? [];
+  const snippets = l.sharedSnippets ?? [];
+  return (
+    <li className="bg-card border border-border rounded-md">
+      <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border">
+        <div className="min-w-0 flex-1">
+          <Link
+            href={`/catalog/${l.toolSlug}`}
+            className="font-medium hover:text-primary"
+          >
+            {l.toolName}
+          </Link>
+          <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+            {formatDate(l.createdAt)}
+          </div>
+        </div>
+        <Pill tone={l.status === "exchanged" ? "good" : "neutral"}>
+          {l.status}
+        </Pill>
+      </div>
+
+      <div className="px-5 py-3 space-y-3 text-xs">
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+            Profile fields shared ({fields.length})
+          </div>
+          {fields.length === 0 ? (
+            <div className="text-muted-foreground italic">
+              No profile fields were sent.
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {fields.map((k) => (
+                <Pill key={k}>{FIELD_LABELS[k] ?? k}</Pill>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+            Library snippets shared ({snippets.length})
+          </div>
+          {snippets.length === 0 ? (
+            <div className="text-muted-foreground italic">
+              No library snippets were sent.
+            </div>
+          ) : (
+            <ul className="space-y-1">
+              {snippets.map((s) => (
+                <li
+                  key={s.chunkId}
+                  className="border border-border rounded px-2.5 py-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground/90 truncate">
+                      {s.documentTitle}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground tabular-nums shrink-0">
+                      chunk #{s.chunkIndex}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground line-clamp-2 mt-0.5">
+                    {s.content}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {l.additionalNote && (
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+              Additional note
+            </div>
+            <div className="text-foreground whitespace-pre-wrap">
+              {l.additionalNote}
+            </div>
+          </div>
+        )}
+      </div>
+    </li>
   );
 }

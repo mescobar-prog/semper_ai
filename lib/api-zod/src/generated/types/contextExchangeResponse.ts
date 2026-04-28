@@ -24,4 +24,7 @@ export interface ContextExchangeResponse {
    */
   structuredContextBlock: ContextBlockState | null;
   primer: RagPrimer;
+  /** @nullable */
+  additionalNote: string | null;
+  sharedFieldKeys: string[];
 }

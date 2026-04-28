@@ -42,6 +42,8 @@ import type {
   HealthStatus,
   LaunchHistoryItem,
   LaunchInitiateResponse,
+  LaunchPreviewResponse,
+  LaunchToolRequest,
   LibraryQueryRequest,
   LibraryQueryResponse,
   LibraryStats,
@@ -2984,7 +2986,94 @@ export const useSetDocumentPresetTags = <
 };
 
 /**
- * @summary Initiate a tool launch (issues a single-use launch token)
+ * @summary Compute the candidate launch payload (profile fields + RAG snippets) without minting a token
+ */
+export const getPreviewLaunchContextUrl = (toolId: string) => {
+  return `/api/tools/${toolId}/launch-preview`;
+};
+
+export const previewLaunchContext = async (
+  toolId: string,
+  options?: RequestInit,
+): Promise<LaunchPreviewResponse> => {
+  return customFetch<LaunchPreviewResponse>(
+    getPreviewLaunchContextUrl(toolId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getPreviewLaunchContextMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewLaunchContext>>,
+    TError,
+    { toolId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewLaunchContext>>,
+  TError,
+  { toolId: string },
+  TContext
+> => {
+  const mutationKey = ["previewLaunchContext"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewLaunchContext>>,
+    { toolId: string }
+  > = (props) => {
+    const { toolId } = props ?? {};
+
+    return previewLaunchContext(toolId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewLaunchContextMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewLaunchContext>>
+>;
+
+export type PreviewLaunchContextMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Compute the candidate launch payload (profile fields + RAG snippets) without minting a token
+ */
+export const usePreviewLaunchContext = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewLaunchContext>>,
+    TError,
+    { toolId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewLaunchContext>>,
+  TError,
+  { toolId: string },
+  TContext
+> => {
+  return useMutation(getPreviewLaunchContextMutationOptions(options));
+};
+
+/**
+ * @summary Initiate a tool launch (issues a single-use launch token, with optional redaction)
  */
 export const getLaunchToolUrl = (toolId: string) => {
   return `/api/tools/${toolId}/launch`;
@@ -2992,11 +3081,14 @@ export const getLaunchToolUrl = (toolId: string) => {
 
 export const launchTool = async (
   toolId: string,
+  launchToolRequest?: LaunchToolRequest,
   options?: RequestInit,
 ): Promise<LaunchInitiateResponse> => {
   return customFetch<LaunchInitiateResponse>(getLaunchToolUrl(toolId), {
     ...options,
     method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(launchToolRequest),
   });
 };
 
@@ -3007,14 +3099,14 @@ export const getLaunchToolMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof launchTool>>,
     TError,
-    { toolId: string },
+    { toolId: string; data: BodyType<LaunchToolRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof launchTool>>,
   TError,
-  { toolId: string },
+  { toolId: string; data: BodyType<LaunchToolRequest> },
   TContext
 > => {
   const mutationKey = ["launchTool"];
@@ -3028,11 +3120,11 @@ export const getLaunchToolMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof launchTool>>,
-    { toolId: string }
+    { toolId: string; data: BodyType<LaunchToolRequest> }
   > = (props) => {
-    const { toolId } = props ?? {};
+    const { toolId, data } = props ?? {};
 
-    return launchTool(toolId, requestOptions);
+    return launchTool(toolId, data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -3041,11 +3133,11 @@ export const getLaunchToolMutationOptions = <
 export type LaunchToolMutationResult = NonNullable<
   Awaited<ReturnType<typeof launchTool>>
 >;
-
+export type LaunchToolMutationBody = BodyType<LaunchToolRequest>;
 export type LaunchToolMutationError = ErrorType<ErrorEnvelope>;
 
 /**
- * @summary Initiate a tool launch (issues a single-use launch token)
+ * @summary Initiate a tool launch (issues a single-use launch token, with optional redaction)
  */
 export const useLaunchTool = <
   TError = ErrorType<ErrorEnvelope>,
@@ -3054,14 +3146,14 @@ export const useLaunchTool = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof launchTool>>,
     TError,
-    { toolId: string },
+    { toolId: string; data: BodyType<LaunchToolRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof launchTool>>,
   TError,
-  { toolId: string },
+  { toolId: string; data: BodyType<LaunchToolRequest> },
   TContext
 > => {
   return useMutation(getLaunchToolMutationOptions(options));

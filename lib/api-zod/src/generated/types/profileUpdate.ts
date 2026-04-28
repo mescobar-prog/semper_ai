@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProfileUpdateLaunchPreference } from "./profileUpdateLaunchPreference";
 
 export interface ProfileUpdate {
   /** @nullable */
@@ -28,4 +29,5 @@ export interface ProfileUpdate {
   aiUseCases?: string[];
   /** @nullable */
   freeFormContext?: string | null;
+  launchPreference?: ProfileUpdateLaunchPreference;
 }

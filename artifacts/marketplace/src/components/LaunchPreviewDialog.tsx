@@ -1,0 +1,448 @@
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  previewLaunchContext,
+  useLaunchTool,
+  getListRecentLaunchesQueryKey,
+  getGetDashboardSummaryQueryKey,
+  getGetMyProfileQueryKey,
+  useUpdateMyProfile,
+  type LaunchPreviewResponse,
+  type RagSnippet,
+} from "@workspace/api-client-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+
+export interface LaunchTrigger {
+  toolId: string;
+  toolName: string;
+}
+
+interface Props {
+  trigger: LaunchTrigger | null;
+  onClose: () => void;
+  onLaunched: (result: { url: string; toolName: string }) => void;
+  /** When true (or undefined), open the preview UI. When false, mint immediately. */
+  showPreview?: boolean;
+}
+
+/**
+ * Pre-launch context preview & redaction dialog.
+ *
+ * Flow:
+ *  1. When `trigger` is set, fetch the candidate payload (`/launch-preview`).
+ *  2. The user toggles individual profile fields and snippets, optionally
+ *     adds a freeform note.
+ *  3. "Launch now" calls `/launch` with the explicit allowlist; the server
+ *     persists the redaction on the launch row and mints a token.
+ *  4. The opened tool only sees what the user approved.
+ */
+export function LaunchPreviewDialog({
+  trigger,
+  onClose,
+  onLaunched,
+  showPreview = true,
+}: Props) {
+  const queryClient = useQueryClient();
+  const launchMutation = useLaunchTool();
+  const updateProfile = useUpdateMyProfile();
+
+  const [preview, setPreview] = useState<LaunchPreviewResponse | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const [excludedFields, setExcludedFields] = useState<Set<string>>(new Set());
+  const [excludedSnippets, setExcludedSnippets] = useState<Set<string>>(
+    new Set(),
+  );
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [savingPreference, setSavingPreference] = useState(false);
+
+  // Reset state whenever a new trigger arrives.
+  useEffect(() => {
+    if (!trigger) return;
+    setPreview(null);
+    setPreviewError(null);
+    setSubmitError(null);
+    setExcludedFields(new Set());
+    setExcludedSnippets(new Set());
+    setNote("");
+  }, [trigger?.toolId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch the candidate payload OR mint directly depending on showPreview.
+  useEffect(() => {
+    if (!trigger) return;
+    let cancelled = false;
+    (async () => {
+      if (!showPreview) {
+        // Direct launch — call /launch with no allowlist (server includes everything).
+        try {
+          setSubmitting(true);
+          setSubmitError(null);
+          const resp = await launchMutation.mutateAsync({
+            toolId: trigger.toolId,
+            data: {},
+          });
+          if (cancelled) return;
+          window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
+          onLaunched({ url: resp.launchUrl, toolName: trigger.toolName });
+          queryClient.invalidateQueries({
+            queryKey: getListRecentLaunchesQueryKey(),
+          });
+          queryClient.invalidateQueries({
+            queryKey: getGetDashboardSummaryQueryKey(),
+          });
+          onClose();
+        } catch (e) {
+          if (cancelled) return;
+          setSubmitError(
+            e instanceof Error ? e.message : "Launch failed",
+          );
+        } finally {
+          if (!cancelled) setSubmitting(false);
+        }
+        return;
+      }
+      try {
+        setLoadingPreview(true);
+        const data = await previewLaunchContext(trigger.toolId);
+        if (cancelled) return;
+        setPreview(data);
+      } catch (e) {
+        if (cancelled) return;
+        setPreviewError(
+          e instanceof Error ? e.message : "Could not load preview",
+        );
+      } finally {
+        if (!cancelled) setLoadingPreview(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trigger?.toolId, showPreview]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fieldsWithValues = useMemo(
+    () => preview?.profileFields.filter((f) => f.hasValue) ?? [],
+    [preview],
+  );
+  const includedFieldCount = useMemo(
+    () => fieldsWithValues.filter((f) => !excludedFields.has(f.key)).length,
+    [fieldsWithValues, excludedFields],
+  );
+  const includedSnippetCount = useMemo(
+    () =>
+      (preview?.candidateSnippets ?? []).filter(
+        (s) => !excludedSnippets.has(s.chunkId),
+      ).length,
+    [preview, excludedSnippets],
+  );
+
+  const toggleField = (key: string) => {
+    setExcludedFields((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const toggleSnippet = (id: string) => {
+    setExcludedSnippets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleLaunch = async () => {
+    if (!trigger || !preview) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const selectedFieldKeys = fieldsWithValues
+        .filter((f) => !excludedFields.has(f.key))
+        .map((f) => f.key);
+      const selectedSnippetIds = preview.candidateSnippets
+        .filter((s) => !excludedSnippets.has(s.chunkId))
+        .map((s) => s.chunkId);
+      const additionalNote = note.trim() ? note.trim() : null;
+
+      const resp = await launchMutation.mutateAsync({
+        toolId: trigger.toolId,
+        data: { selectedFieldKeys, selectedSnippetIds, additionalNote },
+      });
+      window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
+      onLaunched({ url: resp.launchUrl, toolName: trigger.toolName });
+      queryClient.invalidateQueries({
+        queryKey: getListRecentLaunchesQueryKey(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: getGetDashboardSummaryQueryKey(),
+      });
+      onClose();
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : "Launch failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // "Always launch directly from now on" preference toggle.
+  const setLaunchPref = async (pref: "preview" | "direct") => {
+    setSavingPreference(true);
+    try {
+      await updateProfile.mutateAsync({ data: { launchPreference: pref } });
+      queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+    } finally {
+      setSavingPreference(false);
+    }
+  };
+
+  const open = !!trigger;
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Review what {trigger?.toolName ?? "this tool"} will receive
+          </DialogTitle>
+          <DialogDescription>
+            Toggle off anything you don't want this tool to see. Only what's
+            checked is sent.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!showPreview && (
+          <div className="text-sm text-muted-foreground py-6">
+            {submitError ? (
+              <div className="rounded border border-rose-500/40 bg-rose-500/5 p-3 text-rose-300">
+                {submitError}
+              </div>
+            ) : (
+              <>Launching {trigger?.toolName}…</>
+            )}
+          </div>
+        )}
+
+        {showPreview && loadingPreview && (
+          <div className="text-sm text-muted-foreground py-6">
+            Computing what we'd send…
+          </div>
+        )}
+
+        {showPreview && previewError && (
+          <div className="rounded border border-rose-500/40 bg-rose-500/5 p-3 text-sm text-rose-300">
+            {previewError}
+          </div>
+        )}
+
+        {showPreview && preview && (
+          <div className="space-y-6">
+            <section>
+              <SectionLabel
+                title="Operator profile"
+                hint={`${includedFieldCount} of ${fieldsWithValues.length} fields`}
+              />
+              {fieldsWithValues.length === 0 ? (
+                <p className="text-xs text-muted-foreground mt-2">
+                  No profile fields filled in yet — nothing to share.
+                </p>
+              ) : (
+                <ul className="mt-2 divide-y divide-border border border-border rounded-md">
+                  {fieldsWithValues.map((f) => {
+                    const excluded = excludedFields.has(f.key);
+                    return (
+                      <li
+                        key={f.key}
+                        className="flex items-start gap-3 px-4 py-3"
+                      >
+                        <input
+                          id={`field-${f.key}`}
+                          type="checkbox"
+                          checked={!excluded}
+                          onChange={() => toggleField(f.key)}
+                          className="mt-1 h-4 w-4 rounded border-border bg-background text-primary focus:ring-primary"
+                        />
+                        <label
+                          htmlFor={`field-${f.key}`}
+                          className="flex-1 cursor-pointer"
+                        >
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                            {f.label}
+                          </div>
+                          <div
+                            className={`text-sm mt-0.5 break-words ${
+                              excluded
+                                ? "line-through text-muted-foreground"
+                                : "text-foreground"
+                            }`}
+                          >
+                            {f.value}
+                          </div>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            <section>
+              <SectionLabel
+                title="Library snippets"
+                hint={`${includedSnippetCount} of ${preview.candidateSnippets.length} selected`}
+              />
+              {preview.candidateSnippets.length === 0 ? (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Your library produced no relevant snippets for this tool.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {preview.candidateSnippets.map((s) => (
+                    <SnippetRow
+                      key={s.chunkId}
+                      snippet={s}
+                      excluded={excludedSnippets.has(s.chunkId)}
+                      onToggle={() => toggleSnippet(s.chunkId)}
+                    />
+                  ))}
+                </ul>
+              )}
+              {preview.queries.length > 0 && (
+                <details className="mt-2 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer hover:text-foreground">
+                    {preview.queries.length} search queries used
+                  </summary>
+                  <ul className="mt-2 ml-4 list-disc space-y-1">
+                    {preview.queries.map((q, i) => (
+                      <li key={i} className="font-mono">
+                        {q}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </section>
+
+            <section>
+              <SectionLabel title="Additional context (optional)" />
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={3}
+                placeholder="Anything specific you want this tool to know for this session…"
+                className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              />
+            </section>
+
+            {submitError && (
+              <div className="rounded border border-rose-500/40 bg-rose-500/5 p-3 text-sm text-rose-300">
+                {submitError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-border">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preview.launchPreference === "direct"}
+                  disabled={savingPreference}
+                  onChange={(e) =>
+                    setLaunchPref(e.target.checked ? "direct" : "preview")
+                  }
+                  className="h-3.5 w-3.5 rounded border-border bg-background text-primary"
+                />
+                Skip this preview next time
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={submitting}
+                  className="h-9 px-4 rounded-md border border-border text-sm hover:bg-accent/50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLaunch}
+                  disabled={submitting}
+                  className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {submitting ? "Launching…" : "Launch now"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SectionLabel({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="flex items-end justify-between">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
+        {title}
+      </div>
+      {hint && (
+        <div className="text-[10px] font-mono text-muted-foreground tabular-nums">
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SnippetRow({
+  snippet,
+  excluded,
+  onToggle,
+}: {
+  snippet: RagSnippet;
+  excluded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <li
+      className={`border rounded-md p-3 transition-colors ${
+        excluded ? "border-border bg-muted/20" : "border-border bg-card"
+      }`}
+    >
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!excluded}
+          onChange={onToggle}
+          className="mt-1 h-4 w-4 rounded border-border bg-background text-primary focus:ring-primary"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-medium text-foreground truncate">
+              {snippet.documentTitle}
+            </div>
+            <div className="text-[10px] font-mono text-muted-foreground tabular-nums shrink-0">
+              chunk #{snippet.chunkIndex}
+            </div>
+          </div>
+          <div
+            className={`mt-1 text-xs whitespace-pre-wrap leading-relaxed line-clamp-4 ${
+              excluded ? "text-muted-foreground" : "text-foreground/80"
+            }`}
+          >
+            {snippet.content}
+          </div>
+        </div>
+      </label>
+    </li>
+  );
+}

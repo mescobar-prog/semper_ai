@@ -5,10 +5,8 @@ import {
   useGetToolBySlug,
   useAddFavorite,
   useRemoveFavorite,
-  useLaunchTool,
+  useGetMyProfile,
   getGetToolBySlugQueryKey,
-  getListRecentLaunchesQueryKey,
-  getGetDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
 import {
   PageContainer,
@@ -17,6 +15,10 @@ import {
   atoTone,
   ErrorBox,
 } from "@/lib/format";
+import {
+  LaunchPreviewDialog,
+  type LaunchTrigger,
+} from "@/components/LaunchPreviewDialog";
 
 export function CatalogDetail() {
   const params = useParams<{ slug: string }>();
@@ -30,11 +32,16 @@ export function CatalogDetail() {
 
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
-  const launchMutation = useLaunchTool();
+  const { data: profile } = useGetMyProfile();
 
+  const [launchTrigger, setLaunchTrigger] = useState<LaunchTrigger | null>(
+    null,
+  );
+  // When the user clicks "Edit before launch", we explicitly force preview mode
+  // for that single click even if their saved preference is "direct".
+  const [forcePreview, setForcePreview] = useState(false);
   const [launchState, setLaunchState] = useState<
     | { status: "idle" }
-    | { status: "launching" }
     | { status: "launched"; url: string; toolName: string }
     | { status: "error"; message: string }
   >({ status: "idle" });
@@ -73,29 +80,14 @@ export function CatalogDetail() {
     });
   };
 
-  const launch = async () => {
-    setLaunchState({ status: "launching" });
-    try {
-      const resp = await launchMutation.mutateAsync({ toolId: tool.id });
-      window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
-      setLaunchState({
-        status: "launched",
-        url: resp.launchUrl,
-        toolName: tool.name,
-      });
-      queryClient.invalidateQueries({
-        queryKey: getListRecentLaunchesQueryKey(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: getGetDashboardSummaryQueryKey(),
-      });
-    } catch (e) {
-      setLaunchState({
-        status: "error",
-        message: e instanceof Error ? e.message : "Launch failed",
-      });
-    }
+  const launch = (opts?: { forcePreview?: boolean }) => {
+    setLaunchState({ status: "idle" });
+    setForcePreview(!!opts?.forcePreview);
+    setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
   };
+
+  const launchPref = profile?.launchPreference ?? "preview";
+  const showPreview = forcePreview || launchPref !== "direct";
 
   return (
     <PageContainer>
@@ -194,19 +186,31 @@ export function CatalogDetail() {
               Launch this tool
             </div>
             <button
-              onClick={launch}
-              disabled={launchState.status === "launching" || !tool.isActive}
+              onClick={() => launch()}
+              disabled={!!launchTrigger || !tool.isActive}
               className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {launchState.status === "launching"
-                ? "Minting token…"
+              {launchTrigger
+                ? showPreview
+                  ? "Reviewing…"
+                  : "Launching…"
                 : tool.isActive
                   ? "Launch with my context"
                   : "Tool inactive"}
             </button>
             <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-              The marketplace will mint a one-time launch token, attach your
-              profile and library snippets, then open the tool in a new tab.
+              {launchPref === "direct"
+                ? "Your default is to launch directly. Want to choose what to share?"
+                : "You'll preview your profile and library snippets before they're sent."}{" "}
+              {launchPref === "direct" && tool.isActive && (
+                <button
+                  type="button"
+                  onClick={() => launch({ forcePreview: true })}
+                  className="text-primary hover:underline"
+                >
+                  Edit before launch
+                </button>
+              )}
             </p>
             {launchState.status === "launched" && (
               <div className="mt-3 rounded border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs text-emerald-300">
@@ -272,6 +276,22 @@ export function CatalogDetail() {
           </div>
         </aside>
       </div>
+
+      <LaunchPreviewDialog
+        trigger={launchTrigger}
+        showPreview={showPreview}
+        onClose={() => {
+          setLaunchTrigger(null);
+          setForcePreview(false);
+        }}
+        onLaunched={(r) =>
+          setLaunchState({
+            status: "launched",
+            url: r.url,
+            toolName: r.toolName,
+          })
+        }
+      />
     </PageContainer>
   );
 }

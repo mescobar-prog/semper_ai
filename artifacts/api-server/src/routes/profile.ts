@@ -64,6 +64,9 @@ router.put("/profile", requireAuth, async (req, res) => {
     if (k in data) update[k] = data[k];
   }
   if (Array.isArray(data.aiUseCases)) update.aiUseCases = data.aiUseCases;
+  if (data.launchPreference === "preview" || data.launchPreference === "direct") {
+    update.launchPreference = data.launchPreference;
+  }
 
   // Allow the client to switch the active mission preset via PUT /profile in
   // addition to the dedicated /profile/presets/:id/activate endpoint. The

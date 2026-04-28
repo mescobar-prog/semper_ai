@@ -375,6 +375,8 @@ export function serializeProfile(
     freeFormContext: profile.freeFormContext,
     isAdmin: profile.isAdmin === "true",
     activePresetId: activePresetId ?? profile.activePresetId ?? null,
+    launchPreference:
+      profile.launchPreference === "direct" ? "direct" : "preview",
     completenessPct: completenessPct(profile),
     contextBlock: serializeContextBlock(profile),
     updatedAt: profile.updatedAt.toISOString(),
@@ -505,4 +507,58 @@ export function serializePreset(
     createdAt: preset.createdAt.toISOString(),
     updatedAt: preset.updatedAt.toISOString(),
   };
+}
+
+// Profile field keys eligible to be shared with a launching tool, plus
+// human-readable labels. Order is the order shown in the preview UI.
+export const SHAREABLE_PROFILE_FIELDS: Array<{
+  key: keyof Profile;
+  label: string;
+}> = [
+  { key: "branch", label: "Branch" },
+  { key: "rank", label: "Rank" },
+  { key: "mosCode", label: "MOS / Rate / AFSC" },
+  { key: "dutyTitle", label: "Duty title" },
+  { key: "unit", label: "Unit" },
+  { key: "baseLocation", label: "Base / location" },
+  { key: "securityClearance", label: "Security clearance" },
+  { key: "deploymentStatus", label: "Deployment status" },
+  { key: "primaryMission", label: "Primary mission" },
+  { key: "aiUseCases", label: "AI use cases" },
+  { key: "freeFormContext", label: "Free-form context" },
+];
+
+export function profileFieldDisplayValue(
+  profile: Profile,
+  key: keyof Profile,
+): { value: string; hasValue: boolean } {
+  const raw = profile[key] as unknown;
+  if (Array.isArray(raw)) {
+    const arr = raw as string[];
+    return { value: arr.join(", "), hasValue: arr.length > 0 };
+  }
+  if (typeof raw === "string") {
+    return { value: raw, hasValue: raw.trim().length > 0 };
+  }
+  return { value: "", hasValue: false };
+}
+
+// Build a Profile-shaped object containing only the allow-listed field keys;
+// every other shareable field is set to null (or [] for aiUseCases) so the
+// receiving tool sees a stable shape with explicit "redacted" markers.
+export function redactProfileForLaunch(
+  profile: Profile,
+  allowedKeys: ReadonlyArray<string>,
+): Profile {
+  const allowed = new Set(allowedKeys);
+  const out: Profile = { ...profile };
+  for (const { key } of SHAREABLE_PROFILE_FIELDS) {
+    if (allowed.has(key as string)) continue;
+    if (key === "aiUseCases") {
+      (out as Record<string, unknown>)[key] = [];
+    } else {
+      (out as Record<string, unknown>)[key] = null;
+    }
+  }
+  return out;
 }

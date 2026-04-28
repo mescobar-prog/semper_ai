@@ -568,15 +568,16 @@ ${snippetBlock}
 
 Draft the ${briefLabel} now in the operator's voice (${user.displayName}). Output Markdown only.`;
 
-  const response = await anthropic.messages.create({
+  const response = await ai.models.generateContent({
     model: MODEL,
-    max_tokens: 1400,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
+    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 1400,
+    },
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  const raw = textBlock && "text" in textBlock ? textBlock.text : "";
+  const raw = response.text ?? "";
   const cleaned = raw
     .replace(/^```(?:markdown|md)?\s*/i, "")
     .replace(/\s*```$/i, "")
