@@ -7,7 +7,6 @@ import {
   useConfirmContextBlock,
   useListDocuments,
   useUploadTextDocument,
-  getDocumentSnippet,
   requestUploadUrl,
   getGetMyProfileQueryKey,
   getGetLaunchAffirmationQueryKey,
@@ -18,7 +17,6 @@ import type {
   ContextBlockEvaluation,
   ContextBlockFields,
   ContextBlockState,
-  DocumentSnippet,
   DocumentSummary,
 } from "@workspace/api-client-react";
 import { parseAutoSource } from "@workspace/mil-data";
@@ -34,22 +32,17 @@ import {
 
 // ---------- Doctrine picker — text-region helpers --------------------------
 //
-// The Doctrine & Orders textarea is now split into two regions:
-//   1. an auto-managed snippet region at the top, one delimited block per
-//      ticked library doc, followed by
+// The Doctrine & Orders textarea is split into two regions:
+//   1. an auto-managed reference region at the top, one short reference
+//      line per ticked library doc, followed by
 //   2. a `--- Orders ---` divider, followed by
 //   3. the operator's free-form orders.
 //
-// Blocks are wrapped in `<<< doc:<id> >>> … <<< /doc >>>` markers so the
-// picker can add/remove a single doc's snippet without disturbing the
-// operator's free-form text or any other doc's snippet. The markers are
-// visible (not hidden) so the operator can see exactly what will ship to
-// the tool.
-//
-// Selection state in the UI is derived from the textarea content (by
-// scanning for `<<< doc:id >>>` markers in the snippet region), which means
-// the checkboxes and the textarea can never disagree — a manual edit that
-// removes a block also un-ticks its checkbox automatically.
+// Each reference line is just `- <doc title>` — no IDs, no markers, just
+// the human-readable title. Checkbox state is derived by scanning those
+// lines and matching their title against the operator's library, which
+// keeps the checkboxes and the textarea in sync — a manual edit that
+// deletes a reference line also un-ticks its checkbox automatically.
 
 const ORDERS_DIVIDER = "--- Orders ---";
 const DOCTRINE_SNIPPET_MAX_BYTES = 25 * 1024 * 1024;
@@ -75,50 +68,71 @@ function getOrdersRegion(content: string): string {
 }
 
 function joinRegions(snippetRegion: string, ordersRegion: string): string {
-  // Strip trailing whitespace from the snippet region so the divider sits
-  // tight against the last block, and only insert the divider when there
-  // are snippet blocks. A brand-new operator with zero ticks should see a
-  // plain textarea — no stray marker text.
-  const trimmed = snippetRegion.replace(/\s+$/, "");
+  // Trim whitespace from both ends of the reference region so the divider
+  // sits tight against the last reference line and we never end up with a
+  // stray blank line above the first reference. Only insert the divider
+  // when there are reference lines — a brand-new operator with zero ticks
+  // should see a plain textarea, no stray divider.
+  const trimmed = snippetRegion.trim();
   if (!trimmed) return ordersRegion;
   return `${trimmed}\n\n${ORDERS_DIVIDER}\n${ordersRegion}`;
 }
 
-function parseCheckedIds(content: string): Set<string> {
+// A managed reference line is just `- <doc title>` — clean, ID-free text.
+// We extract whatever sits after the leading `- ` on each line of the
+// reference region and treat it as a title; the picker then looks each
+// title up in the operator's library to derive the matching doc id and
+// drive checkbox state.
+const REFERENCE_LINE_RE = /^-\s+(.+?)\s*$/gm;
+
+function parseReferenceTitles(content: string): string[] {
   const region = getSnippetRegion(content);
-  const ids = new Set<string>();
-  const re = /<<<\s*doc:([^\s>]+)\s*>>>[\s\S]*?<<<\s*\/doc\s*>>>/g;
+  const titles: string[] = [];
+  REFERENCE_LINE_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(region))) {
-    ids.add(m[1]);
+  while ((m = REFERENCE_LINE_RE.exec(region))) {
+    titles.push(m[1]);
+  }
+  return titles;
+}
+
+function parseCheckedIds(
+  content: string,
+  docs: readonly DocumentSummary[],
+): Set<string> {
+  const titles = new Set(parseReferenceTitles(content));
+  const ids = new Set<string>();
+  for (const doc of docs) {
+    if (titles.has(doc.title)) ids.add(doc.id);
   }
   return ids;
 }
 
-function buildBlock(doc: DocumentSummary, snippet: DocumentSnippet): string {
-  const truncationMarker = snippet.truncated ? "\n…" : "";
-  return `<<< doc:${doc.id} >>>\n[${doc.title}]\n${snippet.snippet}${truncationMarker}\n<<< /doc >>>`;
+function buildBlock(doc: DocumentSummary): string {
+  return `- ${doc.title}`;
 }
 
-function addBlock(
-  content: string,
-  doc: DocumentSummary,
-  snippet: DocumentSnippet,
-): string {
-  if (parseCheckedIds(content).has(doc.id)) return content;
-  const snippetRegion = getSnippetRegion(content);
+function addBlock(content: string, doc: DocumentSummary): string {
+  // Skip if a managed line for this exact title already exists.
+  if (parseReferenceTitles(content).includes(doc.title)) return content;
+  // Strip trailing whitespace from the existing reference region so two
+  // ticks in a row produce adjacent lines instead of a blank line between.
+  const snippetRegion = getSnippetRegion(content).replace(/\s+$/, "");
   const ordersRegion = getOrdersRegion(content);
-  const sep = snippetRegion && !snippetRegion.endsWith("\n\n") ? "\n\n" : "";
-  const nextSnippets = `${snippetRegion}${sep}${buildBlock(doc, snippet)}\n\n`;
+  const sep = snippetRegion ? "\n" : "";
+  const nextSnippets = `${snippetRegion}${sep}${buildBlock(doc)}\n`;
   return joinRegions(nextSnippets, ordersRegion);
 }
 
-function removeBlock(content: string, docId: string): string {
+function removeBlock(content: string, doc: DocumentSummary): string {
   const snippetRegion = getSnippetRegion(content);
   const ordersRegion = getOrdersRegion(content);
+  // Remove only a line whose text matches `- <this exact title>`, so a
+  // similarly-named doc in the operator's library can never accidentally
+  // get its line stripped when an unrelated doc is unticked.
   const re = new RegExp(
-    `<<<\\s*doc:${escapeRegExp(docId)}\\s*>>>[\\s\\S]*?<<<\\s*\\/doc\\s*>>>\\s*`,
-    "g",
+    `^-\\s+${escapeRegExp(doc.title)}\\s*(?:\\r?\\n|$)`,
+    "gm",
   );
   const next = snippetRegion.replace(re, "");
   return joinRegions(next, ordersRegion);
@@ -714,17 +728,11 @@ function DoctrinePicker({
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [snippetError, setSnippetError] = useState<string | null>(null);
   // IDs of docs the operator just uploaded inline. As soon as one of them
-  // flips to "ready" we fetch its snippet and tick it. This lives outside
-  // the textbox content so we don't have to encode "pending" state in the
+  // flips to "ready" we add it as a reference line. This lives outside the
+  // textbox content so we don't have to encode "pending" state in the
   // textarea itself.
   const [pendingAutoTickIds, setPendingAutoTickIds] = useState<string[]>([]);
-  // While we're fetching a snippet for a manual tick, optimistically lock
-  // out repeat clicks on that doc.
-  const [fetchingIds, setFetchingIds] = useState<Set<string>>(new Set());
-
-  const checkedIds = useMemo(() => parseCheckedIds(value), [value]);
 
   // Keep the dropdown stable but bounded — the typical operator has 5–20
   // docs (foundational + MOS + a few uploads). Sort ready first, processing
@@ -747,103 +755,57 @@ function DoctrinePicker({
     });
   }, [docs]);
 
-  const tickedCount = useMemo(
-    () =>
-      sortedDocs.filter((d) => checkedIds.has(d.id)).length +
-      // Count ids in the textbox that aren't in the library (e.g. a doc
-      // that was deleted upstream) so the summary line is honest.
-      Array.from(checkedIds).filter(
-        (id) => !sortedDocs.some((d) => d.id === id),
-      ).length,
-    [sortedDocs, checkedIds],
+  const checkedIds = useMemo(
+    () => parseCheckedIds(value, sortedDocs),
+    [value, sortedDocs],
   );
+
+  const tickedCount = useMemo(() => {
+    // Count every managed reference line so a stale title (e.g. a doc that
+    // was deleted upstream and no longer matches anything in the library)
+    // still shows up in the summary line — that way the operator can see
+    // there's something they may want to clean up.
+    const titles = parseReferenceTitles(value);
+    return titles.length;
+  }, [value]);
 
   // Auto-tick freshly-uploaded docs the moment they reach "ready". Drop
   // ids that ended up "failed" so we don't spin forever waiting on them.
   useEffect(() => {
     if (!docs || pendingAutoTickIds.length === 0) return;
 
-    const readyIds: string[] = [];
+    const readyDocs: DocumentSummary[] = [];
     const stillPending: string[] = [];
     for (const id of pendingAutoTickIds) {
       const doc = docs.find((d) => d.id === id);
       if (!doc) continue; // doc disappeared — drop it
-      if (doc.status === "ready") readyIds.push(id);
+      if (doc.status === "ready") readyDocs.push(doc);
       else if (doc.status === "uploaded" || doc.status === "processing")
         stillPending.push(id);
       // failed → drop (nothing to tick)
     }
 
-    if (readyIds.length === 0) {
-      if (stillPending.length !== pendingAutoTickIds.length) {
-        setPendingAutoTickIds(stillPending);
-      }
-      return;
+    if (stillPending.length !== pendingAutoTickIds.length) {
+      setPendingAutoTickIds(stillPending);
     }
 
-    // Optimistically remove the ids we're about to tick so this effect
-    // doesn't re-fire on the next docs refresh while the snippet fetch is
-    // in flight.
-    setPendingAutoTickIds(stillPending);
+    if (readyDocs.length === 0) return;
 
-    void Promise.all(
-      readyIds.map(async (id) => {
-        const doc = docs.find((d) => d.id === id);
-        if (!doc) return null;
-        try {
-          const snip = await getDocumentSnippet(id);
-          return { doc, snip };
-        } catch (err) {
-          setSnippetError(
-            err instanceof Error
-              ? err.message
-              : "Failed to fetch a snippet for the newly uploaded doc.",
-          );
-          return null;
-        }
-      }),
-    ).then((results) => {
-      const wins = results.filter(
-        (r): r is { doc: DocumentSummary; snip: DocumentSnippet } => !!r,
-      );
-      if (wins.length === 0) return;
-      setValue((prev) => {
-        let next = prev;
-        for (const r of wins) next = addBlock(next, r.doc, r.snip);
-        return next;
-      });
+    setValue((prev) => {
+      let next = prev;
+      for (const doc of readyDocs) next = addBlock(next, doc);
+      return next;
     });
   }, [docs, pendingAutoTickIds, setValue]);
 
   const toggleDoc = useCallback(
-    async (doc: DocumentSummary, currentlyChecked: boolean) => {
-      setSnippetError(null);
+    (doc: DocumentSummary, currentlyChecked: boolean) => {
       if (currentlyChecked) {
-        setValue((prev) => removeBlock(prev, doc.id));
+        setValue((prev) => removeBlock(prev, doc));
         return;
       }
       if (doc.status !== "ready") return;
-      setFetchingIds((prev) => {
-        const next = new Set(prev);
-        next.add(doc.id);
-        return next;
-      });
-      try {
-        const snip = await getDocumentSnippet(doc.id);
-        setValue((prev) => addBlock(prev, doc, snip));
-      } catch (err) {
-        setSnippetError(
-          err instanceof Error
-            ? err.message
-            : "Failed to fetch doctrine snippet.",
-        );
-      } finally {
-        setFetchingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(doc.id);
-          return next;
-        });
-      }
+      setValue((prev) => addBlock(prev, doc));
     },
     [setValue],
   );
@@ -988,8 +950,7 @@ function DoctrinePicker({
               {sortedDocs.map((doc) => {
                 const checked = checkedIds.has(doc.id);
                 const isReady = doc.status === "ready";
-                const isFetching = fetchingIds.has(doc.id);
-                const disabled = (!isReady && !checked) || isFetching;
+                const disabled = !isReady && !checked;
                 return (
                   <li
                     key={doc.id}
@@ -1003,7 +964,7 @@ function DoctrinePicker({
                       className="mt-0.5 h-4 w-4 accent-primary"
                       checked={checked}
                       disabled={disabled}
-                      onChange={() => void toggleDoc(doc, checked)}
+                      onChange={() => toggleDoc(doc, checked)}
                       data-testid={`doctrine-picker-checkbox-${doc.id}`}
                       aria-label={`Tick ${doc.title}`}
                     />
@@ -1022,9 +983,6 @@ function DoctrinePicker({
                                 : "queued"}
                           </span>
                         )}
-                        {isFetching && (
-                          <span className="text-primary">loading…</span>
-                        )}
                       </div>
                     </div>
                   </li>
@@ -1032,8 +990,6 @@ function DoctrinePicker({
               })}
             </ul>
           )}
-
-          {snippetError && <ErrorBox>{snippetError}</ErrorBox>}
 
           <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-border/50">
             <input
