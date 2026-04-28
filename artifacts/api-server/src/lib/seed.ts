@@ -71,7 +71,7 @@ const TOOLS: SeedTool[] = [
   {
     slug: "context-echo",
     name: "Context Echo",
-    vendor: "DoD AI Marketplace",
+    vendor: "DoW AI Marketplace",
     categorySlug: "comms-writing",
     shortDescription:
       "Reference tool that displays the exact context bundle the marketplace forwards on launch.",
@@ -97,7 +97,7 @@ const TOOLS: SeedTool[] = [
   {
     slug: "brief-drafter",
     name: "Mission Brief Drafter",
-    vendor: "DoD AI Marketplace",
+    vendor: "DoW AI Marketplace",
     categorySlug: "comms-writing",
     shortDescription:
       "Drafts a SITREP, OPORD paragraph, or training brief in your voice from a one-line topic.",
@@ -193,7 +193,7 @@ const TOOLS: SeedTool[] = [
     impactLevels: ["il5", "il6"],
     dataClassification: "secret",
     version: "3.1",
-    badges: ["FedRAMP High", "DoD IL5"],
+    badges: ["FedRAMP High", "DoW IL5"],
     homepageUrl: null,
     launchUrl: "/context-echo/",
     documentationUrl: null,
@@ -219,7 +219,7 @@ const TOOLS: SeedTool[] = [
     impactLevels: ["il5", "il6"],
     dataClassification: "secret",
     version: "1.2",
-    badges: ["Interim Authority", "DoD IL6"],
+    badges: ["Interim Authority", "DoW IL6"],
     homepageUrl: null,
     launchUrl: "/context-echo/",
     documentationUrl: null,

@@ -4,7 +4,7 @@
 //
 // The list is the 11 unified combatant commands plus an explicit
 // "Other / N/A" option for users whose command isn't represented (reservists,
-// service-component HQ, civilian DoD, etc.).
+// service-component HQ, civilian DoW, etc.).
 
 export interface CombatantCommandEntry {
   /** Canonical short identifier stored on the profile. */

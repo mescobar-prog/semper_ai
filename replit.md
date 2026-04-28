@@ -1,8 +1,8 @@
 # Overview
 
-This project is an MVP for a DoD AI Tool Marketplace, akin to a TradeWinds-style platform. Its core purpose is to enable service members to securely access and utilize authorized AI tools. Users will create structured operator profiles and personal RAG libraries. When launching an AI tool, their relevant context and mission-specific document snippets are automatically provided via a one-time launch token.
+This project is an MVP for a DoW AI Tool Marketplace, akin to a TradeWinds-style platform. Its core purpose is to enable service members to securely access and utilize authorized AI tools. Users will create structured operator profiles and personal RAG libraries. When launching an AI tool, their relevant context and mission-specific document snippets are automatically provided via a one-time launch token.
 
-The marketplace aims to streamline the deployment and use of AI capabilities within the DoD, ensuring secure and context-aware interactions. Key capabilities include:
+The marketplace aims to streamline the deployment and use of AI capabilities within the DoW, ensuring secure and context-aware interactions. Key capabilities include:
 - Secure single sign-on for service members (Replit OIDC).
 - Creation and management of operator profiles and personal RAG (Retrieval-Augmented Generation) libraries.
 - A catalog of AI tools with a context block verification gate.

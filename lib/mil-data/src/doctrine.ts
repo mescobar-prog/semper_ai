@@ -6,7 +6,7 @@
 // balloon. Where MOS-specific doctrine is thin we fall back to the branch's
 // foundational publications.
 //
-// Sources are public DoD doctrine portals (armypubs.army.mil, marines.mil,
+// Sources are public DoW doctrine portals (armypubs.army.mil, marines.mil,
 // doctrine.af.mil, navy.mil, etc.). If a URL goes 404 or stale, the rest of
 // the package still ingests; the failure is recorded per-doc.
 

@@ -44,7 +44,7 @@ async function fetchDocBytes(
       redirect: "follow",
       headers: {
         "user-agent":
-          "DoD-AI-Marketplace-AutoIngest/1.0 (+marketplace.dod.ai)",
+          "DoW-AI-Marketplace-AutoIngest/1.0 (+marketplace.dod.ai)",
       },
     });
     if (!resp.ok) {

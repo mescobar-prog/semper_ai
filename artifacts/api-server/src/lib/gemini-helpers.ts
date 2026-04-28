@@ -450,7 +450,7 @@ export async function draftToolText(
     ? `\n\nAdmin steering note (apply this in the rewrite):\n${trimSource(trimmedSteering, 500)}`
     : "";
 
-  const systemPrompt = `You are helping a marketplace admin draft catalog copy for a DoD AI tool.
+  const systemPrompt = `You are helping a marketplace admin draft catalog copy for a DoW AI tool.
 Output rules:
 - Be factual. Do not invent capabilities the source material doesn't support.
 - Use plain text. No markdown headings, no emoji, no marketing superlatives.
@@ -564,7 +564,7 @@ Rules:
 - Output 2-3 distinct queries.
 - Each query must be 2-6 keywords — no full sentences, no stop words like "the" or "a".
 - Every query MUST come directly from the operator's question; do not pivot to generic role/MOS terms.
-- Use synonyms or doctrine terminology a DoD document would actually use for the operator's question.
+- Use synonyms or doctrine terminology a DoW document would actually use for the operator's question.
 - Output ONLY a JSON object: {"queries": ["...", "..."]}. No prose, no markdown fences.`
     : `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
 
@@ -574,7 +574,7 @@ Rules:
 - Each query should target a different angle (mission context, tactics, regulations, equipment, role-specific terminology, etc.).
 - At least one query MUST reuse keywords directly from the user's profile (mission, duty title, MOS, unit) so we retrieve their personal SOPs/docs.
 - Heavily prioritize the admin-authored "tool purpose" if provided — that describes what the tool actually does with the user's context.
-- Bias toward terminology that would actually appear in DoD documents the user might have uploaded.
+- Bias toward terminology that would actually appear in DoW documents the user might have uploaded.
 - Output ONLY a JSON object: {"queries": ["...", "..."]}. No prose, no markdown fences.`;
 
   const userPrompt = intent
@@ -728,7 +728,7 @@ export async function draftMissionBrief(
         .join("\n\n")
     : "(No matching snippets in the operator's library — draft from profile context only and call out gaps.)";
 
-  const systemPrompt = `You are a U.S. military staff writer embedded in the "Mission Brief Drafter" tool inside a DoD AI Tool Marketplace. Your job is to draft a ${briefLabel} for the operator below, anchored in their structured profile and the snippets pulled from their personal doctrine/SOP library.
+  const systemPrompt = `You are a U.S. military staff writer embedded in the "Mission Brief Drafter" tool inside a DoW AI Tool Marketplace. Your job is to draft a ${briefLabel} for the operator below, anchored in their structured profile and the snippets pulled from their personal doctrine/SOP library.
 
 Hard rules:
 - Never invent classified facts, casualty figures, friendly force locations, or specific OPSEC-sensitive details. If the operator hasn't given you a fact, say "TBD" rather than guessing.
