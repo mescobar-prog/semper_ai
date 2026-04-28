@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListToolsSort } from "./listToolsSort";
 
 export type ListToolsParams = {
   q?: string;
@@ -12,4 +13,8 @@ export type ListToolsParams = {
   ato_status?: string;
   impact_level?: string;
   favorites_only?: boolean;
+  /**
+   * Sort order: "name" (default) or "rating".
+   */
+  sort?: ListToolsSort;
 };

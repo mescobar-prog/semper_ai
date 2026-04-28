@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
-import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import {
   db,
   categoriesTable,
   toolsTable,
   favoritesTable,
   launchesTable,
+  toolReviewsTable,
 } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
 
@@ -31,6 +32,7 @@ router.get("/catalog/tools", async (req, res) => {
       ? req.query.impact_level
       : undefined;
   const favoritesOnly = req.query.favorites_only === "true";
+  const sort = req.query.sort === "rating" ? "rating" : "name";
 
   const conditions = [
     eq(toolsTable.isActive, "true"),
@@ -69,6 +71,8 @@ router.get("/catalog/tools", async (req, res) => {
       submitterId: toolsTable.submitterId,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
       launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`,
+      avgRating: sql<string | null>`(SELECT AVG(r.rating)::text FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
+      reviewCount: sql<number>`(SELECT COUNT(*)::int FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
       isFavorite: userId
         ? sql<boolean>`EXISTS (SELECT 1 FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id} AND f.user_id = ${userId})`
         : sql<boolean>`false`,
@@ -76,7 +80,19 @@ router.get("/catalog/tools", async (req, res) => {
     .from(toolsTable)
     .leftJoin(categoriesTable, eq(toolsTable.categoryId, categoriesTable.id))
     .where(and(...conditions))
-    .orderBy(asc(toolsTable.name));
+    .orderBy(
+      ...(sort === "rating"
+        ? [
+            desc(
+              sql`COALESCE((SELECT AVG(r.rating) FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL), 0)`,
+            ),
+            desc(
+              sql`(SELECT COUNT(*) FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
+            ),
+            asc(toolsTable.name),
+          ]
+        : [asc(toolsTable.name)]),
+    );
 
   let result = rows;
   if (favoritesOnly && userId) {
@@ -90,6 +106,10 @@ router.get("/catalog/tools", async (req, res) => {
       launchCount: Number(r.launchCount ?? 0),
       isFavorite: Boolean(r.isFavorite),
       isVendorSubmitted: submitterId != null,
+      avgRating: r.avgRating === null || r.avgRating === undefined
+        ? null
+        : Number(r.avgRating),
+      reviewCount: Number(r.reviewCount ?? 0),
     })),
   );
 });
@@ -125,6 +145,8 @@ router.get("/catalog/tools/:slug", async (req, res) => {
       updatedAt: toolsTable.updatedAt,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
       launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`,
+      avgRating: sql<string | null>`(SELECT AVG(r.rating)::text FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
+      reviewCount: sql<number>`(SELECT COUNT(*)::int FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
       isFavorite: userId
         ? sql<boolean>`EXISTS (SELECT 1 FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id} AND f.user_id = ${userId})`
         : sql<boolean>`false`,
@@ -147,6 +169,11 @@ router.get("/catalog/tools/:slug", async (req, res) => {
     launchCount: Number(row.launchCount ?? 0),
     isFavorite: Boolean(row.isFavorite),
     isVendorSubmitted: submitterId != null,
+    avgRating:
+      row.avgRating === null || row.avgRating === undefined
+        ? null
+        : Number(row.avgRating),
+    reviewCount: Number(row.reviewCount ?? 0),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });

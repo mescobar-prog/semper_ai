@@ -6,6 +6,7 @@ import {
   categoriesTable,
   favoritesTable,
   launchesTable,
+  toolReviewsTable,
   type Tool,
 } from "@workspace/db";
 import {
@@ -21,6 +22,8 @@ interface ToolDetailRow extends Tool {
   categoryName: string | null;
   favoriteCount: number;
   launchCount: number;
+  avgRating: string | number | null;
+  reviewCount: number;
 }
 
 function serializeToolDetail(row: ToolDetailRow) {
@@ -31,11 +34,19 @@ function serializeToolDetail(row: ToolDetailRow) {
     favoriteCount: Number(row.favoriteCount ?? 0),
     launchCount: Number(row.launchCount ?? 0),
     isFavorite: false,
-    isVendorSubmitted: submitterId != null,
-    purpose: row.purpose ?? "",
-    ragQueryTemplates: row.ragQueryTemplates ?? [],
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
+    avgRating:
+      row.avgRating === null || row.avgRating === undefined
+        ? null
+        : Number(row.avgRating),
+    reviewCount: Number(row.reviewCount ?? 0),
+    createdAt: (row.createdAt instanceof Date
+      ? row.createdAt
+      : new Date(row.createdAt)
+    ).toISOString(),
+    updatedAt: (row.updatedAt instanceof Date
+      ? row.updatedAt
+      : new Date(row.updatedAt)
+    ).toISOString(),
   };
 }
 
@@ -70,6 +81,8 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
       updatedAt: toolsTable.updatedAt,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
       launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`,
+      avgRating: sql<string | null>`(SELECT AVG(r.rating)::text FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
+      reviewCount: sql<number>`(SELECT COUNT(*)::int FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
     })
     .from(toolsTable)
     .leftJoin(categoriesTable, eq(toolsTable.categoryId, categoriesTable.id))
@@ -127,6 +140,8 @@ router.post("/admin/tools", requireAdmin, async (req, res) => {
       categoryName: cat?.name ?? null,
       favoriteCount: 0,
       launchCount: 0,
+      avgRating: null,
+      reviewCount: 0,
     }),
   );
 });
@@ -181,13 +196,26 @@ router.put("/admin/tools/:id", requireAdmin, async (req, res) => {
         .limit(1)
     : [null];
 
+  const [stats] = await db
+    .select({
+      favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${updated.id})`,
+      launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${updated.id})`,
+      avgRating: sql<string | null>`(SELECT AVG(r.rating)::text FROM ${toolReviewsTable} r WHERE r.tool_id = ${updated.id} AND r.hidden_at IS NULL)`,
+      reviewCount: sql<number>`(SELECT COUNT(*)::int FROM ${toolReviewsTable} r WHERE r.tool_id = ${updated.id} AND r.hidden_at IS NULL)`,
+    })
+    .from(toolsTable)
+    .where(eq(toolsTable.id, updated.id))
+    .limit(1);
+
   res.json(
     serializeToolDetail({
       ...updated,
       categorySlug: cat?.slug ?? null,
       categoryName: cat?.name ?? null,
-      favoriteCount: 0,
-      launchCount: 0,
+      favoriteCount: stats?.favoriteCount ?? 0,
+      launchCount: stats?.launchCount ?? 0,
+      avgRating: stats?.avgRating ?? null,
+      reviewCount: stats?.reviewCount ?? 0,
     }),
   );
 });

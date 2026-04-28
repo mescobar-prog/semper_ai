@@ -142,3 +142,73 @@ export function EmptyState({
     </div>
   );
 }
+
+export function StarBar({
+  value,
+  size = "sm",
+}: {
+  value: number;
+  size?: "sm" | "md";
+}) {
+  const filled = Math.round(value);
+  const sz = size === "md" ? "text-base" : "text-xs";
+  return (
+    <span aria-label={`${value.toFixed(1)} of 5 stars`} className={sz}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <span
+          key={n}
+          className={n <= filled ? "text-amber-400" : "text-muted-foreground/30"}
+        >
+          ★
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function RatingBadge({
+  avgRating,
+  reviewCount,
+  emptyLabel = "Be the first to review",
+}: {
+  avgRating: number | null;
+  reviewCount: number;
+  emptyLabel?: string;
+}) {
+  if (!avgRating || reviewCount === 0) {
+    return (
+      <span className="text-muted-foreground/80 normal-case font-sans tracking-normal text-[11px]">
+        {emptyLabel}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 normal-case tracking-normal font-sans text-[11px]">
+      <StarBar value={avgRating} />
+      <span className="text-foreground font-medium">
+        {avgRating.toFixed(1)}
+      </span>
+      <span className="text-muted-foreground">
+        ({reviewCount})
+      </span>
+    </span>
+  );
+}
+
+export function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.round(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  const yr = Math.round(day / 365);
+  return `${yr}y ago`;
+}

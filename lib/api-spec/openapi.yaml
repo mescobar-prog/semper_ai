@@ -28,6 +28,8 @@ tags:
     description: Aggregated dashboard summaries.
   - name: Storage
     description: Object storage upload and serving endpoints.
+  - name: Reviews
+    description: Tool ratings and reviews.
 
 paths:
   /healthz:
@@ -512,6 +514,11 @@ paths:
           in: query
           required: false
           schema: { type: boolean }
+        - name: sort
+          in: query
+          required: false
+          description: 'Sort order: "name" (default) or "rating".'
+          schema: { type: string, enum: [name, rating] }
       responses:
         '200':
           description: Tools
@@ -579,6 +586,190 @@ paths:
               schema: { $ref: '#/components/schemas/SimpleSuccess' }
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ---------- Reviews ----------
+  /catalog/reviews:
+    get:
+      tags: [Reviews]
+      operationId: listToolReviews
+      summary: List reviews for a tool (paginated)
+      parameters:
+        - name: tool_slug
+          in: query
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Reviews
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ToolReviewListResponse' }
+        '404':
+          description: Tool not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /catalog/tools/{toolId}/review:
+    put:
+      tags: [Reviews]
+      operationId: upsertMyToolReview
+      summary: Create or update the current user's review for a tool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ToolReviewUpsert' }
+      responses:
+        '200':
+          description: Saved review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ToolReview' }
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '403':
+          description: Must launch the tool before reviewing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Tool not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      tags: [Reviews]
+      operationId: deleteMyToolReview
+      summary: Delete the current user's review for a tool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimpleSuccess' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Review not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/reviews:
+    get:
+      tags: [Reviews]
+      operationId: adminListReviews
+      summary: Admin list of all reviews (including hidden)
+      parameters:
+        - name: include_hidden
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Reviews
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReviewListResponse' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/reviews/{reviewId}/hide:
+    post:
+      tags: [Reviews]
+      operationId: adminHideReview
+      summary: Soft-hide a review with a reason
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminHideReviewRequest' }
+      responses:
+        '200':
+          description: Hidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminToolReview' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Review not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/reviews/{reviewId}/unhide:
+    post:
+      tags: [Reviews]
+      operationId: adminUnhideReview
+      summary: Restore a hidden review
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Unhidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminToolReview' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Review not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -1543,7 +1734,8 @@ components:
       required:
         [id, slug, name, vendor, shortDescription, atoStatus, impactLevels,
          dataClassification, badges, isFavorite, favoriteCount,
-         launchCount, categorySlug, categoryName, isVendorSubmitted]
+         launchCount, categorySlug, categoryName, isVendorSubmitted,
+         avgRating, reviewCount]
       properties:
         id: { type: string }
         slug: { type: string }
@@ -1564,6 +1756,12 @@ components:
         categorySlug: { type: [string, 'null'] }
         categoryName: { type: [string, 'null'] }
         isVendorSubmitted: { type: boolean }
+        avgRating:
+          type: [number, 'null']
+          description: Average star rating across visible reviews, or null when there are no reviews.
+        reviewCount:
+          type: integer
+          description: Number of visible reviews.
 
     ToolDetail:
       allOf:
@@ -2216,3 +2414,92 @@ components:
         presetIds:
           type: array
           items: { type: string }
+
+    ToolReview:
+      type: object
+      required:
+        [id, toolId, rating, comment, reviewerBranch, reviewerRank,
+         createdAt, updatedAt, isMine]
+      properties:
+        id: { type: string }
+        toolId: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: [string, 'null'] }
+        reviewerBranch: { type: [string, 'null'] }
+        reviewerRank: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        isMine: { type: boolean }
+
+    ToolReviewListResponse:
+      type: object
+      required: [reviews, total, avgRating, hasMore, myReview, canReview]
+      properties:
+        reviews:
+          type: array
+          items: { $ref: '#/components/schemas/ToolReview' }
+        total:
+          type: integer
+          description: Total number of visible reviews.
+        avgRating:
+          type: [number, 'null']
+          description: Average rating across visible reviews, or null when there are none.
+        hasMore: { type: boolean }
+        myReview:
+          oneOf:
+            - $ref: '#/components/schemas/ToolReview'
+            - type: 'null'
+        canReview:
+          type: boolean
+          description: True when the current user has launched the tool and is signed in (so may post a review).
+
+    ToolReviewUpsert:
+      type: object
+      required: [rating]
+      properties:
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment:
+          type: [string, 'null']
+          maxLength: 500
+
+    AdminToolReview:
+      type: object
+      required:
+        [id, toolId, toolName, toolSlug, userId, reviewerEmail,
+         reviewerBranch, reviewerRank, rating, comment, isHidden,
+         hiddenReason, hiddenAt, hiddenBy, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        toolId: { type: string }
+        toolName: { type: string }
+        toolSlug: { type: string }
+        userId: { type: string }
+        reviewerEmail: { type: [string, 'null'] }
+        reviewerBranch: { type: [string, 'null'] }
+        reviewerRank: { type: [string, 'null'] }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: [string, 'null'] }
+        isHidden: { type: boolean }
+        hiddenReason: { type: [string, 'null'] }
+        hiddenAt: { type: [string, 'null'], format: date-time }
+        hiddenBy: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AdminReviewListResponse:
+      type: object
+      required: [reviews, total, hasMore]
+      properties:
+        reviews:
+          type: array
+          items: { $ref: '#/components/schemas/AdminToolReview' }
+        total: { type: integer }
+        hasMore: { type: boolean }
+
+    AdminHideReviewRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+          maxLength: 500

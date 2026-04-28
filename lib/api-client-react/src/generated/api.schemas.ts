@@ -252,6 +252,13 @@ export interface ToolSummary {
   /** @nullable */
   categoryName: string | null;
   isVendorSubmitted: boolean;
+  /**
+   * Average star rating across visible reviews, or null when there are no reviews.
+   * @nullable
+   */
+  avgRating: number | null;
+  /** Number of visible reviews. */
+  reviewCount: number;
 }
 
 export type ToolDetail = ToolSummary & {
@@ -778,6 +785,94 @@ export interface DocumentPresetTagsUpdate {
   presetIds: string[];
 }
 
+export interface ToolReview {
+  id: string;
+  toolId: string;
+  /**
+   * @minimum 1
+   * @maximum 5
+   */
+  rating: number;
+  /** @nullable */
+  comment: string | null;
+  /** @nullable */
+  reviewerBranch: string | null;
+  /** @nullable */
+  reviewerRank: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isMine: boolean;
+}
+
+export interface ToolReviewListResponse {
+  reviews: ToolReview[];
+  /** Total number of visible reviews. */
+  total: number;
+  /**
+   * Average rating across visible reviews, or null when there are none.
+   * @nullable
+   */
+  avgRating: number | null;
+  hasMore: boolean;
+  myReview: ToolReview | null;
+  /** True when the current user has launched the tool and is signed in (so may post a review). */
+  canReview: boolean;
+}
+
+export interface ToolReviewUpsert {
+  /**
+   * @minimum 1
+   * @maximum 5
+   */
+  rating: number;
+  /**
+   * @maxLength 500
+   * @nullable
+   */
+  comment?: string | null;
+}
+
+export interface AdminToolReview {
+  id: string;
+  toolId: string;
+  toolName: string;
+  toolSlug: string;
+  userId: string;
+  /** @nullable */
+  reviewerEmail: string | null;
+  /** @nullable */
+  reviewerBranch: string | null;
+  /** @nullable */
+  reviewerRank: string | null;
+  /**
+   * @minimum 1
+   * @maximum 5
+   */
+  rating: number;
+  /** @nullable */
+  comment: string | null;
+  isHidden: boolean;
+  /** @nullable */
+  hiddenReason: string | null;
+  /** @nullable */
+  hiddenAt: string | null;
+  /** @nullable */
+  hiddenBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminReviewListResponse {
+  reviews: AdminToolReview[];
+  total: number;
+  hasMore: boolean;
+}
+
+export interface AdminHideReviewRequest {
+  /** @maxLength 500 */
+  reason?: string | null;
+}
+
 /**
  * Opaque session token — `Bearer <sid>`.
  */
@@ -799,6 +894,43 @@ export type ListToolsParams = {
   ato_status?: string;
   impact_level?: string;
   favorites_only?: boolean;
+  /**
+   * Sort order: "name" (default) or "rating".
+   */
+  sort?: ListToolsSort;
+};
+
+export type ListToolsSort = (typeof ListToolsSort)[keyof typeof ListToolsSort];
+
+export const ListToolsSort = {
+  name: "name",
+  rating: "rating",
+} as const;
+
+export type ListToolReviewsParams = {
+  tool_slug: string;
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+};
+
+export type AdminListReviewsParams = {
+  include_hidden?: boolean;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  limit?: number;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
 };
 
 export type ListDocumentsParams = {

@@ -8,6 +8,7 @@ import {
   launchesTable,
   toolsTable,
   categoriesTable,
+  toolReviewsTable,
 } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
@@ -86,6 +87,8 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       submitterId: toolsTable.submitterId,
       favoriteCount: sql<number>`(SELECT COUNT(*)::int FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id})`,
       launchCount: sql<number>`(SELECT COUNT(*)::int FROM ${launchesTable} l WHERE l.tool_id = ${toolsTable.id})`,
+      avgRating: sql<string | null>`(SELECT AVG(r.rating)::text FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
+      reviewCount: sql<number>`(SELECT COUNT(*)::int FROM ${toolReviewsTable} r WHERE r.tool_id = ${toolsTable.id} AND r.hidden_at IS NULL)`,
       isFavorite: sql<boolean>`EXISTS (SELECT 1 FROM ${favoritesTable} f WHERE f.tool_id = ${toolsTable.id} AND f.user_id = ${userId})`,
     })
     .from(toolsTable)
@@ -118,7 +121,11 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       favoriteCount: Number(t.favoriteCount ?? 0),
       launchCount: Number(t.launchCount ?? 0),
       isFavorite: Boolean(t.isFavorite),
-      isVendorSubmitted: submitterId != null,
+      avgRating:
+        t.avgRating === null || t.avgRating === undefined
+          ? null
+          : Number(t.avgRating),
+      reviewCount: Number(t.reviewCount ?? 0),
     })),
   });
 });

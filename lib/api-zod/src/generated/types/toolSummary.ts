@@ -24,4 +24,11 @@ export interface ToolSummary {
   /** @nullable */
   categoryName: string | null;
   isVendorSubmitted: boolean;
+  /**
+   * Average star rating across visible reviews, or null when there are no reviews.
+   * @nullable
+   */
+  avgRating: number | null;
+  /** Number of visible reviews. */
+  reviewCount: number;
 }

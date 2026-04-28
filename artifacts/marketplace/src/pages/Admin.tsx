@@ -9,15 +9,20 @@ import {
   useListCategories,
   useAdminListSubmissions,
   useReviewSubmission,
+  useAdminListReviews,
+  useAdminHideReview,
+  useAdminUnhideReview,
   getAdminListToolsQueryKey,
   getListToolsQueryKey,
   getAdminListSubmissionsQueryKey,
   getListMySubmissionsQueryKey,
+  getAdminListReviewsQueryKey,
 } from "@workspace/api-client-react";
 import type {
   ToolUpsert,
   ToolDetail,
   SubmissionDetail,
+  AdminToolReview,
 } from "@workspace/api-client-react";
 import {
   PageContainer,
@@ -26,6 +31,8 @@ import {
   atoLabel,
   atoTone,
   EmptyState,
+  StarBar,
+  relativeTime,
 } from "@/lib/format";
 
 const IMPACT_LEVELS = ["IL2", "IL4", "IL5", "IL6"];
@@ -84,7 +91,7 @@ export function Admin() {
   return <AdminInner />;
 }
 
-type AdminTab = "catalog" | "review";
+type AdminTab = "catalog" | "review" | "reviews";
 
 function AdminInner() {
   const [tab, setTab] = useState<AdminTab>("review");
@@ -98,18 +105,28 @@ function AdminInner() {
           Marketplace administration
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Review vendor submissions and manage the published catalog.
+          Review vendor submissions, manage the published catalog, and
+          moderate user reviews.
         </p>
       </div>
       <div className="border-b border-border mb-6 flex gap-6">
         <TabBtn active={tab === "review"} onClick={() => setTab("review")}>
-          Review queue
+          Submission queue
         </TabBtn>
         <TabBtn active={tab === "catalog"} onClick={() => setTab("catalog")}>
           Catalog management
         </TabBtn>
+        <TabBtn active={tab === "reviews"} onClick={() => setTab("reviews")}>
+          Review moderation
+        </TabBtn>
       </div>
-      {tab === "review" ? <ReviewQueue /> : <CatalogManagement />}
+      {tab === "review" ? (
+        <ReviewQueue />
+      ) : tab === "catalog" ? (
+        <CatalogManagement />
+      ) : (
+        <ReviewModerationSection />
+      )}
     </PageContainer>
   );
 }
@@ -1006,5 +1023,150 @@ function Field({
       </label>
       {children}
     </div>
+  );
+}
+function ReviewModerationSection() {
+  const queryClient = useQueryClient();
+  const [showHidden, setShowHidden] = useState(false);
+  const params = { include_hidden: showHidden, limit: 50, offset: 0 };
+  const {
+    data,
+    isLoading,
+    error,
+  } = useAdminListReviews(params, {
+    query: { queryKey: getAdminListReviewsQueryKey(params) },
+  });
+
+  const hideMutation = useAdminHideReview();
+  const unhideMutation = useAdminUnhideReview();
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["/admin/reviews"] });
+    queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
+  };
+
+  const onHide = async (r: AdminToolReview) => {
+    const reason = prompt("Reason for hiding (optional):") ?? "";
+    await hideMutation.mutateAsync({
+      reviewId: r.id,
+      data: { reason: reason.trim() ? reason.trim() : null },
+    });
+    refresh();
+  };
+
+  const onUnhide = async (r: AdminToolReview) => {
+    await unhideMutation.mutateAsync({ reviewId: r.id });
+    refresh();
+  };
+
+  return (
+    <section className="mt-12">
+      <div className="flex items-end justify-between gap-4 mb-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
+            Admin · Reviews
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            Review moderation
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Hide reviews that violate policy. Hidden reviews stay in the
+            database but are excluded from public listings and ratings.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={(e) => setShowHidden(e.target.checked)}
+          />
+          Show hidden
+        </label>
+      </div>
+
+      {error && <ErrorBox>{(error as Error).message}</ErrorBox>}
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="bg-card border border-border rounded-md h-20 animate-pulse"
+            />
+          ))}
+        </div>
+      ) : !data || data.reviews.length === 0 ? (
+        <EmptyState
+          title="No reviews"
+          description={
+            showHidden
+              ? "No reviews exist yet, hidden or otherwise."
+              : "No visible reviews to moderate right now."
+          }
+        />
+      ) : (
+        <div className="space-y-2">
+          {data.reviews.map((r) => (
+            <div
+              key={r.id}
+              className={`bg-card border rounded-md p-4 ${r.hiddenAt ? "border-rose-500/30" : "border-border"}`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {r.toolName}{" "}
+                    <span className="text-xs text-muted-foreground font-mono">
+                      / {r.toolSlug}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground font-mono uppercase tracking-wider mt-0.5">
+                    {[r.reviewerRank, r.reviewerBranch]
+                      .filter(Boolean)
+                      .join(" · ") || "Unknown reviewer"}{" "}
+                    · {relativeTime(r.updatedAt)}
+                  </div>
+                  <div className="mt-1">
+                    <StarBar value={r.rating} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {r.hiddenAt ? (
+                    <>
+                      <Pill tone="destructive">hidden</Pill>
+                      <button
+                        onClick={() => onUnhide(r)}
+                        disabled={unhideMutation.isPending}
+                        className="h-8 px-3 rounded-md border border-border text-xs font-mono uppercase tracking-wider hover:border-primary/50 disabled:opacity-50"
+                      >
+                        Unhide
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => onHide(r)}
+                      disabled={hideMutation.isPending}
+                      className="h-8 px-3 rounded-md border border-border text-xs font-mono uppercase tracking-wider text-rose-400 hover:border-rose-500/50 disabled:opacity-50"
+                    >
+                      Hide
+                    </button>
+                  )}
+                </div>
+              </div>
+              {r.comment && (
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {r.comment}
+                </p>
+              )}
+              {r.hiddenAt && (
+                <div className="mt-2 text-[11px] text-rose-300 font-mono">
+                  Hidden {relativeTime(r.hiddenAt)}
+                  {r.hiddenReason ? ` · "${r.hiddenReason}"` : ""}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

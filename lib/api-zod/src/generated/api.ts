@@ -693,6 +693,10 @@ export const ListToolsQueryParams = zod.object({
   ato_status: zod.coerce.string().optional(),
   impact_level: zod.coerce.string().optional(),
   favorites_only: zod.coerce.boolean().optional(),
+  sort: zod
+    .enum(["name", "rating"])
+    .optional()
+    .describe('Sort order: \"name\" (default) or \"rating\".'),
 });
 
 export const ListToolsResponseItem = zod.object({
@@ -711,6 +715,13 @@ export const ListToolsResponseItem = zod.object({
   categorySlug: zod.string().nullable(),
   categoryName: zod.string().nullable(),
   isVendorSubmitted: zod.boolean(),
+  avgRating: zod
+    .number()
+    .nullable()
+    .describe(
+      "Average star rating across visible reviews, or null when there are no reviews.",
+    ),
+  reviewCount: zod.number().describe("Number of visible reviews."),
 });
 export const ListToolsResponse = zod.array(ListToolsResponseItem);
 
@@ -738,6 +749,13 @@ export const GetToolBySlugResponse = zod
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
     isVendorSubmitted: zod.boolean(),
+    avgRating: zod
+      .number()
+      .nullable()
+      .describe(
+        "Average star rating across visible reviews, or null when there are no reviews.",
+      ),
+    reviewCount: zod.number().describe("Number of visible reviews."),
   })
   .and(
     zod.object({
@@ -784,6 +802,226 @@ export const RemoveFavoriteParams = zod.object({
 
 export const RemoveFavoriteResponse = zod.object({
   success: zod.boolean(),
+});
+
+/**
+ * @summary List reviews for a tool (paginated)
+ */
+export const listToolReviewsQueryLimitMax = 50;
+
+export const listToolReviewsQueryOffsetMin = 0;
+
+export const ListToolReviewsQueryParams = zod.object({
+  tool_slug: zod.coerce.string(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listToolReviewsQueryLimitMax)
+    .optional(),
+  offset: zod.coerce.number().min(listToolReviewsQueryOffsetMin).optional(),
+});
+
+export const listToolReviewsResponseReviewsItemRatingMax = 5;
+
+export const listToolReviewsResponseMyReviewOneRatingMax = 5;
+
+export const ListToolReviewsResponse = zod.object({
+  reviews: zod.array(
+    zod.object({
+      id: zod.string(),
+      toolId: zod.string(),
+      rating: zod
+        .number()
+        .min(1)
+        .max(listToolReviewsResponseReviewsItemRatingMax),
+      comment: zod.string().nullable(),
+      reviewerBranch: zod.string().nullable(),
+      reviewerRank: zod.string().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+      isMine: zod.boolean(),
+    }),
+  ),
+  total: zod.number().describe("Total number of visible reviews."),
+  avgRating: zod
+    .number()
+    .nullable()
+    .describe(
+      "Average rating across visible reviews, or null when there are none.",
+    ),
+  hasMore: zod.boolean(),
+  myReview: zod.union([
+    zod.object({
+      id: zod.string(),
+      toolId: zod.string(),
+      rating: zod
+        .number()
+        .min(1)
+        .max(listToolReviewsResponseMyReviewOneRatingMax),
+      comment: zod.string().nullable(),
+      reviewerBranch: zod.string().nullable(),
+      reviewerRank: zod.string().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+      isMine: zod.boolean(),
+    }),
+    zod.null(),
+  ]),
+  canReview: zod
+    .boolean()
+    .describe(
+      "True when the current user has launched the tool and is signed in (so may post a review).",
+    ),
+});
+
+/**
+ * @summary Create or update the current user's review for a tool
+ */
+export const UpsertMyToolReviewParams = zod.object({
+  toolId: zod.coerce.string(),
+});
+
+export const upsertMyToolReviewBodyRatingMax = 5;
+
+export const upsertMyToolReviewBodyCommentMax = 500;
+
+export const UpsertMyToolReviewBody = zod.object({
+  rating: zod.number().min(1).max(upsertMyToolReviewBodyRatingMax),
+  comment: zod.string().max(upsertMyToolReviewBodyCommentMax).nullish(),
+});
+
+export const upsertMyToolReviewResponseRatingMax = 5;
+
+export const UpsertMyToolReviewResponse = zod.object({
+  id: zod.string(),
+  toolId: zod.string(),
+  rating: zod.number().min(1).max(upsertMyToolReviewResponseRatingMax),
+  comment: zod.string().nullable(),
+  reviewerBranch: zod.string().nullable(),
+  reviewerRank: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  isMine: zod.boolean(),
+});
+
+/**
+ * @summary Delete the current user's review for a tool
+ */
+export const DeleteMyToolReviewParams = zod.object({
+  toolId: zod.coerce.string(),
+});
+
+export const DeleteMyToolReviewResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary Admin list of all reviews (including hidden)
+ */
+export const adminListReviewsQueryLimitMax = 200;
+
+export const adminListReviewsQueryOffsetMin = 0;
+
+export const AdminListReviewsQueryParams = zod.object({
+  include_hidden: zod.coerce.boolean().optional(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(adminListReviewsQueryLimitMax)
+    .optional(),
+  offset: zod.coerce.number().min(adminListReviewsQueryOffsetMin).optional(),
+});
+
+export const adminListReviewsResponseReviewsItemRatingMax = 5;
+
+export const AdminListReviewsResponse = zod.object({
+  reviews: zod.array(
+    zod.object({
+      id: zod.string(),
+      toolId: zod.string(),
+      toolName: zod.string(),
+      toolSlug: zod.string(),
+      userId: zod.string(),
+      reviewerEmail: zod.string().nullable(),
+      reviewerBranch: zod.string().nullable(),
+      reviewerRank: zod.string().nullable(),
+      rating: zod
+        .number()
+        .min(1)
+        .max(adminListReviewsResponseReviewsItemRatingMax),
+      comment: zod.string().nullable(),
+      isHidden: zod.boolean(),
+      hiddenReason: zod.string().nullable(),
+      hiddenAt: zod.coerce.date().nullable(),
+      hiddenBy: zod.string().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  hasMore: zod.boolean(),
+});
+
+/**
+ * @summary Soft-hide a review with a reason
+ */
+export const AdminHideReviewParams = zod.object({
+  reviewId: zod.coerce.string(),
+});
+
+export const adminHideReviewBodyReasonMax = 500;
+
+export const AdminHideReviewBody = zod.object({
+  reason: zod.string().max(adminHideReviewBodyReasonMax).nullish(),
+});
+
+export const adminHideReviewResponseRatingMax = 5;
+
+export const AdminHideReviewResponse = zod.object({
+  id: zod.string(),
+  toolId: zod.string(),
+  toolName: zod.string(),
+  toolSlug: zod.string(),
+  userId: zod.string(),
+  reviewerEmail: zod.string().nullable(),
+  reviewerBranch: zod.string().nullable(),
+  reviewerRank: zod.string().nullable(),
+  rating: zod.number().min(1).max(adminHideReviewResponseRatingMax),
+  comment: zod.string().nullable(),
+  isHidden: zod.boolean(),
+  hiddenReason: zod.string().nullable(),
+  hiddenAt: zod.coerce.date().nullable(),
+  hiddenBy: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Restore a hidden review
+ */
+export const AdminUnhideReviewParams = zod.object({
+  reviewId: zod.coerce.string(),
+});
+
+export const adminUnhideReviewResponseRatingMax = 5;
+
+export const AdminUnhideReviewResponse = zod.object({
+  id: zod.string(),
+  toolId: zod.string(),
+  toolName: zod.string(),
+  toolSlug: zod.string(),
+  userId: zod.string(),
+  reviewerEmail: zod.string().nullable(),
+  reviewerBranch: zod.string().nullable(),
+  reviewerRank: zod.string().nullable(),
+  rating: zod.number().min(1).max(adminUnhideReviewResponseRatingMax),
+  comment: zod.string().nullable(),
+  isHidden: zod.boolean(),
+  hiddenReason: zod.string().nullable(),
+  hiddenAt: zod.coerce.date().nullable(),
+  hiddenBy: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
 });
 
 /**
@@ -1435,6 +1673,13 @@ export const AdminListToolsResponseItem = zod
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
     isVendorSubmitted: zod.boolean(),
+    avgRating: zod
+      .number()
+      .nullable()
+      .describe(
+        "Average star rating across visible reviews, or null when there are no reviews.",
+      ),
+    reviewCount: zod.number().describe("Number of visible reviews."),
   })
   .and(
     zod.object({
@@ -1504,6 +1749,13 @@ export const CreateToolResponse = zod
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
     isVendorSubmitted: zod.boolean(),
+    avgRating: zod
+      .number()
+      .nullable()
+      .describe(
+        "Average star rating across visible reviews, or null when there are no reviews.",
+      ),
+    reviewCount: zod.number().describe("Number of visible reviews."),
   })
   .and(
     zod.object({
@@ -1575,6 +1827,13 @@ export const UpdateToolResponse = zod
     categorySlug: zod.string().nullable(),
     categoryName: zod.string().nullable(),
     isVendorSubmitted: zod.boolean(),
+    avgRating: zod
+      .number()
+      .nullable()
+      .describe(
+        "Average star rating across visible reviews, or null when there are no reviews.",
+      ),
+    reviewCount: zod.number().describe("Number of visible reviews."),
   })
   .and(
     zod.object({
@@ -1989,6 +2248,13 @@ export const GetDashboardSummaryResponse = zod.object({
       categorySlug: zod.string().nullable(),
       categoryName: zod.string().nullable(),
       isVendorSubmitted: zod.boolean(),
+      avgRating: zod
+        .number()
+        .nullable()
+        .describe(
+          "Average star rating across visible reviews, or null when there are no reviews.",
+        ),
+      reviewCount: zod.number().describe("Number of visible reviews."),
     }),
   ),
 });

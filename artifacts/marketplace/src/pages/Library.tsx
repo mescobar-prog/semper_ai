@@ -83,7 +83,7 @@ export function Library() {
   // Poll the documents list while any document is still in a non-terminal
   // state so the user sees the status flip from "uploaded" to "processing"
   // to "ready"/"failed" without a manual refresh.
-  const { data: docs, isLoading, error } = useListDocuments({
+  const { data: docs, isLoading, error } = useListDocuments(undefined, {
     query: {
       queryKey: getListDocumentsQueryKey(),
       refetchInterval: (query) => {

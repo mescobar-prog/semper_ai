@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,14 +6,26 @@ import {
   useAddFavorite,
   useRemoveFavorite,
   useGetMyProfile,
+  useLaunchTool,
+  useListToolReviews,
+  useUpsertMyToolReview,
+  useDeleteMyToolReview,
   getGetToolBySlugQueryKey,
+  getListRecentLaunchesQueryKey,
+  getGetDashboardSummaryQueryKey,
+  getListToolReviewsQueryKey,
+  getListToolsQueryKey,
 } from "@workspace/api-client-react";
+import type { ToolReview } from "@workspace/api-client-react";
 import {
   PageContainer,
   Pill,
   atoLabel,
   atoTone,
   ErrorBox,
+  StarBar,
+  RatingBadge,
+  relativeTime,
 } from "@/lib/format";
 import {
   LaunchPreviewDialog,
@@ -125,6 +137,12 @@ export function CatalogDetail() {
               </span>
             )}
           </h1>
+          <div className="mb-4">
+            <RatingBadge
+              avgRating={tool.avgRating}
+              reviewCount={tool.reviewCount}
+            />
+          </div>
           <div className="flex flex-wrap gap-1.5 mb-6">
             <Pill tone={atoTone(tool.atoStatus)}>
               {atoLabel(tool.atoStatus)}
@@ -273,6 +291,14 @@ export function CatalogDetail() {
             <DetailRow label="Vendor" value={tool.vendor} />
             <DetailRow label="Launches" value={tool.launchCount} />
             <DetailRow label="Favorites" value={tool.favoriteCount} />
+            <DetailRow
+              label="Reviews"
+              value={
+                tool.reviewCount > 0
+                  ? `${tool.avgRating?.toFixed(1) ?? "—"} · ${tool.reviewCount}`
+                  : "—"
+              }
+            />
           </div>
         </aside>
       </div>
@@ -292,7 +318,352 @@ export function CatalogDetail() {
           })
         }
       />
+
+      <ReviewsSection toolId={tool.id} toolSlug={tool.slug} />
     </PageContainer>
+  );
+}
+
+const REVIEWS_PAGE_SIZE = 10;
+
+function ReviewsSection({
+  toolId,
+  toolSlug,
+}: {
+  toolId: string;
+  toolSlug: string;
+}) {
+  const queryClient = useQueryClient();
+  const [offset, setOffset] = useState(0);
+  const [accumulated, setAccumulated] = useState<ToolReview[]>([]);
+  const [editing, setEditing] = useState(false);
+
+  const queryParams = {
+    tool_slug: toolSlug,
+    limit: REVIEWS_PAGE_SIZE,
+    offset,
+  };
+
+  const {
+    data: page,
+    isLoading,
+    error,
+    refetch,
+  } = useListToolReviews(queryParams, {
+    query: { queryKey: getListToolReviewsQueryKey(queryParams) },
+  });
+
+  // Accumulate reviews across "show more" clicks. Reset whenever the first
+  // page changes (e.g. after edit/delete invalidation).
+  useEffect(() => {
+    if (!page) return;
+    if (offset === 0) {
+      setAccumulated(page.reviews);
+    } else {
+      setAccumulated((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        const next = page.reviews.filter((r) => !seen.has(r.id));
+        return [...prev, ...next];
+      });
+    }
+  }, [page, offset]);
+
+  const upsertMutation = useUpsertMyToolReview();
+  const deleteMutation = useDeleteMyToolReview();
+
+  const refreshAll = () => {
+    setOffset(0);
+    setAccumulated([]);
+    queryClient.invalidateQueries({
+      queryKey: getListToolReviewsQueryKey({
+        tool_slug: toolSlug,
+        limit: REVIEWS_PAGE_SIZE,
+        offset: 0,
+      }),
+    });
+    queryClient.invalidateQueries({
+      queryKey: getGetToolBySlugQueryKey(toolSlug),
+    });
+    queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
+    refetch();
+  };
+
+  const onSave = async (rating: number, comment: string) => {
+    await upsertMutation.mutateAsync({
+      toolId,
+      data: { rating, comment: comment.trim() ? comment.trim() : null },
+    });
+    setEditing(false);
+    refreshAll();
+  };
+
+  const onDelete = async () => {
+    if (!confirm("Delete your review?")) return;
+    await deleteMutation.mutateAsync({ toolId });
+    setEditing(false);
+    refreshAll();
+  };
+
+  return (
+    <section className="mt-12 border-t border-border pt-8">
+      <div className="flex items-baseline justify-between gap-4 mb-6">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-1">
+            Reviews
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            What service members say
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Reviewers are identified only by branch and rank.
+          </p>
+        </div>
+        {page && page.total > 0 && (
+          <div className="text-right">
+            <div className="text-3xl font-semibold leading-none">
+              {page.avgRating?.toFixed(1) ?? "—"}
+              <span className="text-base text-muted-foreground"> / 5</span>
+            </div>
+            <div className="mt-1">
+              <StarBar value={page.avgRating ?? 0} size="md" />
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {page.total} {page.total === 1 ? "review" : "reviews"}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {error && <ErrorBox>{(error as Error).message}</ErrorBox>}
+
+      {isLoading && accumulated.length === 0 ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-20 bg-card border border-border rounded-md animate-pulse"
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-3">
+            {accumulated.length === 0 && page?.total === 0 && (
+              <div className="border border-dashed border-border rounded-md p-8 text-center bg-card/40">
+                <div className="text-base font-medium mb-1">
+                  No reviews yet
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {page?.canReview
+                    ? "Be the first to share how this tool performed for your role."
+                    : "Launch this tool once, then come back to leave the first review."}
+                </p>
+              </div>
+            )}
+            {accumulated.map((r) => (
+              <ReviewCard key={r.id} review={r} />
+            ))}
+            {page && page.hasMore && (
+              <div className="pt-2">
+                <button
+                  onClick={() => setOffset(offset + REVIEWS_PAGE_SIZE)}
+                  className="h-9 px-4 rounded-md border border-border text-xs font-mono uppercase tracking-wider hover:border-primary/50"
+                >
+                  Show more
+                </button>
+              </div>
+            )}
+          </div>
+
+          <aside>
+            <ReviewComposer
+              myReview={page?.myReview ?? null}
+              canReview={page?.canReview ?? false}
+              isEditing={editing}
+              onStartEdit={() => setEditing(true)}
+              onCancel={() => setEditing(false)}
+              onSave={onSave}
+              onDelete={onDelete}
+              saving={upsertMutation.isPending || deleteMutation.isPending}
+            />
+          </aside>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ReviewCard({ review }: { review: ToolReview }) {
+  const reviewer =
+    [review.reviewerRank, review.reviewerBranch].filter(Boolean).join(" · ") ||
+    "Anonymous service member";
+  return (
+    <div className="bg-card border border-border rounded-md p-4">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+            {reviewer}
+            {review.isMine && (
+              <span className="ml-2 text-primary">· your review</span>
+            )}
+          </div>
+          <div className="mt-1">
+            <StarBar value={review.rating} />
+          </div>
+        </div>
+        <div className="text-[11px] text-muted-foreground font-mono">
+          {relativeTime(review.updatedAt)}
+        </div>
+      </div>
+      {review.comment && (
+        <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+          {review.comment}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ReviewComposer({
+  myReview,
+  canReview,
+  isEditing,
+  onStartEdit,
+  onCancel,
+  onSave,
+  onDelete,
+  saving,
+}: {
+  myReview: ToolReview | null;
+  canReview: boolean;
+  isEditing: boolean;
+  onStartEdit: () => void;
+  onCancel: () => void;
+  onSave: (rating: number, comment: string) => void;
+  onDelete: () => void;
+  saving: boolean;
+}) {
+  const [rating, setRating] = useState<number>(myReview?.rating ?? 5);
+  const [comment, setComment] = useState<string>(myReview?.comment ?? "");
+
+  useEffect(() => {
+    setRating(myReview?.rating ?? 5);
+    setComment(myReview?.comment ?? "");
+  }, [myReview, isEditing]);
+
+  if (!canReview && !myReview) {
+    return (
+      <div className="bg-card border border-border rounded-md p-5">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-2">
+          Leave a review
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Launch this tool at least once before posting a review. That keeps
+          ratings anchored to actual usage.
+        </p>
+      </div>
+    );
+  }
+
+  if (myReview && !isEditing) {
+    return (
+      <div className="bg-card border border-border rounded-md p-5">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-2">
+          Your review
+        </div>
+        <div className="mb-2">
+          <StarBar value={myReview.rating} size="md" />
+        </div>
+        {myReview.comment && (
+          <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap">
+            {myReview.comment}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <button
+            onClick={onStartEdit}
+            className="h-8 px-3 rounded-md border border-border text-xs font-mono uppercase tracking-wider hover:border-primary/50"
+          >
+            Edit
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={saving}
+            className="h-8 px-3 rounded-md border border-border text-xs font-mono uppercase tracking-wider text-rose-400 hover:border-rose-500/50 disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(rating, comment);
+      }}
+      className="bg-card border border-primary/30 rounded-md p-5"
+    >
+      <div className="text-[10px] uppercase tracking-wider text-primary font-mono font-semibold mb-3">
+        {myReview ? "Edit your review" : "Leave a review"}
+      </div>
+      <div className="mb-3">
+        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+          Rating
+        </div>
+        <div className="flex gap-1 text-2xl">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              type="button"
+              key={n}
+              onClick={() => setRating(n)}
+              aria-label={`${n} stars`}
+              className={
+                n <= rating ? "text-amber-400" : "text-muted-foreground/40"
+              }
+            >
+              ★
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mb-3">
+        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+          Comment (optional, 500 chars)
+        </div>
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value.slice(0, 500))}
+          rows={4}
+          maxLength={500}
+          placeholder="Share what worked, what didn't, and what role you used it in."
+          className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+        />
+        <div className="text-[10px] text-muted-foreground font-mono mt-1 text-right">
+          {comment.length}/500
+        </div>
+      </div>
+      <div className="flex gap-2 justify-end">
+        {myReview && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-8 px-3 rounded-md border border-border text-xs font-mono uppercase tracking-wider"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={saving}
+          className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider hover:bg-primary/90 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : myReview ? "Save changes" : "Post review"}
+        </button>
+      </div>
+    </form>
   );
 }
 

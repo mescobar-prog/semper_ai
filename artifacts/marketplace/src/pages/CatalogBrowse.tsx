@@ -8,6 +8,7 @@ import {
   useRemoveFavorite,
   useGetMyProfile,
   getListToolsQueryKey,
+  ListToolsSort,
 } from "@workspace/api-client-react";
 import type { ToolSummary } from "@workspace/api-client-react";
 import {
@@ -17,6 +18,7 @@ import {
   atoTone,
   ErrorBox,
   EmptyState,
+  RatingBadge,
 } from "@/lib/format";
 
 const ATO_OPTIONS = [
@@ -33,6 +35,7 @@ export function CatalogBrowse() {
   const [category, setCategory] = useState("");
   const [atoStatus, setAtoStatus] = useState("");
   const [impactLevel, setImpactLevel] = useState("");
+  const [sort, setSort] = useState<ListToolsSort>(ListToolsSort.name);
 
   const params = useMemo(
     () => ({
@@ -40,8 +43,9 @@ export function CatalogBrowse() {
       category: category || undefined,
       ato_status: atoStatus || undefined,
       impact_level: impactLevel || undefined,
+      sort,
     }),
-    [q, category, atoStatus, impactLevel],
+    [q, category, atoStatus, impactLevel, sort],
   );
 
   const { data: categories } = useListCategories();
@@ -238,8 +242,11 @@ function ToolCard({
         )}
       </div>
       <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <RatingBadge
+          avgRating={tool.avgRating}
+          reviewCount={tool.reviewCount}
+        />
         <span>{tool.launchCount} launches</span>
-        <span>{tool.favoriteCount} favorites</span>
       </div>
     </Link>
   );

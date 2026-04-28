@@ -17,6 +17,10 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AdminHideReviewRequest,
+  AdminListReviewsParams,
+  AdminReviewListResponse,
+  AdminToolReview,
   AuthUserEnvelope,
   AutoIngestRequest,
   AutoIngestStatusResponse,
@@ -50,6 +54,7 @@ import type {
   LibraryTestQueryRequest,
   LibraryTestQueryResponse,
   ListDocumentsParams,
+  ListToolReviewsParams,
   ListToolsParams,
   LogoutSuccess,
   MissionPreset,
@@ -68,6 +73,9 @@ import type {
   SubmissionUpsert,
   TextDocumentUploadRequest,
   ToolDetail,
+  ToolReview,
+  ToolReviewListResponse,
+  ToolReviewUpsert,
   ToolSummary,
   ToolUpsert,
   UploadUrlRequest,
@@ -2186,6 +2194,539 @@ export const useRemoveFavorite = <
   TContext
 > => {
   return useMutation(getRemoveFavoriteMutationOptions(options));
+};
+
+/**
+ * @summary List reviews for a tool (paginated)
+ */
+export const getListToolReviewsUrl = (params: ListToolReviewsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/catalog/reviews?${stringifiedParams}`
+    : `/api/catalog/reviews`;
+};
+
+export const listToolReviews = async (
+  params: ListToolReviewsParams,
+  options?: RequestInit,
+): Promise<ToolReviewListResponse> => {
+  return customFetch<ToolReviewListResponse>(getListToolReviewsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListToolReviewsQueryKey = (params?: ListToolReviewsParams) => {
+  return [`/api/catalog/reviews`, ...(params ? [params] : [])] as const;
+};
+
+export const getListToolReviewsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listToolReviews>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: ListToolReviewsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listToolReviews>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListToolReviewsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listToolReviews>>> = ({
+    signal,
+  }) => listToolReviews(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listToolReviews>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListToolReviewsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listToolReviews>>
+>;
+export type ListToolReviewsQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary List reviews for a tool (paginated)
+ */
+
+export function useListToolReviews<
+  TData = Awaited<ReturnType<typeof listToolReviews>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: ListToolReviewsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listToolReviews>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListToolReviewsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create or update the current user's review for a tool
+ */
+export const getUpsertMyToolReviewUrl = (toolId: string) => {
+  return `/api/catalog/tools/${toolId}/review`;
+};
+
+export const upsertMyToolReview = async (
+  toolId: string,
+  toolReviewUpsert: ToolReviewUpsert,
+  options?: RequestInit,
+): Promise<ToolReview> => {
+  return customFetch<ToolReview>(getUpsertMyToolReviewUrl(toolId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(toolReviewUpsert),
+  });
+};
+
+export const getUpsertMyToolReviewMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof upsertMyToolReview>>,
+    TError,
+    { toolId: string; data: BodyType<ToolReviewUpsert> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof upsertMyToolReview>>,
+  TError,
+  { toolId: string; data: BodyType<ToolReviewUpsert> },
+  TContext
+> => {
+  const mutationKey = ["upsertMyToolReview"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof upsertMyToolReview>>,
+    { toolId: string; data: BodyType<ToolReviewUpsert> }
+  > = (props) => {
+    const { toolId, data } = props ?? {};
+
+    return upsertMyToolReview(toolId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpsertMyToolReviewMutationResult = NonNullable<
+  Awaited<ReturnType<typeof upsertMyToolReview>>
+>;
+export type UpsertMyToolReviewMutationBody = BodyType<ToolReviewUpsert>;
+export type UpsertMyToolReviewMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Create or update the current user's review for a tool
+ */
+export const useUpsertMyToolReview = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof upsertMyToolReview>>,
+    TError,
+    { toolId: string; data: BodyType<ToolReviewUpsert> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof upsertMyToolReview>>,
+  TError,
+  { toolId: string; data: BodyType<ToolReviewUpsert> },
+  TContext
+> => {
+  return useMutation(getUpsertMyToolReviewMutationOptions(options));
+};
+
+/**
+ * @summary Delete the current user's review for a tool
+ */
+export const getDeleteMyToolReviewUrl = (toolId: string) => {
+  return `/api/catalog/tools/${toolId}/review`;
+};
+
+export const deleteMyToolReview = async (
+  toolId: string,
+  options?: RequestInit,
+): Promise<SimpleSuccess> => {
+  return customFetch<SimpleSuccess>(getDeleteMyToolReviewUrl(toolId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteMyToolReviewMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteMyToolReview>>,
+    TError,
+    { toolId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteMyToolReview>>,
+  TError,
+  { toolId: string },
+  TContext
+> => {
+  const mutationKey = ["deleteMyToolReview"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteMyToolReview>>,
+    { toolId: string }
+  > = (props) => {
+    const { toolId } = props ?? {};
+
+    return deleteMyToolReview(toolId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteMyToolReviewMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteMyToolReview>>
+>;
+
+export type DeleteMyToolReviewMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Delete the current user's review for a tool
+ */
+export const useDeleteMyToolReview = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteMyToolReview>>,
+    TError,
+    { toolId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteMyToolReview>>,
+  TError,
+  { toolId: string },
+  TContext
+> => {
+  return useMutation(getDeleteMyToolReviewMutationOptions(options));
+};
+
+/**
+ * @summary Admin list of all reviews (including hidden)
+ */
+export const getAdminListReviewsUrl = (params?: AdminListReviewsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/reviews?${stringifiedParams}`
+    : `/api/admin/reviews`;
+};
+
+export const adminListReviews = async (
+  params?: AdminListReviewsParams,
+  options?: RequestInit,
+): Promise<AdminReviewListResponse> => {
+  return customFetch<AdminReviewListResponse>(getAdminListReviewsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListReviewsQueryKey = (
+  params?: AdminListReviewsParams,
+) => {
+  return [`/api/admin/reviews`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListReviewsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListReviews>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params?: AdminListReviewsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListReviews>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListReviewsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListReviews>>
+  > = ({ signal }) => adminListReviews(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListReviews>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListReviewsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListReviews>>
+>;
+export type AdminListReviewsQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Admin list of all reviews (including hidden)
+ */
+
+export function useAdminListReviews<
+  TData = Awaited<ReturnType<typeof adminListReviews>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params?: AdminListReviewsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListReviews>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListReviewsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Soft-hide a review with a reason
+ */
+export const getAdminHideReviewUrl = (reviewId: string) => {
+  return `/api/admin/reviews/${reviewId}/hide`;
+};
+
+export const adminHideReview = async (
+  reviewId: string,
+  adminHideReviewRequest: AdminHideReviewRequest,
+  options?: RequestInit,
+): Promise<AdminToolReview> => {
+  return customFetch<AdminToolReview>(getAdminHideReviewUrl(reviewId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(adminHideReviewRequest),
+  });
+};
+
+export const getAdminHideReviewMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminHideReview>>,
+    TError,
+    { reviewId: string; data: BodyType<AdminHideReviewRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminHideReview>>,
+  TError,
+  { reviewId: string; data: BodyType<AdminHideReviewRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminHideReview"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminHideReview>>,
+    { reviewId: string; data: BodyType<AdminHideReviewRequest> }
+  > = (props) => {
+    const { reviewId, data } = props ?? {};
+
+    return adminHideReview(reviewId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminHideReviewMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminHideReview>>
+>;
+export type AdminHideReviewMutationBody = BodyType<AdminHideReviewRequest>;
+export type AdminHideReviewMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Soft-hide a review with a reason
+ */
+export const useAdminHideReview = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminHideReview>>,
+    TError,
+    { reviewId: string; data: BodyType<AdminHideReviewRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminHideReview>>,
+  TError,
+  { reviewId: string; data: BodyType<AdminHideReviewRequest> },
+  TContext
+> => {
+  return useMutation(getAdminHideReviewMutationOptions(options));
+};
+
+/**
+ * @summary Restore a hidden review
+ */
+export const getAdminUnhideReviewUrl = (reviewId: string) => {
+  return `/api/admin/reviews/${reviewId}/unhide`;
+};
+
+export const adminUnhideReview = async (
+  reviewId: string,
+  options?: RequestInit,
+): Promise<AdminToolReview> => {
+  return customFetch<AdminToolReview>(getAdminUnhideReviewUrl(reviewId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAdminUnhideReviewMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUnhideReview>>,
+    TError,
+    { reviewId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUnhideReview>>,
+  TError,
+  { reviewId: string },
+  TContext
+> => {
+  const mutationKey = ["adminUnhideReview"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUnhideReview>>,
+    { reviewId: string }
+  > = (props) => {
+    const { reviewId } = props ?? {};
+
+    return adminUnhideReview(reviewId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUnhideReviewMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUnhideReview>>
+>;
+
+export type AdminUnhideReviewMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Restore a hidden review
+ */
+export const useAdminUnhideReview = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUnhideReview>>,
+    TError,
+    { reviewId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUnhideReview>>,
+  TError,
+  { reviewId: string },
+  TContext
+> => {
+  return useMutation(getAdminUnhideReviewMutationOptions(options));
 };
 
 /**
