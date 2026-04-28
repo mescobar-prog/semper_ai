@@ -1495,6 +1495,33 @@ export const DeleteDocumentResponse = zod.object({
 });
 
 /**
+ * Used by the Doctrine & Orders picker on the Catalog page (Task #85). Returns the first one or two chunks of the document concatenated and capped at a server-side character budget so a single ticked doc cannot dominate the Context Block textbox. The actual doctrine text is returned (not just a citation) so the operator can see what their Context Block will ship to the tool.
+
+ * @summary Get a bounded representative text excerpt for a single document
+ */
+export const GetDocumentSnippetParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetDocumentSnippetResponse = zod.object({
+  documentId: zod.string(),
+  title: zod.string(),
+  snippet: zod
+    .string()
+    .describe(
+      "Bounded excerpt of the document's text content (the first 1–2 chunks concatenated, capped at a server-side character budget).\n",
+    ),
+  truncated: zod
+    .boolean()
+    .describe(
+      "True when the snippet hit the character cap or the document has additional chunks beyond what was sampled. The UI can use this to render a `…` truncation marker.\n",
+    ),
+  charCount: zod
+    .number()
+    .describe("Length of the snippet string after capping."),
+});
+
+/**
  * Re-runs the extraction pipeline against an existing failed document without forcing the user to re-upload or re-discover the source. Two flavours, dispatched on the document's metadata:
 1. Auto-ingested docs (`autoSource` + `sourceUrl` set, no `storageObjectPath`): re-runs the same fetch + extract + chunk path that auto-ingest uses, updating the row in place.
 2. User-uploaded docs (`storageObjectPath` set, no `autoSource`): re-runs the async extraction pipeline against the already-uploaded blob in object storage, dropping any leftover chunks and replacing them.

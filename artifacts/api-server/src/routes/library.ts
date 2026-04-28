@@ -635,6 +635,80 @@ router.post("/library/documents/:id/retry", requireAuth, async (req, res) => {
   });
 });
 
+// Bounded character budget for the doctrine-picker snippet (Task #85).
+// Sized so multiple selections in the Context Block textbox don't blow past
+// reasonable evaluator/textarea limits, while still pasting enough actual
+// doctrine text (not just a citation) to be useful.
+const SNIPPET_CHAR_BUDGET = 1500;
+
+// Returns a representative text excerpt for a single document, used by the
+// Doctrine & Orders picker on the Catalog page. We pull the first 1–2 chunks
+// (the ones most likely to contain the document's title page / overview /
+// purpose statement), concatenate them, and cap at SNIPPET_CHAR_BUDGET so a
+// single selection can't dominate the textarea.
+router.get(
+  "/library/documents/:id/snippet",
+  requireAuth,
+  async (req, res) => {
+    const docId = String(req.params.id);
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        and(
+          eq(documentsTable.id, docId),
+          eq(documentsTable.userId, req.user!.id),
+        ),
+      )
+      .limit(1);
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+    if (doc.status !== "ready") {
+      res.status(400).json({
+        error: `Document is not ready yet (status: ${doc.status}).`,
+      });
+      return;
+    }
+
+    const chunks = await db
+      .select({ content: docChunksTable.content })
+      .from(docChunksTable)
+      .where(eq(docChunksTable.documentId, doc.id))
+      .orderBy(asc(docChunksTable.chunkIndex))
+      .limit(2);
+
+    if (chunks.length === 0) {
+      res
+        .status(400)
+        .json({ error: "Document has no extractable chunks." });
+      return;
+    }
+
+    const joined = chunks.map((c) => c.content.trim()).join("\n\n");
+    let snippet = joined;
+    let truncated = false;
+    if (snippet.length > SNIPPET_CHAR_BUDGET) {
+      snippet = snippet.slice(0, SNIPPET_CHAR_BUDGET).trimEnd();
+      truncated = true;
+    } else if (doc.chunkCount > chunks.length) {
+      // Document continues beyond the chunks we sampled — flag truncation
+      // even though we didn't hit the byte cap, so the UI can render a "…"
+      // marker indicating there's more doctrine the user could review.
+      truncated = true;
+    }
+
+    res.json({
+      documentId: doc.id,
+      title: doc.title,
+      snippet,
+      truncated,
+      charCount: snippet.length,
+    });
+  },
+);
+
 router.delete("/library/documents/:id", requireAuth, async (req, res) => {
   const result = await db
     .delete(documentsTable)

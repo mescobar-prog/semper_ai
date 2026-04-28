@@ -45,6 +45,7 @@ export * from "./dashboardSummary";
 export * from "./dashboardSummaryAtoStatusBreakdownItem";
 export * from "./documentDetail";
 export * from "./documentPresetTagsUpdate";
+export * from "./documentSnippet";
 export * from "./documentSummary";
 export * from "./draftToolTextRequest";
 export * from "./draftToolTextRequestField";

@@ -43,6 +43,7 @@ import type {
   DashboardSummary,
   DocumentDetail,
   DocumentPresetTagsUpdate,
+  DocumentSnippet,
   DocumentSummary,
   DraftToolTextRequest,
   DraftToolTextResult,
@@ -3453,6 +3454,95 @@ export const useDeleteDocument = <
 > => {
   return useMutation(getDeleteDocumentMutationOptions(options));
 };
+
+/**
+ * Used by the Doctrine & Orders picker on the Catalog page (Task #85). Returns the first one or two chunks of the document concatenated and capped at a server-side character budget so a single ticked doc cannot dominate the Context Block textbox. The actual doctrine text is returned (not just a citation) so the operator can see what their Context Block will ship to the tool.
+
+ * @summary Get a bounded representative text excerpt for a single document
+ */
+export const getGetDocumentSnippetUrl = (id: string) => {
+  return `/api/library/documents/${id}/snippet`;
+};
+
+export const getDocumentSnippet = async (
+  id: string,
+  options?: RequestInit,
+): Promise<DocumentSnippet> => {
+  return customFetch<DocumentSnippet>(getGetDocumentSnippetUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDocumentSnippetQueryKey = (id: string) => {
+  return [`/api/library/documents/${id}/snippet`] as const;
+};
+
+export const getGetDocumentSnippetQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDocumentSnippet>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDocumentSnippet>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDocumentSnippetQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDocumentSnippet>>
+  > = ({ signal }) => getDocumentSnippet(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDocumentSnippet>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDocumentSnippetQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDocumentSnippet>>
+>;
+export type GetDocumentSnippetQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Get a bounded representative text excerpt for a single document
+ */
+
+export function useGetDocumentSnippet<
+  TData = Awaited<ReturnType<typeof getDocumentSnippet>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDocumentSnippet>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDocumentSnippetQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Re-runs the extraction pipeline against an existing failed document without forcing the user to re-upload or re-discover the source. Two flavours, dispatched on the document's metadata:

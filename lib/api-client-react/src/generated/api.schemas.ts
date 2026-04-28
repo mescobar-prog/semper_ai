@@ -751,6 +751,19 @@ export type DocumentDetail = DocumentSummary & {
   chunks: ChunkPreview[];
 };
 
+export interface DocumentSnippet {
+  documentId: string;
+  title: string;
+  /** Bounded excerpt of the document's text content (the first 1–2 chunks concatenated, capped at a server-side character budget).
+   */
+  snippet: string;
+  /** True when the snippet hit the character cap or the document has additional chunks beyond what was sampled. The UI can use this to render a `…` truncation marker.
+   */
+  truncated: boolean;
+  /** Length of the snippet string after capping. */
+  charCount: number;
+}
+
 export interface TextDocumentUploadRequest {
   /** @minLength 1 */
   title: string;

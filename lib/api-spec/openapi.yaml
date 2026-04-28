@@ -958,6 +958,45 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /library/documents/{id}/snippet:
+    get:
+      tags: [Library]
+      operationId: getDocumentSnippet
+      summary: Get a bounded representative text excerpt for a single document
+      description: >
+        Used by the Doctrine & Orders picker on the Catalog page (Task #85).
+        Returns the first one or two chunks of the document concatenated and
+        capped at a server-side character budget so a single ticked doc
+        cannot dominate the Context Block textbox. The actual doctrine text
+        is returned (not just a citation) so the operator can see what their
+        Context Block will ship to the tool.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Snippet payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentSnippet' }
+        '400':
+          description: Document is not ready or has no chunks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /library/documents/{id}/retry:
     post:
       tags: [Library]
@@ -2565,6 +2604,27 @@ components:
             chunks:
               type: array
               items: { $ref: '#/components/schemas/ChunkPreview' }
+
+    DocumentSnippet:
+      type: object
+      required: [documentId, title, snippet, truncated, charCount]
+      properties:
+        documentId: { type: string }
+        title: { type: string }
+        snippet:
+          type: string
+          description: >
+            Bounded excerpt of the document's text content (the first 1–2
+            chunks concatenated, capped at a server-side character budget).
+        truncated:
+          type: boolean
+          description: >
+            True when the snippet hit the character cap or the document has
+            additional chunks beyond what was sampled. The UI can use this
+            to render a `…` truncation marker.
+        charCount:
+          type: integer
+          description: Length of the snippet string after capping.
 
     ChunkPreview:
       type: object
