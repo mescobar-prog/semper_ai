@@ -6,8 +6,17 @@ import {
   text,
   timestamp,
   varchar,
+  vector,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./auth";
+
+/**
+ * Dimensionality of the chunk embedding vectors. Pinned to 384 because the
+ * default embedding model (Xenova/all-MiniLM-L6-v2) produces 384-d vectors.
+ * Changing the model in the future requires re-embedding (Task #22), which is
+ * why each chunk row also stores `embeddingModel` and `embeddingDim`.
+ */
+export const EMBEDDING_DIM = 384;
 
 export const documentsTable = pgTable(
   "documents",
@@ -85,6 +94,26 @@ export const docChunksTable = pgTable(
     chunkIndex: integer("chunk_index").notNull(),
     content: text("content").notNull(),
     charCount: integer("char_count").notNull(),
+    // Token count as reported by the embedding model's tokenizer. Used by
+    // the chunker to honour the per-chunk token budget and by the backfill
+    // routine to skip work that's already been done. Nullable so old rows
+    // from before the chunker upgrade aren't lost.
+    tokenCount: integer("token_count"),
+    // Short, human-readable trail derived from surrounding section headings,
+    // e.g. "FM 3-21.8 > Ch. 4 > Reconnaissance". Used by future citation
+    // rendering and ranking improvements. Nullable for the same reason.
+    headingTrail: text("heading_trail"),
+    // Stored embedding for semantic search. Nullable so the column can be
+    // backfilled incrementally and so chunks remain queryable via FTS while
+    // their embedding catches up (or when no API key is configured).
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
+    // Identifier of the embedding model used to produce the vector above
+    // (e.g. "Xenova/all-MiniLM-L6-v2"). Combined with `embeddingDim` this
+    // gives Task #22 the data it needs to detect a model change and
+    // schedule a re-embed.
+    embeddingModel: varchar("embedding_model"),
+    embeddingDim: integer("embedding_dim"),
+    embeddedAt: timestamp("embedded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -92,6 +121,12 @@ export const docChunksTable = pgTable(
   (t) => [
     index("doc_chunks_document_id_idx").on(t.documentId),
     index("doc_chunks_user_id_idx").on(t.userId),
+    // HNSW index for cosine-distance similarity search on the embedding
+    // column. pgvector's `vector_cosine_ops` opclass pairs with the `<=>`
+    // operator. Created via raw SQL because drizzle-orm's index builder
+    // does not yet expose vector index types.
+    index("doc_chunks_embedding_hnsw_idx")
+      .using("hnsw", sql`${t.embedding} vector_cosine_ops`),
   ],
 );
 

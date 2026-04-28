@@ -1,50 +1,16 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db, docChunksTable, documentsTable } from "@workspace/db";
+import { logger } from "./logger";
+import {
+  embedOne,
+  EmbeddingsUnavailableError,
+  toPgVectorLiteral,
+} from "./embeddings";
 
-const TARGET_CHUNK_CHARS = 900;
-const MAX_CHUNK_CHARS = 1400;
-
-export function chunkText(content: string): string[] {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
-  if (normalized.length === 0) return [];
-
-  const paragraphs = normalized.split(/\n{2,}/);
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const para of paragraphs) {
-    const trimmed = para.trim();
-    if (!trimmed) continue;
-
-    if (trimmed.length > MAX_CHUNK_CHARS) {
-      if (current) {
-        chunks.push(current);
-        current = "";
-      }
-      const sentences = trimmed.split(/(?<=[.!?])\s+/);
-      let buf = "";
-      for (const s of sentences) {
-        if ((buf + " " + s).length > TARGET_CHUNK_CHARS && buf) {
-          chunks.push(buf.trim());
-          buf = s;
-        } else {
-          buf = buf ? `${buf} ${s}` : s;
-        }
-      }
-      if (buf) chunks.push(buf.trim());
-      continue;
-    }
-
-    if ((current + "\n\n" + trimmed).length > TARGET_CHUNK_CHARS && current) {
-      chunks.push(current);
-      current = trimmed;
-    } else {
-      current = current ? `${current}\n\n${trimmed}` : trimmed;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
+// Re-export the structure-aware token chunker so existing imports of
+// `chunkText` from this module keep working. The new chunker returns
+// `{content, estimatedTokens, headingTrail}` instead of a bare string array.
+export { chunkText, type Chunk } from "./chunker";
 
 export interface RagSnippet {
   chunkId: string;
@@ -52,7 +18,18 @@ export interface RagSnippet {
   documentTitle: string;
   chunkIndex: number;
   content: string;
+  /**
+   * Cosine similarity (0-1, higher is better) when sourced from semantic
+   * search; ts_rank score when sourced from FTS fallback. The two scoring
+   * regimes intentionally share a field — Task #20 will introduce a unified
+   * hybrid ranker on top of this. Until then, callers should treat `score` as
+   * "higher is better within the same result set".
+   */
   score: number;
+  /** "semantic" | "fts" — lets callers / logs see which path served them. */
+  source?: "semantic" | "fts";
+  /** Heading trail recorded at chunk time, if any. */
+  headingTrail?: string | null;
 }
 
 // Tokenize an arbitrary user/LLM query string into space-separated keywords
@@ -79,13 +56,131 @@ export interface SearchOptions {
   // document ids. An empty array means "no candidate documents" — we return
   // [] without touching the database, because Postgres rejects an empty IN ().
   documentIds?: string[];
+  /**
+   * Minimum cosine similarity required for a semantic match to count. If the
+   * top hit doesn't clear this floor we fall back to FTS so users don't see
+   * "the model thinks this is best, but it's actually irrelevant" results.
+   * Tuned empirically for all-MiniLM-L6-v2.
+   */
+  minSimilarity?: number;
 }
 
+const DEFAULT_MIN_SIMILARITY = 0.2;
+
+/**
+ * Semantic-first chunk search with FTS fallback. Order of operations:
+ *  1. Try to embed the query.
+ *  2. Run cosine top-K against pgvector, scoped to userId (and optional
+ *     documentIds).
+ *  3. If the embedding step fails, the top hit is below the floor, or no
+ *     hits come back, fall back to keyword (FTS) search and log it.
+ *
+ * Returns up to `limit` snippets ordered by similarity (or ts_rank in
+ * fallback mode).
+ */
 export async function searchChunks(
   userId: string,
   query: string,
   limit = 5,
   opts: SearchOptions = {},
+): Promise<RagSnippet[]> {
+  if (opts.documentIds !== undefined && opts.documentIds.length === 0) {
+    // Caller explicitly scoped to "no documents" — short-circuit for the
+    // same reason the FTS branch does (Postgres rejects an empty IN list,
+    // and "match nothing" is the user's intent).
+    return [];
+  }
+  if (query.trim().length === 0) return [];
+
+  // 1. Try semantic search first.
+  try {
+    const semantic = await semanticSearch(userId, query, limit, opts);
+    const minSim = opts.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
+    if (semantic.length > 0 && semantic[0].score >= minSim) {
+      return semantic;
+    }
+    if (semantic.length > 0) {
+      logger.info(
+        { userId, topScore: semantic[0].score, minSim },
+        "semantic search top hit below similarity floor; falling back to FTS",
+      );
+    } else {
+      logger.info(
+        { userId },
+        "semantic search returned no candidates; falling back to FTS",
+      );
+    }
+  } catch (err) {
+    if (err instanceof EmbeddingsUnavailableError) {
+      logger.warn(
+        { err: err.message },
+        "semantic search unavailable; falling back to FTS",
+      );
+    } else {
+      logger.error({ err }, "semantic search crashed; falling back to FTS");
+    }
+  }
+
+  // 2. FTS fallback.
+  return ftsSearch(userId, query, limit, opts);
+}
+
+async function semanticSearch(
+  userId: string,
+  query: string,
+  limit: number,
+  opts: SearchOptions,
+): Promise<RagSnippet[]> {
+  const vec = await embedOne(query);
+  const literal = toPgVectorLiteral(vec);
+
+  let scopeClause: SQL = sql``;
+  if (opts.documentIds !== undefined) {
+    scopeClause = sql`AND dc.document_id IN (${sql.join(
+      opts.documentIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})`;
+  }
+
+  // pgvector's `<=>` is cosine distance (lower is better); convert to
+  // similarity (1 - distance) for the unified score interface.
+  const rows = await db.execute(sql`
+    SELECT
+      dc.id            AS "chunkId",
+      dc.document_id   AS "documentId",
+      d.title          AS "documentTitle",
+      dc.chunk_index   AS "chunkIndex",
+      dc.content       AS "content",
+      dc.heading_trail AS "headingTrail",
+      1 - (dc.embedding <=> ${literal}::vector) AS "score"
+    FROM ${docChunksTable} dc
+    JOIN ${documentsTable} d ON d.id = dc.document_id
+    WHERE dc.user_id = ${userId}
+      AND dc.embedding IS NOT NULL
+      ${scopeClause}
+    ORDER BY dc.embedding <=> ${literal}::vector
+    LIMIT ${limit}
+  `);
+
+  return (rows.rows as unknown as Array<RagSnippet & { score: unknown }>).map(
+    (r) => ({
+      chunkId: r.chunkId,
+      documentId: r.documentId,
+      documentTitle: r.documentTitle,
+      chunkIndex: r.chunkIndex,
+      content: r.content,
+      score: Number(r.score),
+      source: "semantic" as const,
+      headingTrail: r.headingTrail ?? null,
+    }),
+  );
+}
+
+async function ftsSearch(
+  userId: string,
+  query: string,
+  limit: number,
+  opts: SearchOptions,
 ): Promise<RagSnippet[]> {
   const tokens = tokenizeForOrQuery(query);
   if (tokens.length === 0) return [];
@@ -94,12 +189,8 @@ export async function searchChunks(
   // both "uas" and "uass" etc. Each token already escaped (alphanumeric only).
   const tsqueryStr = tokens.map((t) => `${t}:*`).join(" | ");
 
-  // Document-scope filter for active mission preset. Note we early-return on
-  // an explicit empty list so the caller's "preset has no docs" semantics
-  // produce zero results instead of being silently ignored.
-  let scopeClause: SQL | undefined;
+  let scopeClause: SQL = sql``;
   if (opts.documentIds !== undefined) {
-    if (opts.documentIds.length === 0) return [];
     scopeClause = sql`AND dc.document_id IN (${sql.join(
       opts.documentIds.map((id) => sql`${id}`),
       sql`, `,
@@ -113,6 +204,7 @@ export async function searchChunks(
       d.title          AS "documentTitle",
       dc.chunk_index   AS "chunkIndex",
       dc.content       AS "content",
+      dc.heading_trail AS "headingTrail",
       ts_rank(
         to_tsvector('english', dc.content),
         to_tsquery('english', ${tsqueryStr})
@@ -121,15 +213,23 @@ export async function searchChunks(
     JOIN ${documentsTable} d ON d.id = dc.document_id
     WHERE dc.user_id = ${userId}
       AND to_tsvector('english', dc.content) @@ to_tsquery('english', ${tsqueryStr})
-      ${scopeClause ?? sql``}
+      ${scopeClause}
     ORDER BY "score" DESC
     LIMIT ${limit}
   `);
 
-  return (rows.rows as unknown as RagSnippet[]).map((r) => ({
-    ...r,
-    score: Number(r.score),
-  }));
+  return (rows.rows as unknown as Array<RagSnippet & { score: unknown }>).map(
+    (r) => ({
+      chunkId: r.chunkId,
+      documentId: r.documentId,
+      documentTitle: r.documentTitle,
+      chunkIndex: r.chunkIndex,
+      content: r.content,
+      score: Number(r.score),
+      source: "fts" as const,
+      headingTrail: r.headingTrail ?? null,
+    }),
+  );
 }
 
 export async function searchChunksMultiQuery(
@@ -152,6 +252,11 @@ export async function searchChunksMultiQuery(
       merged.push(s);
     }
   }
+  // Sort by score descending. Note that FTS scores and cosine similarities
+  // live on different scales — Task #20 introduces a true hybrid ranker; until
+  // then, results from the same source dominate the order naturally because
+  // we don't typically mix the two within one merged list (semantic returns
+  // first when available, FTS only when it falls back).
   merged.sort((a, b) => b.score - a.score);
   return merged.slice(0, totalLimit);
 }

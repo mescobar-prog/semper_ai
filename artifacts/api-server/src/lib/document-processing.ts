@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
-import { db, documentsTable, docChunksTable } from "@workspace/db";
+import { db, documentsTable } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 import { extractDocumentText } from "./document-extract";
 import { chunkText } from "./rag";
+import { ingestChunks } from "./chunk-ingest";
 import { logger } from "./logger";
 
 const objectStorage = new ObjectStorageService();
@@ -101,21 +102,21 @@ export async function processStoredDocument(documentId: string): Promise<void> {
     return;
   }
 
+  let result;
   try {
-    await db.insert(docChunksTable).values(
-      chunks.map((c, idx) => ({
-        documentId: doc.id,
-        userId: doc.userId,
-        chunkIndex: idx,
-        content: c,
-        charCount: c.length,
-      })),
-    );
+    result = await ingestChunks(doc.id, doc.userId, chunks);
   } catch (err) {
     logger.error({ err, documentId }, "chunk insert failed");
     await markFailed(documentId, "Failed to index extracted text.");
     return;
   }
+
+  // If embeddings failed, the chunks are still written and FTS still works,
+  // so we mark the doc ready but surface a non-fatal warning the UI can show.
+  // Backfill on the next server boot will retry the embeddings.
+  const errorMessage = result.embeddingError
+    ? "Indexed for keyword search; semantic search will activate once embeddings finish processing."
+    : null;
 
   await db
     .update(documentsTable)
@@ -125,7 +126,7 @@ export async function processStoredDocument(documentId: string): Promise<void> {
       sizeBytes: buffer.byteLength,
       charCount: text.length,
       chunkCount: chunks.length,
-      errorMessage: null,
+      errorMessage,
       processedAt: new Date(),
     })
     .where(eq(documentsTable.id, documentId));

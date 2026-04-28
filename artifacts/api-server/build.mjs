@@ -29,6 +29,12 @@ async function buildAll() {
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
       "*.node",
+      // Externalize transformers.js + ONNX runtime: they bundle native
+      // bindings (onnxruntime-node *.node) and load model files from disk
+      // via dynamic require, both of which break esbuild's static bundle.
+      "@xenova/transformers",
+      "onnxruntime-node",
+      "onnxruntime-web",
       "sharp",
       "better-sqlite3",
       "sqlite3",

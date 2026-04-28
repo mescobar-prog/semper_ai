@@ -16,6 +16,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { chunkText, searchChunks } from "../lib/rag";
+import { ingestChunks } from "../lib/chunk-ingest";
 import { extractDocumentText } from "../lib/document-extract";
 import {
   ingestMosPackage,
@@ -336,15 +337,18 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     .returning();
 
   try {
-    await db.insert(docChunksTable).values(
-      chunks.map((c, idx) => ({
-        documentId: doc.id,
-        userId,
-        chunkIndex: idx,
-        content: c,
-        charCount: c.length,
-      })),
-    );
+    const result = await ingestChunks(doc.id, userId, chunks);
+    if (result.embeddingError) {
+      // Document is still searchable via FTS; embeddings will be backfilled
+      // on the next backfill pass. Surface the warning to the user.
+      await db
+        .update(documentsTable)
+        .set({
+          errorMessage:
+            "Indexed for keyword search; semantic search will activate once embeddings finish processing.",
+        })
+        .where(eq(documentsTable.id, doc.id));
+    }
   } catch (err) {
     logger.error({ err }, "chunk insert failed");
     await db.delete(documentsTable).where(eq(documentsTable.id, doc.id));

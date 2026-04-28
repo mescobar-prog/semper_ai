@@ -17,6 +17,7 @@ import {
 } from "@workspace/mil-data";
 import { extractDocumentText } from "./document-extract";
 import { chunkText } from "./rag";
+import { ingestChunks } from "./chunk-ingest";
 import { logger } from "./logger";
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -120,15 +121,16 @@ async function ingestOne(
       })
       .returning();
     try {
-      await db.insert(docChunksTable).values(
-        chunks.map((c, idx) => ({
-          documentId: doc.id,
-          userId,
-          chunkIndex: idx,
-          content: c,
-          charCount: c.length,
-        })),
-      );
+      const result = await ingestChunks(doc.id, userId, chunks);
+      if (result.embeddingError) {
+        await db
+          .update(documentsTable)
+          .set({
+            errorMessage:
+              "Indexed for keyword search; semantic search will activate once embeddings finish processing.",
+          })
+          .where(eq(documentsTable.id, doc.id));
+      }
     } catch (err) {
       logger.error(
         { err, docId: doc.id },
