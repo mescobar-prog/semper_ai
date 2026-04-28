@@ -18,11 +18,21 @@
  * with a fast char/token ratio so it stays unit-testable without loading the
  * embedding model. Real per-chunk token counts are recomputed by the
  * embedding pipeline and persisted on the row.
+ *
+ * Budget rationale (2026-04 — see Task #86):
+ * The local embedder (Xenova/all-MiniLM-L6-v2) silently truncates anything
+ * past 256 tokens. We previously targeted 500 / capped at 800, which meant
+ * the back half of every typical chunk never made it into the vector — it
+ * was stored and rendered, but invisible to retrieval. We now target ~200
+ * tokens with a 250-token hard cap so the entire chunk fits inside the
+ * model's budget end-to-end, with headroom for the heading-trail prefix and
+ * tokenizer variance (the chars/token ratio under-counts on
+ * acronym/code-heavy text). Overlap shrinks proportionally.
  */
 
-const TARGET_TOKENS = 500;
-const MAX_TOKENS = 800;
-const OVERLAP_TOKENS = 50;
+const TARGET_TOKENS = 200;
+const MAX_TOKENS = 250;
+const OVERLAP_TOKENS = 30;
 // Approximate chars-per-token for English prose. Used for the synchronous
 // budget in this chunker; the embedder later writes the *actual* count.
 const CHARS_PER_TOKEN = 4;
@@ -30,6 +40,14 @@ const CHARS_PER_TOKEN = 4;
 const TARGET_CHARS = TARGET_TOKENS * CHARS_PER_TOKEN;
 const MAX_CHARS = MAX_TOKENS * CHARS_PER_TOKEN;
 const OVERLAP_CHARS = OVERLAP_TOKENS * CHARS_PER_TOKEN;
+
+/**
+ * Maximum chunk size (in chars) that the *current* chunker would emit. The
+ * embedding backfill uses this to identify chunks produced by the previous
+ * (larger) budget and re-chunk them.
+ */
+export const CHUNKER_MAX_CHARS = MAX_CHARS;
+export const CHUNKER_MAX_TOKENS = MAX_TOKENS;
 
 export interface Chunk {
   /** The chunk text (already trimmed). */

@@ -1,12 +1,12 @@
 import { eq, isNull, and, sql } from "drizzle-orm";
-import { db, docChunksTable, EMBEDDING_DIM } from "@workspace/db";
+import { db, docChunksTable, documentsTable, EMBEDDING_DIM } from "@workspace/db";
 import {
   countTokens,
   embedMany,
   EMBEDDING_MODEL,
   EmbeddingsUnavailableError,
 } from "./embeddings";
-import { chunkText } from "./chunker";
+import { chunkText, CHUNKER_MAX_CHARS } from "./chunker";
 import { logger } from "./logger";
 
 /**
@@ -197,4 +197,261 @@ export async function backfillHeadingTrails(): Promise<void> {
   if (updated > 0) {
     logger.info({ updated }, "heading-trail backfill complete");
   }
+}
+
+/**
+ * Re-chunk and re-embed any documents whose chunks were produced under the
+ * old (larger) chunker budget. The previous chunker capped chunks at 800
+ * tokens / ~3200 chars, but the embedder silently truncates anything past
+ * 256 tokens — so the back half of those chunks never made it into the
+ * vector. We now cap chunks at 250 tokens / ~1000 chars so each chunk fits
+ * inside the embedder's budget end-to-end (see Task #86).
+ *
+ * Detection is by chunk size: if any chunk on a document exceeds the new
+ * `CHUNKER_MAX_CHARS`, the document is treated as legacy and re-chunked
+ * from its stored chunk text. After re-chunking, every chunk on the
+ * document satisfies the new cap, so this routine becomes a no-op for that
+ * document on subsequent boots — making the backfill naturally idempotent
+ * and resumable without an explicit version column.
+ *
+ * Source text is reconstructed by joining the existing chunks; this mirrors
+ * the heading-trail backfill above. The previous chunks' overlap shows up
+ * as small duplicated regions in the joined text, which the new chunker
+ * handles fine — at worst we emit a few extra near-boundary chunks.
+ */
+
+const REBUILD_DOC_BATCH = 8;
+const REBUILD_MAX_DOCS_PER_RUN = 500;
+
+export async function rebuildOversizedChunks(): Promise<{
+  documentsChecked: number;
+  documentsRebuilt: number;
+  chunksWritten: number;
+  chunksEmbedded: number;
+  finished: boolean;
+}> {
+  const start = Date.now();
+  let documentsChecked = 0;
+  let documentsRebuilt = 0;
+  let chunksWritten = 0;
+  let chunksEmbedded = 0;
+
+  for (let pass = 0; pass < REBUILD_MAX_DOCS_PER_RUN; pass++) {
+    // Find one batch of documents that still have at least one oversized
+    // chunk. Ordered by document_id so we make deterministic forward
+    // progress across server restarts.
+    const oversizedDocs = await db.execute(sql`
+      SELECT document_id, MAX(char_count) AS max_chars
+      FROM ${docChunksTable}
+      WHERE char_count > ${CHUNKER_MAX_CHARS}
+      GROUP BY document_id
+      ORDER BY document_id
+      LIMIT ${REBUILD_DOC_BATCH}
+    `);
+    const docRows = oversizedDocs.rows as Array<{
+      document_id: string;
+      max_chars: number;
+    }>;
+    if (docRows.length === 0) {
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      if (documentsChecked > 0) {
+        logger.info(
+          {
+            documentsChecked,
+            documentsRebuilt,
+            chunksWritten,
+            chunksEmbedded,
+            elapsedSec: elapsed,
+          },
+          "chunker-rebuild backfill complete",
+        );
+      }
+      return {
+        documentsChecked,
+        documentsRebuilt,
+        chunksWritten,
+        chunksEmbedded,
+        finished: true,
+      };
+    }
+
+    for (const docRow of docRows) {
+      documentsChecked++;
+      const documentId = docRow.document_id;
+      try {
+        const result = await rebuildOneDocument(documentId);
+        if (result) {
+          documentsRebuilt++;
+          chunksWritten += result.written;
+          chunksEmbedded += result.embedded;
+        }
+      } catch (err) {
+        if (err instanceof EmbeddingsUnavailableError) {
+          logger.warn(
+            { err: err.message, documentId, documentsRebuilt },
+            "embeddings unavailable; chunker-rebuild paused (will resume on restart)",
+          );
+          return {
+            documentsChecked,
+            documentsRebuilt,
+            chunksWritten,
+            chunksEmbedded,
+            finished: false,
+          };
+        }
+        logger.warn(
+          { err, documentId },
+          "chunker-rebuild failed for document; skipping",
+        );
+      }
+    }
+
+    if (pass > 0 && pass % 5 === 0) {
+      logger.info(
+        { documentsChecked, documentsRebuilt, chunksWritten, chunksEmbedded },
+        "chunker-rebuild backfill progress",
+      );
+    }
+  }
+
+  logger.info(
+    { documentsChecked, documentsRebuilt, chunksWritten, chunksEmbedded },
+    "chunker-rebuild backfill stopped after REBUILD_MAX_DOCS_PER_RUN; will continue on next boot",
+  );
+  return {
+    documentsChecked,
+    documentsRebuilt,
+    chunksWritten,
+    chunksEmbedded,
+    finished: false,
+  };
+}
+
+async function rebuildOneDocument(
+  documentId: string,
+): Promise<{ written: number; embedded: number } | null> {
+  // Pull the document row up-front so we have the user_id for the new
+  // chunk rows and can update char_count + chunk_count atomically.
+  const [doc] = await db
+    .select({
+      id: documentsTable.id,
+      userId: documentsTable.userId,
+    })
+    .from(documentsTable)
+    .where(eq(documentsTable.id, documentId))
+    .limit(1);
+  if (!doc) {
+    // Orphaned chunks — clean them up so we don't keep re-selecting them.
+    await db
+      .delete(docChunksTable)
+      .where(eq(docChunksTable.documentId, documentId));
+    return null;
+  }
+
+  const oldChunks = await db
+    .select({
+      content: docChunksTable.content,
+    })
+    .from(docChunksTable)
+    .where(eq(docChunksTable.documentId, documentId))
+    .orderBy(docChunksTable.chunkIndex);
+  if (oldChunks.length === 0) return null;
+
+  const reconstructed = oldChunks.map((c) => c.content).join("\n\n");
+  const newChunks = chunkText(reconstructed);
+  if (newChunks.length === 0) {
+    // Defensive: shouldn't happen, but if it does don't blow away the doc.
+    logger.warn(
+      { documentId },
+      "chunker-rebuild produced zero chunks; leaving original chunks in place",
+    );
+    return null;
+  }
+
+  // Embed the new chunks before we touch the DB. If embedding fails we
+  // still proceed with the rewrite (chunks get embedding=NULL and the
+  // embeddings backfill will catch them on the next pass), unless the
+  // failure is "embedder offline" — in which case we propagate so the
+  // caller can pause the whole rebuild.
+  let embeddings: number[][] | null = null;
+  try {
+    embeddings = await embedMany(newChunks.map((c) => c.content));
+  } catch (err) {
+    if (err instanceof EmbeddingsUnavailableError) {
+      throw err;
+    }
+    logger.warn(
+      { err, documentId, chunkCount: newChunks.length },
+      "embedding rebuilt chunks failed; chunks will be backfilled later",
+    );
+  }
+
+  const tokenCounts = await Promise.all(
+    newChunks.map(async (c) => {
+      try {
+        const t = await countTokens(c.content);
+        return t > 0 ? t : c.estimatedTokens;
+      } catch {
+        return c.estimatedTokens;
+      }
+    }),
+  );
+
+  const now = new Date();
+  // documents.charCount represents the *source* text length (matching the
+  // ingestion path, which sets it to the extracted-text length). Using the
+  // reconstructed length keeps that semantic — sum of new chunk lengths
+  // would double-count the small per-boundary overlap.
+  const sourceCharCount = reconstructed.length;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(docChunksTable)
+      .where(eq(docChunksTable.documentId, documentId));
+    // Write in modest sub-batches so we don't blow Postgres' bind-parameter
+    // limit on large documents.
+    const INSERT_BATCH = 200;
+    for (let start = 0; start < newChunks.length; start += INSERT_BATCH) {
+      const end = Math.min(start + INSERT_BATCH, newChunks.length);
+      const slice = newChunks.slice(start, end).map((c, i) => {
+        const idx = start + i;
+        return {
+          documentId,
+          userId: doc.userId,
+          chunkIndex: idx,
+          content: c.content,
+          charCount: c.content.length,
+          tokenCount: tokenCounts[idx],
+          headingTrail: c.headingTrail || null,
+          embedding: embeddings ? embeddings[idx] : null,
+          embeddingModel: embeddings ? EMBEDDING_MODEL : null,
+          embeddingDim: embeddings ? EMBEDDING_DIM : null,
+          embeddedAt: embeddings ? now : null,
+        };
+      });
+      await tx.insert(docChunksTable).values(slice);
+    }
+    await tx
+      .update(documentsTable)
+      .set({
+        chunkCount: newChunks.length,
+        charCount: sourceCharCount,
+      })
+      .where(eq(documentsTable.id, documentId));
+  });
+
+  logger.info(
+    {
+      documentId,
+      newChunkCount: newChunks.length,
+      previousChunkCount: oldChunks.length,
+      embedded: embeddings ? newChunks.length : 0,
+    },
+    "rebuilt oversized document chunks",
+  );
+
+  return {
+    written: newChunks.length,
+    embedded: embeddings ? newChunks.length : 0,
+  };
 }

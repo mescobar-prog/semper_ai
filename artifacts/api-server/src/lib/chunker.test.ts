@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkText } from "./chunker";
+import { chunkText, CHUNKER_MAX_CHARS, CHUNKER_MAX_TOKENS } from "./chunker";
 
 describe("chunkText", () => {
   it("returns [] for empty input", () => {
@@ -42,7 +42,7 @@ The recon team moves at dusk.
   });
 
   it("respects the max-chars cap on long single paragraphs", () => {
-    // Generate a 10k-char paragraph of varied sentences so the splitter has
+    // Generate a long paragraph of varied sentences so the splitter has
     // boundaries to work with.
     const sentences = Array.from(
       { length: 200 },
@@ -53,8 +53,37 @@ The recon team moves at dusk.
     const out = chunkText(text);
     expect(out.length).toBeGreaterThan(2);
     for (const c of out) {
-      // 800 tokens * 4 chars/token = 3200 chars cap
-      expect(c.content.length).toBeLessThanOrEqual(3300);
+      // Hard cap: MAX_TOKENS * CHARS_PER_TOKEN. The chunker enforces this
+      // exactly — every code path either appends within target, flushes
+      // before exceeding, or hard-slices at MAX_CHARS.
+      expect(c.content.length).toBeLessThanOrEqual(CHUNKER_MAX_CHARS);
+    }
+  });
+
+  it("keeps every chunk inside the embedder's token budget on adversarial input", () => {
+    // Build a multi-thousand-character single paragraph with NO headings and
+    // NO blank lines — the structure-aware splitter has nothing to grip on
+    // except sentence boundaries, exercising the brute-split fallback path.
+    const giantParagraph = Array.from(
+      { length: 800 },
+      (_, i) =>
+        `Adversarial sentence ${i} mentions reconnaissance, MEDEVAC, and CASEVAC procedures with deliberate verbosity to inflate the token count beyond any reasonable per-chunk budget.`,
+    ).join(" ");
+    // And a no-whitespace "wall of text" pathological case where even
+    // sentence splitting gives nothing useful — the hard char-split must
+    // still keep us within budget.
+    const wallOfText = "x".repeat(20000);
+
+    for (const input of [giantParagraph, wallOfText]) {
+      const out = chunkText(input);
+      expect(out.length).toBeGreaterThan(0);
+      for (const c of out) {
+        // Strict caps, no tolerance: this is the invariant retrieval depends
+        // on. Estimated tokens are derived from char length so they cap at
+        // ceil(MAX_CHARS / 4) === MAX_TOKENS.
+        expect(c.content.length).toBeLessThanOrEqual(CHUNKER_MAX_CHARS);
+        expect(c.estimatedTokens).toBeLessThanOrEqual(CHUNKER_MAX_TOKENS);
+      }
     }
   });
 

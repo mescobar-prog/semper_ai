@@ -5,6 +5,7 @@ import { warmEmbeddings, semanticSearchStatus } from "./lib/embeddings";
 import {
   backfillEmbeddings,
   backfillHeadingTrails,
+  rebuildOversizedChunks,
 } from "./lib/embeddings-backfill";
 import { runProfileSplitMigration } from "./lib/migrate";
 
@@ -66,6 +67,12 @@ async function bootstrap() {
       return;
     }
     try {
+      // Re-chunk legacy documents first: their chunks were sized for the
+      // old (larger) chunker and the back half of every chunk was being
+      // truncated by the embedder. Rebuilding here means the freshly
+      // emitted chunks get embedded inline, so the subsequent
+      // backfillEmbeddings pass only has to clean up any stragglers.
+      await rebuildOversizedChunks();
       await backfillEmbeddings();
       await backfillHeadingTrails();
     } catch (err) {

@@ -11,8 +11,9 @@ export const EMBEDDING_DIM = 384;
 
 /**
  * Hard cap the model will accept; longer inputs are truncated by the
- * tokenizer. Our chunker targets ~500 tokens with an 800-token cap, so
- * truncation is rare.
+ * tokenizer. Our chunker targets ~200 tokens with a 250-token hard cap, so
+ * every chunk fits inside this budget end-to-end and truncation should
+ * effectively never happen on chunker output (see Task #86).
  */
 const MODEL_MAX_TOKENS = 256;
 
