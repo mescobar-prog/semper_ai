@@ -28,6 +28,11 @@ import { draftToolText } from "../lib/gemini-helpers";
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
+// Maximum allowed installer-binary upload size. Mirrors the client-side
+// constant `MAX_INSTALLER_UPLOAD_SIZE_BYTES` in
+// artifacts/marketplace/src/pages/Admin.tsx — keep in sync.
+export const MAX_INSTALLER_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
+
 interface ToolDetailRow extends Tool {
   categorySlug: string | null;
   categoryName: string | null;
@@ -458,6 +463,14 @@ router.post(
     const parsed = RequestInstallerUploadUrlBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid installer upload request" });
+      return;
+    }
+    if (parsed.data.sizeBytes > MAX_INSTALLER_UPLOAD_SIZE_BYTES) {
+      res.status(413).json({
+        error: `Installer too large. Maximum size is ${Math.floor(
+          MAX_INSTALLER_UPLOAD_SIZE_BYTES / (1024 * 1024),
+        )} MB.`,
+      });
       return;
     }
     try {

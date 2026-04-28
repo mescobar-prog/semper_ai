@@ -1419,6 +1419,43 @@ function DescriptionFields({
 }
 
 // ─── Hosting section: cloud vs local_install ─────────────────────────────
+// Maximum allowed installer-binary upload size. Mirrors the server-side
+// constant `MAX_INSTALLER_UPLOAD_SIZE_BYTES` in
+// artifacts/api-server/src/routes/admin.ts — keep in sync.
+const MAX_INSTALLER_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
+const MAX_INSTALLER_UPLOAD_SIZE_MB = Math.floor(
+  MAX_INSTALLER_UPLOAD_SIZE_BYTES / (1024 * 1024),
+);
+
+function putWithProgress(
+  url: string,
+  file: File,
+  contentType: string,
+  onProgress: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) {
+        onProgress(Math.round((ev.loaded / ev.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(100);
+        resolve();
+      } else {
+        reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed (network error)"));
+    xhr.onabort = () => reject(new Error("Upload aborted"));
+    xhr.send(file);
+  });
+}
+
 function HostingSection({
   data,
   set,
@@ -1429,29 +1466,36 @@ function HostingSection({
   const isLocal = data.hostingType === "local_install";
   const installerMutation = useRequestInstallerUploadUrl();
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   async function uploadInstaller(file: File) {
-    setUploading(true);
     setUploadError(null);
+
+    if (file.size > MAX_INSTALLER_UPLOAD_SIZE_BYTES) {
+      setUploadError(
+        `File is ${(file.size / 1024 / 1024).toFixed(1)} MB. Maximum is ${MAX_INSTALLER_UPLOAD_SIZE_MB} MB.`,
+      );
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
     try {
+      const contentType = file.type || "application/octet-stream";
       const presigned = await installerMutation.mutateAsync({
         data: {
           filename: file.name,
           sizeBytes: file.size,
-          contentType: file.type || "application/octet-stream",
+          contentType,
         },
       });
-      const putResp = await fetch(presigned.uploadUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": file.type || "application/octet-stream",
-        },
-        body: file,
-      });
-      if (!putResp.ok) {
-        throw new Error(`Upload failed (HTTP ${putResp.status})`);
-      }
+      await putWithProgress(
+        presigned.uploadUrl,
+        file,
+        contentType,
+        (pct) => setUploadProgress(pct),
+      );
       set("installerObjectKey", presigned.objectKey);
       set("installerFilename", file.name);
       set("installerSizeBytes", file.size);
@@ -1459,7 +1503,13 @@ function HostingSection({
       // only when no external URL was set; the server prefers installerUrl
       // first, so we keep that override path open.
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      const msg =
+        err instanceof Error ? err.message : "Upload failed";
+      // Surface the server's 413 message verbatim when present.
+      const detail =
+        (err as { response?: { data?: { error?: string } } } | null)?.response
+          ?.data?.error;
+      setUploadError(detail ?? msg);
     } finally {
       setUploading(false);
     }
@@ -1547,17 +1597,33 @@ function HostingSection({
             <div className="flex flex-wrap items-center gap-3">
               <input
                 type="file"
+                disabled={uploading}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) uploadInstaller(f);
                   e.target.value = "";
                 }}
-                className="text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary/20 file:text-primary file:px-3 file:py-1.5 file:text-xs file:font-mono file:hover:bg-primary/30"
+                className="text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary/20 file:text-primary file:px-3 file:py-1.5 file:text-xs file:font-mono file:hover:bg-primary/30 disabled:opacity-60"
               />
               {uploading && (
-                <span className="text-xs font-mono text-primary">
-                  Uploading…
-                </span>
+                <div className="flex items-center gap-2 min-w-[160px]">
+                  <div
+                    className="relative h-2 w-32 overflow-hidden rounded-full bg-primary/20"
+                    role="progressbar"
+                    aria-valuenow={uploadProgress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Installer upload progress"
+                  >
+                    <div
+                      className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-150 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-primary tabular-nums">
+                    {uploadProgress}%
+                  </span>
+                </div>
               )}
               {data.installerFilename && !uploading && (
                 <span className="text-xs font-mono text-muted-foreground">
@@ -1580,6 +1646,9 @@ function HostingSection({
                   Remove
                 </button>
               )}
+            </div>
+            <div className="mt-1 text-[10px] font-mono text-muted-foreground">
+              Maximum {MAX_INSTALLER_UPLOAD_SIZE_MB} MB. Larger installers should be hosted externally and referenced via the URL field above.
             </div>
             {uploadError && (
               <div className="mt-2">
