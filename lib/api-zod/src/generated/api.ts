@@ -185,6 +185,11 @@ export const GetMyProfileResponse = zod
         .describe(
           "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
         ),
+      bypassed: zod
+        .boolean()
+        .describe(
+          'True when the operator confirmed this block under the 10\/12 GO threshold via the explicit \"Confirm anyway\" bypass path. Cleared on any in-threshold (GO) confirm.\n',
+        ),
     }),
   })
   .describe(
@@ -316,6 +321,11 @@ export const UpdateMyProfileResponse = zod
         .describe(
           "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
         ),
+      bypassed: zod
+        .boolean()
+        .describe(
+          'True when the operator confirmed this block under the 10\/12 GO threshold via the explicit \"Confirm anyway\" bypass path. Cleared on any in-threshold (GO) confirm.\n',
+        ),
     }),
   })
   .describe(
@@ -440,7 +450,7 @@ export const EvaluateContextBlockResponse = zod.object({
 });
 
 /**
- * Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and OPSEC-flagged submissions, and persists the 6 fields plus the latest score and confirmed-at timestamp on the operator's profile.
+ * Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and OPSEC-flagged submissions, and persists the 6 fields plus the latest score and confirmed-at timestamp on the operator's profile. Setting `bypass: true` allows confirmation when the score is below the 10/12 threshold (no OPSEC flag); the persisted row is marked as `bypassed`. OPSEC violations remain a hard reject regardless of `bypass`.
 
  * @summary Save a 6-element Context Block (server re-evaluates and rejects NO-GO)
  */
@@ -457,6 +467,12 @@ export const ConfirmContextBlockBody = zod.object({
   experience: zod
     .string()
     .describe("Element 6 — Human experience & judgment AI cannot infer."),
+  bypass: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, allows confirming a sub-threshold (NO-GO by score) block. The persisted row is marked as `bypassed`. Ignored on in-threshold (GO) confirmations. OPSEC violations remain a hard reject regardless of `bypass`.\n",
+    ),
 });
 
 export const ConfirmContextBlockResponse = zod.object({
@@ -544,6 +560,11 @@ export const ConfirmContextBlockResponse = zod.object({
       .number()
       .describe(
         "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
+      ),
+    bypassed: zod
+      .boolean()
+      .describe(
+        'True when the operator confirmed this block under the 10\/12 GO threshold via the explicit \"Confirm anyway\" bypass path. Cleared on any in-threshold (GO) confirm.\n',
       ),
   }),
   evaluation: zod.object({
@@ -1877,6 +1898,11 @@ export const ExchangeContextTokenResponse = zod.object({
       .describe(
         "Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit\/re-confirm auto-invalidates an outstanding affirmation.\n",
       ),
+    bypassed: zod
+      .boolean()
+      .describe(
+        'True when the operator confirmed this block under the 10\/12 GO threshold via the explicit \"Confirm anyway\" bypass path. Cleared on any in-threshold (GO) confirm.\n',
+      ),
   }),
   contextMarkdown: zod
     .string()
@@ -2831,6 +2857,11 @@ export const AdminListContextBlockConfirmationsResponse = zod.object({
         .describe(
           "True if the most recent confirmation tripped the OPSEC fail-safe.",
         ),
+      bypassed: zod
+        .boolean()
+        .describe(
+          'True if the most recent confirmation was bypassed under the 10\/12 threshold via the \"Confirm anyway\" path.\n',
+        ),
       submissionId: zod
         .string()
         .nullable()
@@ -2843,6 +2874,11 @@ export const AdminListContextBlockConfirmationsResponse = zod.object({
     unconfirmedUsers: zod.number(),
     opsecFlaggedUsers: zod.number(),
     noGoUsers: zod.number(),
+    bypassedUsers: zod
+      .number()
+      .describe(
+        "Number of users whose most recent confirmation was bypassed under the 10\/12 threshold.\n",
+      ),
   }),
 });
 

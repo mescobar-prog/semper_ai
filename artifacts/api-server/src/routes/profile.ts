@@ -329,10 +329,25 @@ router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
     return;
   }
 
-  // Server-side enforcement: NO-GO submissions are rejected outright. The
-  // operator must edit and re-submit. We still return the evaluation so the
-  // UI can render the failing scores / OPSEC flag.
-  if (evaluation.status !== "GO") {
+  // Server-side enforcement (Task #99):
+  //   - OPSEC violations are *always* a hard reject — `bypass: true` is
+  //     ignored.
+  //   - Sub-threshold scores (totalScore < 10 with no OPSEC flag) are
+  //     normally rejected, but `bypass: true` allows the operator to
+  //     confirm anyway and the row is persisted with `bypassed = true`.
+  //     The condition is keyed explicitly to `totalScore < 10` (not just
+  //     status !== "GO") so that any future evaluator status that isn't
+  //     about the score (e.g. an OPSEC-only NO-GO) cannot be silently
+  //     bypassed via this path.
+  //   - In-threshold (GO) confirms always clear the bypass flag so the row
+  //     reflects the latest assurance level.
+  const bypassRequested = parsed.data.bypass === true;
+  const isGo = evaluation.status === "GO" && !evaluation.opsecFlag;
+  const isSubThreshold = evaluation.totalScore < 10;
+  const allowSubThresholdBypass =
+    !isGo && isSubThreshold && bypassRequested && !evaluation.opsecFlag;
+
+  if (!isGo && !allowSubThresholdBypass) {
     res.status(422).json({
       error:
         evaluation.opsecFlag
@@ -366,6 +381,7 @@ router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
       flags: evaluation.flags,
       submissionId: evaluation.submissionId,
       opsecFlag: evaluation.opsecFlag ? "true" : "false",
+      bypassed: allowSubThresholdBypass ? "true" : "false",
       version: (existingCb.version ?? 1) + 1,
       updatedAt: now,
     })

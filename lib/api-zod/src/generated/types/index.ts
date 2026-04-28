@@ -31,6 +31,7 @@ export * from "./chatMessage";
 export * from "./chatMessageRole";
 export * from "./chunkPreview";
 export * from "./confirmContextBlockRejection";
+export * from "./confirmContextBlockRequest";
 export * from "./contextBlockConfirmation";
 export * from "./contextBlockEvaluation";
 export * from "./contextBlockFields";

@@ -29,4 +29,7 @@ export interface ContextBlockState {
   /** Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit/re-confirm auto-invalidates an outstanding affirmation.
    */
   version: number;
+  /** True when the operator confirmed this block under the 10/12 GO threshold via the explicit "Confirm anyway" bypass path. Cleared on any in-threshold (GO) confirm.
+   */
+  bypassed: boolean;
 }

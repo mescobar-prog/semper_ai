@@ -187,6 +187,10 @@ export interface SerializedContextBlockState {
   // affirmation gate (Task #45) keys on this so any change automatically
   // invalidates an outstanding affirmation.
   version: number;
+  // True when the operator confirmed this block under the 10/12 GO
+  // threshold via the explicit "Confirm anyway" bypass path (Task #99).
+  // Cleared on any in-threshold (GO) confirm.
+  bypassed: boolean;
 }
 
 export interface SerializedContextBlockEvaluation {
@@ -212,6 +216,7 @@ export function serializeContextBlock(
       confirmedAt: null,
       lastEvaluation: null,
       version: 1,
+      bypassed: false,
     };
   }
   const lastEvaluation: SerializedContextBlockEvaluation | null =
@@ -235,6 +240,7 @@ export function serializeContextBlock(
     confirmedAt: cb.confirmedAt ? cb.confirmedAt.toISOString() : null,
     lastEvaluation,
     version: cb.version ?? 1,
+    bypassed: cb.bypassed === "true",
   };
 }
 

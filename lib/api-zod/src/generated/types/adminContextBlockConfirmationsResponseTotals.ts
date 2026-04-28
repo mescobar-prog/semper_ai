@@ -12,4 +12,7 @@ export type AdminContextBlockConfirmationsResponseTotals = {
   unconfirmedUsers: number;
   opsecFlaggedUsers: number;
   noGoUsers: number;
+  /** Number of users whose most recent confirmation was bypassed under the 10/12 threshold.
+   */
+  bypassedUsers: number;
 };

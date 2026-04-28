@@ -164,6 +164,9 @@ export interface ContextBlockState {
   /** Monotonic version of this context block. Bumps every time any of the 6 fields are edited or the block is re-confirmed. The launch-time affirmation gate (Task #45) pairs (user, active preset, this version) so any edit/re-confirm auto-invalidates an outstanding affirmation.
    */
   version: number;
+  /** True when the operator confirmed this block under the 10/12 GO threshold via the explicit "Confirm anyway" bypass path. Cleared on any in-threshold (GO) confirm.
+   */
+  bypassed: boolean;
 }
 
 /**
@@ -194,6 +197,24 @@ export interface ContextBlockConfirmation {
   profile: UserProfile;
   contextBlock: ContextBlockState;
   evaluation: ContextBlockEvaluation;
+}
+
+export interface ConfirmContextBlockRequest {
+  /** Element 1 — Doctrine & Orders cited (e.g. MCDP-4, unit SOPs). */
+  doctrine: string;
+  /** Element 2 — Commander's intent for this task. */
+  intent: string;
+  /** Element 3 — Operational environment. */
+  environment: string;
+  /** Element 4 — Constraints & limitations. */
+  constraints: string;
+  /** Element 5 — Risk if the LLM hallucinates. */
+  risk: string;
+  /** Element 6 — Human experience & judgment AI cannot infer. */
+  experience: string;
+  /** When true, allows confirming a sub-threshold (NO-GO by score) block. The persisted row is marked as `bypassed`. Ignored on in-threshold (GO) confirmations. OPSEC violations remain a hard reject regardless of `bypass`.
+   */
+  bypass?: boolean;
 }
 
 export interface ConfirmContextBlockRejection {
@@ -1313,6 +1334,9 @@ export interface AdminContextBlockConfirmation {
   status: string | null;
   /** True if the most recent confirmation tripped the OPSEC fail-safe. */
   opsecFlag: boolean;
+  /** True if the most recent confirmation was bypassed under the 10/12 threshold via the "Confirm anyway" path.
+   */
+  bypassed: boolean;
   /**
    * Submission ID of the most recent confirmation.
    * @nullable
@@ -1326,6 +1350,9 @@ export type AdminContextBlockConfirmationsResponseTotals = {
   unconfirmedUsers: number;
   opsecFlaggedUsers: number;
   noGoUsers: number;
+  /** Number of users whose most recent confirmation was bypassed under the 10/12 threshold.
+   */
+  bypassedUsers: number;
 };
 
 export interface AdminContextBlockConfirmationsResponse {

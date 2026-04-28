@@ -604,6 +604,7 @@ router.get(
         cbScoreTotal: contextBlocksTable.scoreTotal,
         cbStatus: contextBlocksTable.status,
         cbOpsecFlag: contextBlocksTable.opsecFlag,
+        cbBypassed: contextBlocksTable.bypassed,
         cbSubmissionId: contextBlocksTable.submissionId,
       })
       .from(usersTable)
@@ -637,6 +638,7 @@ router.get(
         scoreTotal: r.cbScoreTotal,
         status: r.cbStatus,
         opsecFlag: r.cbOpsecFlag === "true",
+        bypassed: r.cbBypassed === "true",
         submissionId: r.cbSubmissionId,
       };
     });
@@ -648,6 +650,7 @@ router.get(
         else acc.unconfirmedUsers += 1;
         if (u.opsecFlag) acc.opsecFlaggedUsers += 1;
         if (u.status === "NO-GO") acc.noGoUsers += 1;
+        if (u.bypassed) acc.bypassedUsers += 1;
         return acc;
       },
       {
@@ -656,6 +659,7 @@ router.get(
         unconfirmedUsers: 0,
         opsecFlaggedUsers: 0,
         noGoUsers: 0,
+        bypassedUsers: 0,
       },
     );
 

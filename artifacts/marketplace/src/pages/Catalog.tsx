@@ -22,6 +22,13 @@ import type {
 import { parseAutoSource } from "@workspace/mil-data";
 import { PageContainer, ErrorBox, Pill, formatBytes } from "@/lib/format";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ExportMenu,
   ImportControl,
   ImportMessageBanner,
@@ -274,11 +281,17 @@ export function Catalog() {
     }
   };
 
-  const onConfirm = async () => {
+  // Confirms with optional `bypass: true` for the sub-threshold path
+  // (Task #99). The bypass-dialog flow calls this with bypass=true after
+  // the operator acknowledges the warning; the normal in-threshold path
+  // calls it without `bypass` and the server enforces the threshold.
+  const submitConfirm = async (opts: { bypass?: boolean } = {}) => {
     setError(null);
     const snapshot = { ...fields };
     try {
-      const result = await confirmMutation.mutateAsync({ data: snapshot });
+      const result = await confirmMutation.mutateAsync({
+        data: { ...snapshot, ...(opts.bypass ? { bypass: true } : {}) },
+      });
       setEvaluation(result.evaluation);
       setEvaluatedSnapshot(snapshot);
       queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
@@ -288,6 +301,7 @@ export function Catalog() {
       queryClient.invalidateQueries({
         queryKey: getGetLaunchAffirmationQueryKey(),
       });
+      return true;
     } catch (err) {
       // Surface server-side rejection (NO-GO / OPSEC) which arrives as 422
       // with { error, evaluation }.
@@ -302,13 +316,43 @@ export function Catalog() {
           anyErr.message ??
           "Could not confirm Context Block.",
       );
+      return false;
     }
+  };
+
+  // Sub-threshold (NO-GO with no OPSEC) bypass dialog state. The Confirm
+  // Context Block button opens this dialog instead of being a no-op when
+  // the latest evaluation is below 10/12 with no OPSEC flag.
+  const [bypassDialogOpen, setBypassDialogOpen] = useState(false);
+
+  const isGo = evaluation?.status === "GO" && !evaluation.opsecFlag;
+  // OPSEC failures remain a hard block — no bypass is offered.
+  const canBypass =
+    !!evaluation &&
+    !evaluation.opsecFlag &&
+    !isGo &&
+    !evaluationStale &&
+    allFilled;
+
+  const onConfirm = async () => {
+    if (canBypass) {
+      setBypassDialogOpen(true);
+      return;
+    }
+    await submitConfirm();
+  };
+
+  const onConfirmBypass = async () => {
+    const ok = await submitConfirm({ bypass: true });
+    if (ok) setBypassDialogOpen(false);
   };
 
   const evaluating = evaluateMutation.isPending;
   const confirming = confirmMutation.isPending;
-  const isGo = evaluation?.status === "GO" && !evaluation.opsecFlag;
-  const canConfirm = isGo && !evaluationStale && allFilled && !confirming;
+  // Confirm is enabled when the operator has either a clean GO score, OR
+  // a sub-threshold (non-OPSEC) score that they can choose to bypass.
+  const canConfirm =
+    (isGo || canBypass) && !evaluationStale && allFilled && !confirming;
 
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(
     null,
@@ -443,12 +487,16 @@ export function Catalog() {
           {cb?.confirmedAt && !evaluationStale && (
             <div className="bg-primary/10 border border-primary/40 rounded-md p-4 flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <div className="text-sm font-semibold text-primary">
+                <div className="text-sm font-semibold text-primary flex items-center gap-2 flex-wrap">
                   Context Block confirmed — no changes pending
+                  {cb?.bypassed && (
+                    <Pill tone="warn">Bypassed (under 10/12)</Pill>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Your confirmed block ships with every launch. Proceed to
-                  the tool list, or edit any element below to re-evaluate.
+                  {cb?.bypassed
+                    ? "Your block was confirmed under the 10/12 threshold. Tools will see a lower-assurance notice when you launch."
+                    : "Your confirmed block ships with every launch. Proceed to the tool list, or edit any element below to re-evaluate."}
                 </p>
               </div>
               <Link
@@ -535,6 +583,12 @@ export function Catalog() {
               type="button"
               onClick={onConfirm}
               disabled={!canConfirm}
+              data-testid="button-confirm-context-block"
+              title={
+                canBypass
+                  ? "Score is below 10/12 — confirming will require an explicit bypass acknowledgment."
+                  : undefined
+              }
               className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50 hover:bg-primary/90 transition-colors"
             >
               {confirming ? "Confirming…" : "Confirm Context Block"}
@@ -558,7 +612,181 @@ export function Catalog() {
           />
         </aside>
       </div>
+
+      <BypassConfirmDialog
+        open={bypassDialogOpen}
+        evaluation={evaluation}
+        submitting={confirming}
+        onCancel={() => setBypassDialogOpen(false)}
+        onConfirm={onConfirmBypass}
+      />
     </PageContainer>
+  );
+}
+
+// Labels used in the bypass dialog to surface which of the four scoring
+// criteria fell short. These are the criteria the evaluator scores (1..3
+// each, total /12) — distinct from the six context-block elements the
+// operator fills out.
+const CRITERIA: Array<{
+  key: keyof ContextBlockEvaluation["scores"];
+  label: string;
+}> = [
+  { key: "doctrine", label: "Doctrine & Orders" },
+  { key: "environment", label: "Environment & Commander's Intent" },
+  { key: "constraints", label: "Constraints, Limitations & Risk" },
+  { key: "experience", label: "Experience & Judgment" },
+];
+
+function BypassConfirmDialog({
+  open,
+  evaluation,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  evaluation: ContextBlockEvaluation | null;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [acknowledged, setAcknowledged] = useState(false);
+  // Reset the acknowledgment checkbox each time the dialog opens so the
+  // operator can't accidentally inherit a prior "already checked" state.
+  if (!open && acknowledged) {
+    setAcknowledged(false);
+  }
+
+  const scores = evaluation?.scores;
+  const shortfalls = scores
+    ? CRITERIA.filter((c) => (scores[c.key] ?? 0) < 3)
+    : [];
+  // The evaluator returns "None" when no flags fired; treat that as empty.
+  const flagText = (() => {
+    const raw = (evaluation?.flags ?? "").trim();
+    if (!raw || raw.toLowerCase() === "none") return null;
+    return raw;
+  })();
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && !submitting && onCancel()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Confirm under threshold?</DialogTitle>
+          <DialogDescription>
+            This Context Block scored{" "}
+            <span className="font-mono">
+              {evaluation?.totalScore ?? "?"}/12
+            </span>
+            , below the 10/12 review threshold. You can confirm anyway, but
+            the row will be persisted with a bypass flag and surfaced in the
+            launch affirmation modal and admin audit.
+          </DialogDescription>
+        </DialogHeader>
+
+        {scores && (
+          <div className="rounded-md border border-border bg-card p-3">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
+              Per-criterion scores
+            </div>
+            <ul className="space-y-1.5 text-xs">
+              {CRITERIA.map((c) => {
+                const s = scores[c.key] ?? 0;
+                const short = s < 3;
+                return (
+                  <li
+                    key={c.key}
+                    data-testid={`bypass-criterion-${c.key}`}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span
+                      className={
+                        short
+                          ? "text-amber-300 font-medium"
+                          : "text-foreground/90"
+                      }
+                    >
+                      {c.label}
+                      {short && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-300/80 font-mono">
+                          shortfall
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={`font-mono ${
+                        short ? "text-amber-300" : "text-emerald-400"
+                      }`}
+                    >
+                      {s}/3
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {shortfalls.length === 0 && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                All four criteria scored 3/3, but the total is still being
+                reported below 10/12 — re-evaluate after editing if this looks
+                wrong.
+              </p>
+            )}
+          </div>
+        )}
+
+        {flagText && (
+          <div
+            data-testid="bypass-flags"
+            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+          >
+            <div className="text-[10px] font-mono uppercase tracking-wider text-amber-300/80 mb-1">
+              Evaluator flags
+            </div>
+            {flagText}
+          </div>
+        )}
+
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          OPSEC violations cannot be bypassed. This option is only available
+          when the block is sub-threshold but OPSEC-clean.
+        </div>
+
+        <label className="flex items-start gap-3 rounded-md border border-border bg-card px-3 py-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="checkbox-bypass-acknowledge"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-primary"
+          />
+          <span className="text-sm">
+            I understand the score is below 10/12 and accept the lower
+            assurance for downstream tool launches.
+          </span>
+        </label>
+
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="h-9 px-4 rounded-md border border-border text-sm hover:bg-accent/50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={!acknowledged || submitting}
+            data-testid="button-confirm-bypass"
+            className="h-9 px-4 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-600/90 disabled:opacity-50"
+          >
+            {submitting ? "Confirming…" : "Confirm anyway"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -582,20 +810,24 @@ function ConfirmationCard({
       </div>
       {confirmedAt ? (
         <>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <Pill tone="good">Confirmed</Pill>
             {cb?.lastEvaluation && (
               <span className="text-xs font-mono">
                 {cb.lastEvaluation.totalScore}/12
               </span>
             )}
+            {cb?.bypassed && <Pill tone="warn">Bypassed</Pill>}
           </div>
           <p className="text-xs text-muted-foreground">
             Last confirmed{" "}
             <span className="font-mono">
               {confirmedAt.toLocaleString()}
             </span>
-            . This block ships in every tool launch.
+            .{" "}
+            {cb?.bypassed
+              ? "Confirmed under the 10/12 threshold — tools see a lower-assurance flag."
+              : "This block ships in every tool launch."}
           </p>
         </>
       ) : (

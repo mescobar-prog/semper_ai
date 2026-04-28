@@ -34,6 +34,7 @@ import type {
   Category,
   ChatMessage,
   ConfirmContextBlockRejection,
+  ConfirmContextBlockRequest,
   ContextBlockConfirmation,
   ContextBlockEvaluation,
   ContextBlockFields,
@@ -1201,7 +1202,7 @@ export const useEvaluateContextBlock = <
 };
 
 /**
- * Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and OPSEC-flagged submissions, and persists the 6 fields plus the latest score and confirmed-at timestamp on the operator's profile.
+ * Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and OPSEC-flagged submissions, and persists the 6 fields plus the latest score and confirmed-at timestamp on the operator's profile. Setting `bypass: true` allows confirmation when the score is below the 10/12 threshold (no OPSEC flag); the persisted row is marked as `bypassed`. OPSEC violations remain a hard reject regardless of `bypass`.
 
  * @summary Save a 6-element Context Block (server re-evaluates and rejects NO-GO)
  */
@@ -1210,14 +1211,14 @@ export const getConfirmContextBlockUrl = () => {
 };
 
 export const confirmContextBlock = async (
-  contextBlockFields: ContextBlockFields,
+  confirmContextBlockRequest: ConfirmContextBlockRequest,
   options?: RequestInit,
 ): Promise<ContextBlockConfirmation> => {
   return customFetch<ContextBlockConfirmation>(getConfirmContextBlockUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(contextBlockFields),
+    body: JSON.stringify(confirmContextBlockRequest),
   });
 };
 
@@ -1228,14 +1229,14 @@ export const getConfirmContextBlockMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof confirmContextBlock>>,
     TError,
-    { data: BodyType<ContextBlockFields> },
+    { data: BodyType<ConfirmContextBlockRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof confirmContextBlock>>,
   TError,
-  { data: BodyType<ContextBlockFields> },
+  { data: BodyType<ConfirmContextBlockRequest> },
   TContext
 > => {
   const mutationKey = ["confirmContextBlock"];
@@ -1249,7 +1250,7 @@ export const getConfirmContextBlockMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof confirmContextBlock>>,
-    { data: BodyType<ContextBlockFields> }
+    { data: BodyType<ConfirmContextBlockRequest> }
   > = (props) => {
     const { data } = props ?? {};
 
@@ -1262,7 +1263,8 @@ export const getConfirmContextBlockMutationOptions = <
 export type ConfirmContextBlockMutationResult = NonNullable<
   Awaited<ReturnType<typeof confirmContextBlock>>
 >;
-export type ConfirmContextBlockMutationBody = BodyType<ContextBlockFields>;
+export type ConfirmContextBlockMutationBody =
+  BodyType<ConfirmContextBlockRequest>;
 export type ConfirmContextBlockMutationError = ErrorType<
   ErrorEnvelope | ConfirmContextBlockRejection
 >;
@@ -1277,14 +1279,14 @@ export const useConfirmContextBlock = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof confirmContextBlock>>,
     TError,
-    { data: BodyType<ContextBlockFields> },
+    { data: BodyType<ConfirmContextBlockRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof confirmContextBlock>>,
   TError,
-  { data: BodyType<ContextBlockFields> },
+  { data: BodyType<ConfirmContextBlockRequest> },
   TContext
 > => {
   return useMutation(getConfirmContextBlockMutationOptions(options));

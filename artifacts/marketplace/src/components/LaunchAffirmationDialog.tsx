@@ -143,6 +143,21 @@ export function LaunchAffirmationDialog({
               </div>
             </section>
 
+            {current.contextBlock.bypassed && (
+              <div
+                role="alert"
+                className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-200"
+              >
+                <div className="font-semibold uppercase tracking-wider text-[10px] text-amber-300 mb-1">
+                  Lower-assurance context
+                </div>
+                This context block was confirmed under the 10/12 review
+                threshold. Tools you launch will see a flag indicating the
+                block was operator-bypassed; proceed only if that level of
+                assurance is acceptable for the work ahead.
+              </div>
+            )}
+
             <section>
               <SectionLabel title="Six-element context block" />
               <ContextBlockGrid cb={current.contextBlock} />

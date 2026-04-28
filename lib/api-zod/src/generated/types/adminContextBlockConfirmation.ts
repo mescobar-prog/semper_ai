@@ -35,6 +35,9 @@ export interface AdminContextBlockConfirmation {
   status: string | null;
   /** True if the most recent confirmation tripped the OPSEC fail-safe. */
   opsecFlag: boolean;
+  /** True if the most recent confirmation was bypassed under the 10/12 threshold via the "Confirm anyway" path.
+   */
+  bypassed: boolean;
   /**
    * Submission ID of the most recent confirmation.
    * @nullable

@@ -2473,7 +2473,7 @@ function ReviewModerationSection() {
 function ContextBlockAudit() {
   const { data, isLoading, error } = useAdminListContextBlockConfirmations();
   const [showOnly, setShowOnly] = useState<
-    "all" | "confirmed" | "unconfirmed" | "opsec" | "nogo"
+    "all" | "confirmed" | "unconfirmed" | "opsec" | "nogo" | "bypassed"
   >("all");
 
   const all = data?.users ?? [];
@@ -2484,6 +2484,7 @@ function ContextBlockAudit() {
     if (showOnly === "unconfirmed") return !u.hasConfirmed;
     if (showOnly === "opsec") return u.opsecFlag;
     if (showOnly === "nogo") return u.status === "NO-GO";
+    if (showOnly === "bypassed") return u.bypassed;
     return true;
   });
 
@@ -2516,11 +2517,12 @@ function ContextBlockAudit() {
           <option value="unconfirmed">Never confirmed</option>
           <option value="opsec">OPSEC-flagged</option>
           <option value="nogo">NO-GO status</option>
+          <option value="bypassed">Bypassed (under 10/12)</option>
         </select>
       </div>
 
       {totals && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-6">
           <StatCard label="Total users" value={totals.totalUsers} />
           <StatCard
             label="Confirmed"
@@ -2543,6 +2545,11 @@ function ContextBlockAudit() {
             label="NO-GO status"
             value={totals.noGoUsers}
             tone={totals.noGoUsers > 0 ? "warn" : "neutral"}
+          />
+          <StatCard
+            label="Bypassed"
+            value={totals.bypassedUsers}
+            tone={totals.bypassedUsers > 0 ? "warn" : "neutral"}
           />
         </div>
       )}
@@ -2573,6 +2580,7 @@ function ContextBlockAudit() {
                 <th className="px-4 py-3">Last confirmed</th>
                 <th className="px-4 py-3">Score</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Bypassed</th>
                 <th className="px-4 py-3">Submission</th>
               </tr>
             </thead>
@@ -2661,6 +2669,13 @@ function ConfirmationRow({ u }: { u: AdminContextBlockConfirmation }) {
           )}
           {u.opsecFlag && <Pill tone="destructive">OPSEC</Pill>}
         </div>
+      </td>
+      <td className="px-4 py-3 align-top">
+        {u.bypassed ? (
+          <Pill tone="warn">Bypassed</Pill>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </td>
       <td className="px-4 py-3 align-top">
         {u.submissionId ? (

@@ -178,6 +178,15 @@ export async function runProfileSplitMigration(): Promise<void> {
     ALTER TABLE context_blocks
       ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1
   `);
+  // --- 3d.2. Operator-bypass flag (Task #99). When the operator confirms
+  // a sub-threshold (NO-GO, no-OPSEC) Context Block via the explicit
+  // "Confirm anyway" path, the row is persisted with bypassed='true' so
+  // the launch-time affirmation modal and admin audit can surface the
+  // lower assurance level. OPSEC violations cannot bypass.
+  await db.execute(sql`
+    ALTER TABLE context_blocks
+      ADD COLUMN IF NOT EXISTS bypassed varchar NOT NULL DEFAULT 'false'
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS launch_affirmations (
       user_id varchar PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

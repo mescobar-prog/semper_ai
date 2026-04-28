@@ -284,11 +284,15 @@ paths:
         Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and
         OPSEC-flagged submissions, and persists the 6 fields plus the
         latest score and confirmed-at timestamp on the operator's profile.
+        Setting `bypass: true` allows confirmation when the score is below
+        the 10/12 threshold (no OPSEC flag); the persisted row is marked
+        as `bypassed`. OPSEC violations remain a hard reject regardless of
+        `bypass`.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ContextBlockFields' }
+            schema: { $ref: '#/components/schemas/ConfirmContextBlockRequest' }
       responses:
         '200':
           description: Confirmed Context Block state
@@ -2069,7 +2073,7 @@ components:
       type: object
       required:
         [doctrine, intent, environment, constraints, risk, experience,
-         confirmedAt, lastEvaluation, version]
+         confirmedAt, lastEvaluation, version, bypassed]
       properties:
         doctrine: { type: [string, 'null'] }
         intent: { type: [string, 'null'] }
@@ -2093,6 +2097,12 @@ components:
             launch-time affirmation gate (Task #45) pairs (user, active
             preset, this version) so any edit/re-confirm auto-invalidates
             an outstanding affirmation.
+        bypassed:
+          type: boolean
+          description: >
+            True when the operator confirmed this block under the 10/12
+            GO threshold via the explicit "Confirm anyway" bypass path.
+            Cleared on any in-threshold (GO) confirm.
 
     ContextBlockConfirmation:
       type: object
@@ -2101,6 +2111,36 @@ components:
         profile: { $ref: '#/components/schemas/UserProfile' }
         contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
         evaluation: { $ref: '#/components/schemas/ContextBlockEvaluation' }
+
+    ConfirmContextBlockRequest:
+      type: object
+      required: [doctrine, intent, environment, constraints, risk, experience]
+      properties:
+        doctrine:
+          type: string
+          description: Element 1 — Doctrine & Orders cited (e.g. MCDP-4, unit SOPs).
+        intent:
+          type: string
+          description: Element 2 — Commander's intent for this task.
+        environment:
+          type: string
+          description: Element 3 — Operational environment.
+        constraints:
+          type: string
+          description: Element 4 — Constraints & limitations.
+        risk:
+          type: string
+          description: Element 5 — Risk if the LLM hallucinates.
+        experience:
+          type: string
+          description: Element 6 — Human experience & judgment AI cannot infer.
+        bypass:
+          type: boolean
+          description: >
+            When true, allows confirming a sub-threshold (NO-GO by score)
+            block. The persisted row is marked as `bypassed`. Ignored on
+            in-threshold (GO) confirmations. OPSEC violations remain a hard
+            reject regardless of `bypass`.
 
     ConfirmContextBlockRejection:
       type: object
@@ -3314,7 +3354,7 @@ components:
       type: object
       required:
         [userId, displayName, email, branch, rank, isAdmin, hasConfirmed,
-         confirmedAt, scoreTotal, status, opsecFlag, submissionId]
+         confirmedAt, scoreTotal, status, opsecFlag, bypassed, submissionId]
       properties:
         userId: { type: string }
         displayName: { type: string }
@@ -3338,6 +3378,11 @@ components:
         opsecFlag:
           type: boolean
           description: True if the most recent confirmation tripped the OPSEC fail-safe.
+        bypassed:
+          type: boolean
+          description: >
+            True if the most recent confirmation was bypassed under the
+            10/12 threshold via the "Confirm anyway" path.
         submissionId:
           type: [string, 'null']
           description: Submission ID of the most recent confirmation.
@@ -3353,10 +3398,15 @@ components:
           type: object
           required:
             [totalUsers, confirmedUsers, unconfirmedUsers, opsecFlaggedUsers,
-             noGoUsers]
+             noGoUsers, bypassedUsers]
           properties:
             totalUsers: { type: integer }
             confirmedUsers: { type: integer }
             unconfirmedUsers: { type: integer }
             opsecFlaggedUsers: { type: integer }
             noGoUsers: { type: integer }
+            bypassedUsers:
+              type: integer
+              description: >
+                Number of users whose most recent confirmation was bypassed
+                under the 10/12 threshold.

@@ -45,6 +45,12 @@ export const contextBlocksTable = pgTable("context_blocks", {
   flags: text("flags"),
   submissionId: varchar("submission_id"),
   opsecFlag: varchar("opsec_flag").notNull().default("false"),
+  // True when the operator confirmed this block under the 10/12 GO
+  // threshold via the explicit "Confirm anyway" bypass path. Stored as a
+  // boolean-as-varchar to match the existing opsecFlag style. Cleared on
+  // any in-threshold (GO) confirm so the row reflects the most recent
+  // confirmation's assurance level.
+  bypassed: varchar("bypassed").notNull().default("false"),
   // ----------------------------------------------------------------------
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
