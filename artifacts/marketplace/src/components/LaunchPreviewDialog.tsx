@@ -63,6 +63,7 @@ export function LaunchPreviewDialog({
 
   const [preview, setPreview] = useState<LaunchPreviewResponse | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [refreshingPreview, setRefreshingPreview] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [excludedFields, setExcludedFields] = useState<Set<string>>(new Set());
@@ -70,6 +71,10 @@ export function LaunchPreviewDialog({
     new Set(),
   );
   const [note, setNote] = useState("");
+  // Task #88: operator's "what will you ask this tool?" intent. The text
+  // box lives above the snippets; we debounce typing so we only re-run
+  // the preview RAG once the operator pauses.
+  const [intent, setIntent] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [savingPreference, setSavingPreference] = useState(false);
@@ -83,9 +88,13 @@ export function LaunchPreviewDialog({
     setExcludedFields(new Set());
     setExcludedSnippets(new Set());
     setNote("");
+    setIntent("");
   }, [trigger?.toolId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch the candidate payload OR mint directly depending on showPreview.
+  // Initial fetch of the candidate payload OR direct mint depending on
+  // showPreview. We don't include `intent` in the dep list because the
+  // intent-driven re-fetches are handled in a separate debounced effect
+  // below — this effect only fires once per (toolId, showPreview).
   useEffect(() => {
     if (!trigger) return;
     let cancelled = false;
@@ -123,7 +132,9 @@ export function LaunchPreviewDialog({
       }
       try {
         setLoadingPreview(true);
-        const data = await previewLaunchContext(trigger.toolId);
+        const data = await previewLaunchContext(trigger.toolId, {
+          launchIntent: null,
+        });
         if (cancelled) return;
         setPreview(data);
       } catch (e) {
@@ -139,6 +150,45 @@ export function LaunchPreviewDialog({
       cancelled = true;
     };
   }, [trigger?.toolId, showPreview]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced intent → re-fetch preview. We wait ~500ms after the
+  // operator stops typing so we don't spam the LLM-backed query
+  // generator on every keystroke. Skips while the initial fetch is
+  // still running and only fires for non-empty intents that actually
+  // differ from the last preview's intent (the latter prevents a
+  // double-fetch on first paint when the input is empty anyway).
+  useEffect(() => {
+    if (!trigger || !showPreview) return;
+    if (loadingPreview) return;
+    const trimmed = intent.trim();
+    const lastIntent = preview?.launchIntent ?? "";
+    if (trimmed === lastIntent) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setRefreshingPreview(true);
+        const data = await previewLaunchContext(trigger.toolId, {
+          launchIntent: trimmed.length > 0 ? trimmed : null,
+        });
+        if (cancelled) return;
+        setPreview(data);
+        // Reset snippet exclusions — the candidate set just changed so
+        // the operator's previous ticks don't apply to the new chunks.
+        setExcludedSnippets(new Set());
+      } catch (e) {
+        if (cancelled) return;
+        setPreviewError(
+          e instanceof Error ? e.message : "Could not refresh preview",
+        );
+      } finally {
+        if (!cancelled) setRefreshingPreview(false);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [intent, trigger?.toolId, showPreview, loadingPreview, preview?.launchIntent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fieldsWithValues = useMemo(
     () => preview?.profileFields.filter((f) => f.hasValue) ?? [],
@@ -185,10 +235,18 @@ export function LaunchPreviewDialog({
         .filter((s) => !excludedSnippets.has(s.chunkId))
         .map((s) => s.chunkId);
       const additionalNote = note.trim() ? note.trim() : null;
+      // Task #88: forward the intent the operator typed so the launch row
+      // persists it and the receiving tool sees it via context-exchange.
+      const launchIntent = intent.trim() ? intent.trim() : null;
 
       const resp = await launchMutation.mutateAsync({
         toolId: trigger.toolId,
-        data: { selectedFieldKeys, selectedSnippetIds, additionalNote },
+        data: {
+          selectedFieldKeys,
+          selectedSnippetIds,
+          additionalNote,
+          launchIntent,
+        },
       });
       if (resp.hostingType !== "local_install") {
         window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
@@ -309,10 +367,50 @@ export function LaunchPreviewDialog({
             </section>
 
             <section>
+              <SectionLabel title="What will you ask this tool?" />
+              <textarea
+                value={intent}
+                onChange={(e) => setIntent(e.target.value)}
+                rows={2}
+                placeholder="e.g. Draft a SITREP on convoy security in our current AO."
+                className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {refreshingPreview
+                  ? "Refreshing snippets for your question…"
+                  : intent.trim()
+                    ? "We'll search your selected doctrine using this question first."
+                    : "Optional. If left blank, we'll search using your role and the tool's purpose."}
+              </p>
+            </section>
+
+            <section>
               <SectionLabel
                 title="Library snippets"
                 hint={`${includedSnippetCount} of ${preview.candidateSnippets.length} selected`}
               />
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {preview.scopedToSelectedDoctrine ? (
+                  <>
+                    Scoped to your selected doctrine (
+                    {preview.selectedDoctrineDocIds.length}{" "}
+                    {preview.selectedDoctrineDocIds.length === 1
+                      ? "doc"
+                      : "docs"}
+                    ).
+                  </>
+                ) : preview.selectedDoctrineDocIds.length > 0 ? (
+                  <>
+                    Your selected doctrine isn't in this preset's library —
+                    falling back to the full preset scope.
+                  </>
+                ) : (
+                  <>
+                    No doctrine ticked — searching the full preset library.
+                    Tick docs in your Context Block to narrow the search.
+                  </>
+                )}
+              </div>
               {preview.candidateSnippets.length === 0 ? (
                 <p className="text-xs text-muted-foreground mt-2">
                   Your library produced no relevant snippets for this tool.
@@ -440,8 +538,22 @@ function SnippetRow({
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-medium text-foreground truncate">
-              {snippet.documentTitle}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="text-xs font-medium text-foreground truncate">
+                {snippet.documentTitle}
+              </div>
+              {/* Task #88: badge showing whether this snippet came from
+                  the operator's selected doctrine (intent-led, scoped)
+                  or fell back to the wider preset library. */}
+              {snippet.fromSelectedDoctrine ? (
+                <span className="shrink-0 rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider text-emerald-300">
+                  selected doctrine
+                </span>
+              ) : (
+                <span className="shrink-0 rounded-sm border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
+                  fallback
+                </span>
+              )}
             </div>
             <div className="text-[10px] font-mono text-muted-foreground tabular-nums shrink-0">
               chunk #{snippet.chunkIndex}

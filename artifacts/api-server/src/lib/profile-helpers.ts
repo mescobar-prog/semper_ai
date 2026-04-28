@@ -132,6 +132,31 @@ export async function getOrCreateProfile(userId: string): Promise<Profile> {
   return created;
 }
 
+// The Context Block's "Doctrine & Orders" textarea (Task #85) embeds one
+// `<<< doc:<id> >>> … <<< /doc >>>` block per document the operator ticked
+// in the doctrine picker. This regex pulls those ids back out so we can
+// scope launch-time RAG (Task #88) to the doctrine the operator already
+// affirmed as relevant for this tasking.
+const DOCTRINE_DOC_ID_RE = /<<<\s*doc:([^\s>]+)\s*>>>/g;
+
+export function parseSelectedDoctrineDocIds(
+  doctrine: string | null | undefined,
+): string[] {
+  if (!doctrine) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  // Reset lastIndex defensively — the regex literal is module-scoped.
+  DOCTRINE_DOC_ID_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = DOCTRINE_DOC_ID_RE.exec(doctrine))) {
+    const id = m[1];
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 export async function getOrCreateContextBlock(
   userId: string,
 ): Promise<ContextBlock> {

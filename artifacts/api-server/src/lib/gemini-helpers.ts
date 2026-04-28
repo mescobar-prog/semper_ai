@@ -504,10 +504,24 @@ Output rules:
   return { field, text: raw, list: null };
 }
 
+export interface GenerateRagQueriesOptions {
+  /**
+   * Operator's "What will you ask this tool?" sentence captured on the
+   * launch screen (Task #88). When present it becomes the PRIMARY verbatim
+   * RAG query and steers the LLM-generated supplementary queries; profile
+   * and admin-template queries fall to the back of the list as recall
+   * insurance instead of leading the search.
+   */
+  intent?: string | null;
+}
+
 export async function generateRagQueries(
   profile: Profile | null,
   toolDesc: RagToolDescriptor,
+  opts: GenerateRagQueriesOptions = {},
 ): Promise<string[]> {
+  const intent = opts.intent?.trim() || null;
+
   const profileQueries: string[] = [];
   if (profile?.command) {
     const cmd = findCommand(profile.command);
@@ -537,7 +551,22 @@ export async function generateRagQueries(
     ? `Tool's actual purpose (admin-authored): ${toolDesc.purpose.trim()}`
     : "";
 
-  const systemPrompt = `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
+  // Intent-led mode (Task #88) and profile-led mode share the same JSON
+  // contract but use different system prompts. Intent mode tells the LLM
+  // to expand the operator's question into 2-3 keyword variants instead of
+  // role-fishing across their whole library.
+  const systemPrompt = intent
+    ? `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
+
+The operator has just typed a SPECIFIC QUESTION they want this tool to help them with. Your job is to expand that question into search-friendly keyword queries so we surface the right snippets from their library — NOT to fish across their whole role.
+
+Rules:
+- Output 2-3 distinct queries.
+- Each query must be 2-6 keywords — no full sentences, no stop words like "the" or "a".
+- Every query MUST come directly from the operator's question; do not pivot to generic role/MOS terms.
+- Use synonyms or doctrine terminology a DoD document would actually use for the operator's question.
+- Output ONLY a JSON object: {"queries": ["...", "..."]}. No prose, no markdown fences.`
+    : `You generate short search queries to retrieve relevant context from a U.S. service member's personal doctrine/SOP/reference library. The queries will be used against a Postgres full-text search index.
 
 Rules:
 - Output 3-5 distinct queries.
@@ -548,7 +577,21 @@ Rules:
 - Bias toward terminology that would actually appear in DoD documents the user might have uploaded.
 - Output ONLY a JSON object: {"queries": ["...", "..."]}. No prose, no markdown fences.`;
 
-  const userPrompt = `User profile:
+  const userPrompt = intent
+    ? `Operator's question (this is the primary signal — expand THIS):
+"${intent}"
+
+Operator profile (for context only — do not pivot the queries to these):
+${profileSummary(profile)}
+
+Tool the operator is launching:
+Name: ${toolDesc.name}
+Vendor: ${toolDesc.vendor}
+Short description: ${toolDesc.shortDescription}
+${purposeLine}
+
+Generate the JSON object now.`
+    : `User profile:
 ${profileSummary(profile)}
 
 Tool the user is launching:
@@ -587,13 +630,25 @@ Generate the JSON object now.`;
     logger.warn({ err }, "RAG query generation failed; falling back to profile-only queries");
   }
 
-  // Always merge admin-authored templates (highest priority — these are
-  // hand-tuned for this tool), profile-derived queries, and LLM-generated
-  // queries. Templates and profile queries are guaranteed to recall the
-  // user's personal docs even if the LLM drifts.
+  // Merge order matters — the first query gets the most weight in
+  // searchChunksMultiQuery's per-query top-K pass, and after merge we
+  // sort hits by score, so leading with the strongest signal raises
+  // recall on the snippets the operator actually wants.
+  //
+  // Intent mode (Task #88): the verbatim operator question leads, then
+  // the LLM's keyword expansions of it, then the admin templates and
+  // profile queries as recall insurance.
+  //
+  // Legacy mode (no intent provided yet — auto-launches, brief drafter,
+  // back-compat callers): admin templates + profile queries lead so the
+  // operator's personal SOPs always get a fair shot.
+  const ordered = intent
+    ? [intent, ...llmQueries, ...templateQueries, ...profileQueries]
+    : [...templateQueries, ...profileQueries, ...llmQueries];
+
   const merged: string[] = [];
   const seen = new Set<string>();
-  for (const q of [...templateQueries, ...profileQueries, ...llmQueries]) {
+  for (const q of ordered) {
     const key = q.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

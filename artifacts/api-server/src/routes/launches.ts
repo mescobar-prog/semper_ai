@@ -19,6 +19,7 @@ import {
   DraftBriefBody,
   ExchangeContextTokenBody,
   LaunchToolBody,
+  PreviewLaunchContextBody,
   QueryLibraryBody,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -36,6 +37,7 @@ import {
   getOrCreateContextBlock,
   getOrCreateProfile,
   hasConfirmedContextBlock,
+  parseSelectedDoctrineDocIds,
   serializeContextBlock,
   serializePreset,
   serializeProfile,
@@ -98,10 +100,135 @@ async function loadActiveTool(toolId: string) {
   return tool;
 }
 
+// ----- Launch-time RAG plumbing (Task #88) -----------------------------
+// Intent-led, doctrine-scoped RAG used by both /launch-preview and /launch
+// so the preview the operator sees and the snippets we actually persist
+// stay in lockstep.
+//
+// Per-document cap and minimum post-merge relevance score keep one chatty
+// document or a long tail of weak hits from drowning out the snippets the
+// operator actually wants when they typed an intent.
+const LAUNCH_RAG_MIN_SCORE = 0.15;
+const LAUNCH_RAG_PER_DOC_CAP = 3;
+const LAUNCH_RAG_TOTAL_LIMIT = 12;
+
+interface LaunchRagScope {
+  /** Doc IDs we'll actually search over (post intersection / fallback). */
+  scopedDocumentIds: string[];
+  /** Doc IDs the operator explicitly ticked in the Context Block. */
+  selectedDoctrineDocIds: string[];
+  /**
+   * True when the search was narrowed to the operator's selected
+   * doctrine; false when no doctrine was ticked (or the intersection
+   * with the preset's docs was empty) and we fell back to the whole
+   * preset scope. Surfaced in the preview so operators understand
+   * what just drove their results.
+   */
+  scopedToSelectedDoctrine: boolean;
+}
+
+function resolveLaunchRagScope(
+  contextBlockDoctrine: string | null,
+  presetDocumentIds: string[],
+): LaunchRagScope {
+  const selected = parseSelectedDoctrineDocIds(contextBlockDoctrine);
+  if (selected.length === 0) {
+    return {
+      scopedDocumentIds: presetDocumentIds,
+      selectedDoctrineDocIds: [],
+      scopedToSelectedDoctrine: false,
+    };
+  }
+  const presetSet = new Set(presetDocumentIds);
+  const intersection = selected.filter((id) => presetSet.has(id));
+  if (intersection.length === 0) {
+    // Operator ticked doctrine that isn't in their active preset's doc set
+    // — most likely the preset was switched after the CB was edited.
+    // Falling back to the preset scope keeps the launch flow working
+    // instead of returning zero snippets, but we still report
+    // scopedToSelectedDoctrine=false so the UI can show "fallback".
+    return {
+      scopedDocumentIds: presetDocumentIds,
+      selectedDoctrineDocIds: selected,
+      scopedToSelectedDoctrine: false,
+    };
+  }
+  return {
+    scopedDocumentIds: intersection,
+    selectedDoctrineDocIds: selected,
+    scopedToSelectedDoctrine: true,
+  };
+}
+
+interface RunLaunchRagInput {
+  userId: string;
+  tool: {
+    name: string;
+    vendor: string;
+    shortDescription: string;
+    longDescription: string;
+    purpose: string | null;
+    ragQueryTemplates: string[] | null;
+  };
+  snapshotProfile: ReturnType<typeof snapshotAsProfile>;
+  scope: LaunchRagScope;
+  intent: string | null;
+}
+
+interface RunLaunchRagResult {
+  queries: string[];
+  snippets: Awaited<ReturnType<typeof searchChunksMultiQuery>>;
+}
+
+async function runLaunchRag(
+  input: RunLaunchRagInput,
+): Promise<RunLaunchRagResult> {
+  const { userId, tool, snapshotProfile, scope, intent } = input;
+  const queries = await generateRagQueries(
+    snapshotProfile,
+    {
+      name: tool.name,
+      vendor: tool.vendor,
+      shortDescription: tool.shortDescription,
+      longDescription: tool.longDescription,
+      // RagToolDescriptor declares these optional (string | undefined),
+      // but the toolsTable serializes purpose / ragQueryTemplates as
+      // nullable. Coerce so we don't accidentally pass through `null`,
+      // which the descriptor's downstream profile interpolation doesn't
+      // expect.
+      purpose: tool.purpose ?? undefined,
+      ragQueryTemplates: tool.ragQueryTemplates ?? undefined,
+    },
+    { intent },
+  );
+  const rawSnippets = await searchChunksMultiQuery(
+    userId,
+    queries,
+    4,
+    LAUNCH_RAG_TOTAL_LIMIT,
+    {
+      documentIds: scope.scopedDocumentIds,
+      minScore: LAUNCH_RAG_MIN_SCORE,
+      perDocumentCap: LAUNCH_RAG_PER_DOC_CAP,
+    },
+  );
+  const selectedDocSet = new Set(scope.selectedDoctrineDocIds);
+  const snippets = rawSnippets.map((s) => ({
+    ...s,
+    fromSelectedDoctrine: selectedDocSet.has(s.documentId),
+  }));
+  return { queries, snippets };
+}
+
 // POST /tools/:toolId/launch-preview
 // Returns the candidate context bundle (profile fields + RAG snippets) the
 // user is about to send, *without* minting a launch token. The marketplace
 // frontend uses this to render the pre-launch preview / redaction panel.
+//
+// Optional body: { launchIntent?: string | null } — when present, the
+// operator's free-form "what will you ask this tool?" sentence becomes
+// the primary RAG query (Task #88). The frontend debounces this so we
+// only re-run the search when the operator stops typing.
 router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
   const tool = await loadActiveTool(String(req.params.toolId));
   if (!tool) {
@@ -113,27 +240,43 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
     return;
   }
 
+  // Validate launchIntent off the body. Body is optional — auto-launch /
+  // direct-launch flows POST {} and expect a profile-led preview — so we
+  // pass an empty object through the schema when the body is missing.
+  const previewBody = PreviewLaunchContextBody.safeParse(req.body ?? {});
+  if (!previewBody.success) {
+    res.status(400).json({ error: "Invalid launch preview body" });
+    return;
+  }
+  const rawIntent = previewBody.data.launchIntent ?? null;
+  const intent = rawIntent && rawIntent.trim() ? rawIntent.trim() : null;
+
   // Resolve the user's active mission preset; the snapshot drives identity
   // for the preview (so the candidate list reflects what would actually be
   // sent on launch), and the preset's document set scopes RAG so the user
   // doesn't see snippets from outside their chosen mission scope.
-  const ctx = await getActiveContext(req.user!.id);
+  const [ctx, contextBlockRow] = await Promise.all([
+    getActiveContext(req.user!.id),
+    getOrCreateContextBlock(req.user!.id),
+  ]);
   const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
+  const scope = resolveLaunchRagScope(
+    contextBlockRow.doctrine,
+    ctx.documentIds,
+  );
 
   let queries: string[] = [];
   let snippets: Awaited<ReturnType<typeof searchChunksMultiQuery>> = [];
   try {
-    queries = await generateRagQueries(snapshotProfile, {
-      name: tool.name,
-      vendor: tool.vendor,
-      shortDescription: tool.shortDescription,
-      longDescription: tool.longDescription,
-      purpose: tool.purpose,
-      ragQueryTemplates: tool.ragQueryTemplates,
+    const result = await runLaunchRag({
+      userId: req.user!.id,
+      tool,
+      snapshotProfile,
+      scope,
+      intent,
     });
-    snippets = await searchChunksMultiQuery(req.user!.id, queries, 4, 12, {
-      documentIds: ctx.documentIds,
-    });
+    queries = result.queries;
+    snippets = result.snippets;
   } catch (err) {
     logger.warn({ err }, "RAG preview failed; returning empty candidates");
   }
@@ -155,6 +298,13 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
     queries,
     launchPreference:
       ctx.profile.launchPreference === "direct" ? "direct" : "preview",
+    // Task #88: tell the UI which doctrine the operator's CB ticked and
+    // whether the search was actually narrowed to it (vs falling back
+    // to the whole preset because nothing was ticked or the
+    // intersection was empty).
+    launchIntent: intent,
+    selectedDoctrineDocIds: scope.selectedDoctrineDocIds,
+    scopedToSelectedDoctrine: scope.scopedToSelectedDoctrine,
   });
 });
 
@@ -181,7 +331,16 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Invalid launch selection" });
     return;
   }
-  const { selectedFieldKeys, selectedSnippetIds, additionalNote } = parsed.data;
+  const {
+    selectedFieldKeys,
+    selectedSnippetIds,
+    additionalNote,
+    launchIntent: rawLaunchIntent,
+  } = parsed.data;
+  const launchIntent =
+    typeof rawLaunchIntent === "string" && rawLaunchIntent.trim().length > 0
+      ? rawLaunchIntent.trim()
+      : null;
 
   // Ensure an active preset exists and use its snapshot as the profile basis;
   // RAG is scoped to the preset's documents so launches stay within mission.
@@ -199,6 +358,15 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   // render without a follow-up round trip.
   const contextBlockRow = await getOrCreateContextBlock(req.user!.id);
   const cbVersion = contextBlockRow.version ?? 1;
+  // Compute the doctrine scope once — used for RAG selection (when the
+  // client didn't send selectedSnippetIds) and for badging the persisted
+  // snippets (so the audit row records which hits came from selected
+  // doctrine vs the preset fallback).
+  const ragScope = resolveLaunchRagScope(
+    contextBlockRow.doctrine,
+    ctx.documentIds,
+  );
+  const selectedDoctrineSet = new Set(ragScope.selectedDoctrineDocIds);
   const gateNow = new Date();
   const validAffirmation = await loadValidAffirmation(
     req.user!.id,
@@ -249,24 +417,21 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   // selected snippets. Otherwise, look up the requested chunk IDs (scoped to
   // this user + preset doc set so a caller can't peek at someone else's
   // library or snippets outside the active mission).
+  //
+  // Task #88: when the client sent a launchIntent with selectedSnippetIds=null,
+  // we use the same intent-led, doctrine-scoped RAG path as the preview so the
+  // operator gets back exactly what they were shown.
   let sharedSnippets: LaunchSharedSnippet[] = [];
   try {
     if (selectedSnippetIds == null) {
-      const queries = await generateRagQueries(snapshotProfile, {
-        name: tool.name,
-        vendor: tool.vendor,
-        shortDescription: tool.shortDescription,
-        longDescription: tool.longDescription,
-        purpose: tool.purpose,
-        ragQueryTemplates: tool.ragQueryTemplates,
+      const result = await runLaunchRag({
+        userId: req.user!.id,
+        tool,
+        snapshotProfile,
+        scope: ragScope,
+        intent: launchIntent,
       });
-      sharedSnippets = await searchChunksMultiQuery(
-        req.user!.id,
-        queries,
-        4,
-        12,
-        { documentIds: ctx.documentIds },
-      );
+      sharedSnippets = result.snippets;
     } else if (selectedSnippetIds.length > 0) {
       const presetDocIds = new Set(ctx.documentIds);
       const rows = await db
@@ -303,6 +468,7 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
           chunkIndex: r.chunkIndex,
           content: r.content,
           score: 0,
+          fromSelectedDoctrine: selectedDoctrineSet.has(r.documentId),
         }));
     }
   } catch (err) {
@@ -328,6 +494,9 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
       sharedFieldKeys,
       sharedSnippets,
       additionalNote: note,
+      // Task #88: persist the operator's intent so audits / dashboards
+      // can show what task drove this launch's RAG.
+      launchIntent,
       presetId: preset.id,
       contextBlockVersion: cbVersion,
       affirmedAt: validAffirmation.affirmedAt,
@@ -616,6 +785,11 @@ router.post("/tools/context-exchange", async (req, res) => {
     // are intentionally empty here because we did not re-run RAG.
     primer: { queries: [], snippets },
     additionalNote: launch.additionalNote ?? null,
+    // Task #88: surface the operator's launch-time intent to the
+    // receiving tool so it can lead its UX with the operator's question
+    // (e.g. brief-drafter pre-filling the topic field, or a chat tool
+    // pre-populating its first user turn).
+    launchIntent: launch.launchIntent ?? null,
     sharedFieldKeys,
   });
 });
@@ -765,6 +939,7 @@ router.get("/launches/recent", requireAuth, async (req, res) => {
       sharedFieldKeys: launchesTable.sharedFieldKeys,
       sharedSnippets: launchesTable.sharedSnippets,
       additionalNote: launchesTable.additionalNote,
+      launchIntent: launchesTable.launchIntent,
     })
     .from(launchesTable)
     .innerJoin(toolsTable, eq(launchesTable.toolId, toolsTable.id))
@@ -783,6 +958,7 @@ router.get("/launches/recent", requireAuth, async (req, res) => {
       sharedFieldKeys: r.sharedFieldKeys ?? [],
       sharedSnippets: r.sharedSnippets ?? [],
       additionalNote: r.additionalNote ?? null,
+      launchIntent: r.launchIntent ?? null,
     })),
   );
 });

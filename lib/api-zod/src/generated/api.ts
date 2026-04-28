@@ -1418,6 +1418,7 @@ export const TestLibraryQueryResponse = zod.object({
       chunkIndex: zod.number(),
       content: zod.string(),
       score: zod.number(),
+      fromSelectedDoctrine: zod.boolean().optional(),
     }),
   ),
 });
@@ -1633,6 +1634,14 @@ export const PreviewLaunchContextParams = zod.object({
   toolId: zod.coerce.string(),
 });
 
+export const PreviewLaunchContextBody = zod
+  .object({
+    launchIntent: zod.string().nullish(),
+  })
+  .describe(
+    "Optional body for \/launch-preview (Task #88). When `launchIntent` is present the operator's free-form sentence becomes the primary RAG query and steers which snippets are surfaced; the marketplace debounces the typing so we only re-run the search once the operator pauses.\n",
+  );
+
 export const PreviewLaunchContextResponse = zod.object({
   tool: zod.object({
     id: zod.string(),
@@ -1656,10 +1665,14 @@ export const PreviewLaunchContextResponse = zod.object({
       chunkIndex: zod.number(),
       content: zod.string(),
       score: zod.number(),
+      fromSelectedDoctrine: zod.boolean().optional(),
     }),
   ),
   queries: zod.array(zod.string()),
   launchPreference: zod.enum(["preview", "direct"]),
+  launchIntent: zod.string().nullable(),
+  selectedDoctrineDocIds: zod.array(zod.string()),
+  scopedToSelectedDoctrine: zod.boolean(),
 });
 
 /**
@@ -1679,6 +1692,7 @@ export const LaunchToolBody = zod.object({
     .union([zod.array(zod.string()), zod.null()])
     .optional(),
   additionalNote: zod.string().nullish(),
+  launchIntent: zod.string().nullish(),
 });
 
 export const LaunchToolResponse = zod.object({
@@ -1879,10 +1893,12 @@ export const ExchangeContextTokenResponse = zod.object({
         chunkIndex: zod.number(),
         content: zod.string(),
         score: zod.number(),
+        fromSelectedDoctrine: zod.boolean().optional(),
       }),
     ),
   }),
   additionalNote: zod.string().nullable(),
+  launchIntent: zod.string().nullable(),
   sharedFieldKeys: zod.array(zod.string()),
 });
 
@@ -1906,6 +1922,7 @@ export const QueryLibraryResponse = zod.object({
       chunkIndex: zod.number(),
       content: zod.string(),
       score: zod.number(),
+      fromSelectedDoctrine: zod.boolean().optional(),
     }),
   ),
 });
@@ -1944,6 +1961,7 @@ export const DraftBriefResponse = zod.object({
         chunkIndex: zod.number(),
         content: zod.string(),
         score: zod.number(),
+        fromSelectedDoctrine: zod.boolean().optional(),
       }),
     )
     .describe("Snippets the model was asked to draw on."),
@@ -1968,9 +1986,11 @@ export const ListRecentLaunchesResponseItem = zod.object({
       chunkIndex: zod.number(),
       content: zod.string(),
       score: zod.number(),
+      fromSelectedDoctrine: zod.boolean().optional(),
     }),
   ),
   additionalNote: zod.string().nullable(),
+  launchIntent: zod.string().nullable(),
 });
 export const ListRecentLaunchesResponse = zod.array(
   ListRecentLaunchesResponseItem,
@@ -2965,9 +2985,11 @@ export const GetDashboardSummaryResponse = zod.object({
           chunkIndex: zod.number(),
           content: zod.string(),
           score: zod.number(),
+          fromSelectedDoctrine: zod.boolean().optional(),
         }),
       ),
       additionalNote: zod.string().nullable(),
+      launchIntent: zod.string().nullable(),
     }),
   ),
   atoStatusBreakdown: zod.array(

@@ -24,5 +24,7 @@ export interface ContextExchangeResponse {
   primer: RagPrimer;
   /** @nullable */
   additionalNote: string | null;
+  /** @nullable */
+  launchIntent: string | null;
   sharedFieldKeys: string[];
 }

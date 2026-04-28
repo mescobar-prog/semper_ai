@@ -13,4 +13,5 @@ export interface RagSnippet {
   chunkIndex: number;
   content: string;
   score: number;
+  fromSelectedDoctrine?: boolean;
 }

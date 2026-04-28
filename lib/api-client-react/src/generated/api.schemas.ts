@@ -797,6 +797,7 @@ export interface RagSnippet {
   chunkIndex: number;
   content: string;
   score: number;
+  fromSelectedDoctrine?: boolean;
 }
 
 export interface LibraryTestQueryResponse {
@@ -809,6 +810,15 @@ export interface LaunchPreviewProfileField {
   label: string;
   value: string;
   hasValue: boolean;
+}
+
+/**
+ * Optional body for /launch-preview (Task #88). When `launchIntent` is present the operator's free-form sentence becomes the primary RAG query and steers which snippets are surfaced; the marketplace debounces the typing so we only re-run the search once the operator pauses.
+
+ */
+export interface LaunchPreviewRequest {
+  /** @nullable */
+  launchIntent?: string | null;
 }
 
 export type LaunchPreviewResponseTool = {
@@ -832,6 +842,10 @@ export interface LaunchPreviewResponse {
   candidateSnippets: RagSnippet[];
   queries: string[];
   launchPreference: LaunchPreviewResponseLaunchPreference;
+  /** @nullable */
+  launchIntent: string | null;
+  selectedDoctrineDocIds: string[];
+  scopedToSelectedDoctrine: boolean;
 }
 
 export interface LaunchToolRequest {
@@ -839,6 +853,8 @@ export interface LaunchToolRequest {
   selectedSnippetIds?: string[] | null;
   /** @nullable */
   additionalNote?: string | null;
+  /** @nullable */
+  launchIntent?: string | null;
 }
 
 export type LaunchInitiateResponseHostingType =
@@ -1001,6 +1017,8 @@ export interface ContextExchangeResponse {
   primer: RagPrimer;
   /** @nullable */
   additionalNote: string | null;
+  /** @nullable */
+  launchIntent: string | null;
   sharedFieldKeys: string[];
 }
 
@@ -1104,6 +1122,8 @@ export interface LaunchHistoryItem {
   sharedSnippets: RagSnippet[];
   /** @nullable */
   additionalNote: string | null;
+  /** @nullable */
+  launchIntent: string | null;
 }
 
 export interface UploadUrlRequest {

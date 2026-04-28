@@ -30,6 +30,14 @@ export interface RagSnippet {
   source?: "semantic" | "fts";
   /** Heading trail recorded at chunk time, if any. */
   headingTrail?: string | null;
+  /**
+   * True when this snippet's documentId is one of the doctrine docs the
+   * operator explicitly ticked in their Context Block at launch time
+   * (Task #88). Lets the launch preview UI badge "from your selected
+   * doctrine" vs "from preset library (fallback)". Optional because most
+   * RAG callers (library-query, brief drafter) don't compute this.
+   */
+  fromSelectedDoctrine?: boolean;
 }
 
 // Tokenize an arbitrary user/LLM query string into space-separated keywords
@@ -232,12 +240,30 @@ async function ftsSearch(
   );
 }
 
+export interface MultiQueryOptions extends SearchOptions {
+  /**
+   * Minimum score a snippet must clear to be returned in the merged list.
+   * Applies post-merge so weak hits — including ones that beat the
+   * per-query similarity floor in `searchChunks` but still don't carry
+   * useful signal at the launch level — don't crowd out stronger ones.
+   * Defaults to 0 (off) so existing callers don't change behavior.
+   */
+  minScore?: number;
+  /**
+   * Cap on how many snippets can come from the same document, applied
+   * after sorting by score. Prevents a single document from dominating
+   * the operator's launch primer when its text happens to keyword-match
+   * many of the generated queries.
+   */
+  perDocumentCap?: number;
+}
+
 export async function searchChunksMultiQuery(
   userId: string,
   queries: string[],
   perQuery = 4,
   totalLimit = 12,
-  opts: SearchOptions = {},
+  opts: MultiQueryOptions = {},
 ): Promise<RagSnippet[]> {
   const all = await Promise.all(
     queries.map((q) => searchChunks(userId, q, perQuery, opts)),
@@ -258,5 +284,26 @@ export async function searchChunksMultiQuery(
   // we don't typically mix the two within one merged list (semantic returns
   // first when available, FTS only when it falls back).
   merged.sort((a, b) => b.score - a.score);
-  return merged.slice(0, totalLimit);
+
+  // Apply optional post-merge filters (Task #88): a relevance floor strips
+  // weak hits that snuck through the per-query top-K, and a per-document
+  // cap stops one chatty document from monopolising the primer slots.
+  let filtered = merged;
+  if (opts.minScore !== undefined) {
+    const floor = opts.minScore;
+    filtered = filtered.filter((s) => s.score >= floor);
+  }
+  if (opts.perDocumentCap !== undefined && opts.perDocumentCap > 0) {
+    const cap = opts.perDocumentCap;
+    const perDoc = new Map<string, number>();
+    const capped: RagSnippet[] = [];
+    for (const s of filtered) {
+      const n = perDoc.get(s.documentId) ?? 0;
+      if (n >= cap) continue;
+      perDoc.set(s.documentId, n + 1);
+      capped.push(s);
+    }
+    filtered = capped;
+  }
+  return filtered.slice(0, totalLimit);
 }

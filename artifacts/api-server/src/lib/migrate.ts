@@ -163,6 +163,7 @@ export async function runProfileSplitMigration(): Promise<void> {
       ADD COLUMN IF NOT EXISTS shared_field_keys jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS shared_snippets jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS additional_note text,
+      ADD COLUMN IF NOT EXISTS launch_intent text,
       ADD COLUMN IF NOT EXISTS preset_id varchar,
       ADD COLUMN IF NOT EXISTS context_block_version integer,
       ADD COLUMN IF NOT EXISTS affirmed_at timestamp with time zone

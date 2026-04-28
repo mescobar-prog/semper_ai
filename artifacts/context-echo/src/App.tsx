@@ -196,7 +196,8 @@ function ContextEchoPage() {
     );
   }
 
-  const { tool, user, profile, primer, sessionExpiresAt } = state.data;
+  const { tool, user, profile, primer, sessionExpiresAt, launchIntent } =
+    state.data;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -236,6 +237,19 @@ function ContextEchoPage() {
             on your behalf. Session token expires{" "}
             {new Date(sessionExpiresAt).toLocaleTimeString()}.
           </p>
+          {launchIntent && (
+            <div className="mb-6 rounded-lg border border-sky-500/30 bg-sky-500/5 px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wider text-sky-300 font-semibold mb-1">
+                Launch intent
+              </div>
+              <div className="text-sm text-slate-200 whitespace-pre-wrap">
+                {launchIntent}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                The operator's question that drove the primer search below.
+              </div>
+            </div>
+          )}
           <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
             <Field label="Authenticated as" value={user.displayName} />
             <Field label="Email" value={user.email} />

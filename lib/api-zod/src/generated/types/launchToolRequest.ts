@@ -11,4 +11,6 @@ export interface LaunchToolRequest {
   selectedSnippetIds?: string[] | null;
   /** @nullable */
   additionalNote?: string | null;
+  /** @nullable */
+  launchIntent?: string | null;
 }

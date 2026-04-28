@@ -117,7 +117,14 @@ function BriefDrafterPage() {
       return;
     }
     exchangeContextToken({ launchToken: token })
-      .then((data) => setState({ status: "ready", data }))
+      .then((data) => {
+        setState({ status: "ready", data });
+        // Task #88: pre-fill the topic with the operator's launch intent
+        // so they don't have to retype what they already told the marketplace.
+        if (data.launchIntent) {
+          setTopic((prev) => (prev.trim() ? prev : data.launchIntent ?? ""));
+        }
+      })
       .catch((err: unknown) => {
         const message =
           err instanceof Error ? err.message : "Token exchange failed";
@@ -215,7 +222,8 @@ function BriefDrafterPage() {
     );
   }
 
-  const { tool, user, profile, primer, sessionExpiresAt } = state.data;
+  const { tool, user, profile, primer, sessionExpiresAt, launchIntent } =
+    state.data;
 
   const profileSummaryParts: string[] = [];
   if (profile.rank) profileSummaryParts.push(profile.rank);
@@ -260,6 +268,21 @@ function BriefDrafterPage() {
             {primer.snippets.length} primer snippet
             {primer.snippets.length === 1 ? "" : "s"} from your library
           </p>
+
+          {launchIntent && (
+            <div className="mb-6 rounded-lg border border-sky-500/30 bg-sky-500/5 px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wider text-sky-300 font-semibold mb-1">
+                Launch intent received
+              </div>
+              <div className="text-sm text-slate-200 whitespace-pre-wrap">
+                {launchIntent}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                Pre-filled into the topic field below — edit it before drafting
+                if you want to refine.
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleDraft} className="space-y-5">
             <div>

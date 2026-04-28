@@ -45,6 +45,11 @@ export const launchesTable = pgTable(
       .default(sql`'[]'::jsonb`),
     // Optional freeform note the user appended at preview time.
     additionalNote: text("additional_note"),
+    // Optional "What will you ask this tool?" intent the operator typed on
+    // the launch screen (Task #88). When present this string drove the RAG
+    // primary query, so persisting it next to the audit-time snippets lets
+    // admins / auditors see what task drove the search.
+    launchIntent: text("launch_intent"),
     // ----- Launch-time affirmation audit (Task #45) -----------------------
     // The active mission preset and the context-block version that the user
     // affirmed-current at the moment we minted this launch token. Persisted

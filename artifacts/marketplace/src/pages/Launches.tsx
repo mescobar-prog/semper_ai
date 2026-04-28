@@ -100,6 +100,17 @@ function LaunchRow({ launch: l }: { launch: LaunchHistoryItem }) {
       </div>
 
       <div className="px-5 py-3 space-y-3 text-xs">
+        {l.launchIntent && (
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+              Operator's question
+            </div>
+            <div className="text-foreground whitespace-pre-wrap">
+              {l.launchIntent}
+            </div>
+          </div>
+        )}
+
         <div>
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
             Profile fields shared ({fields.length})

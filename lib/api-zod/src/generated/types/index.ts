@@ -71,6 +71,7 @@ export * from "./launchInitiateResponseHostingType";
 export * from "./launchNeedsAffirmation";
 export * from "./launchNeedsAffirmationCode";
 export * from "./launchPreviewProfileField";
+export * from "./launchPreviewRequest";
 export * from "./launchPreviewResponse";
 export * from "./launchPreviewResponseLaunchPreference";
 export * from "./launchPreviewResponseTool";

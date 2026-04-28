@@ -18,4 +18,6 @@ export interface LaunchHistoryItem {
   sharedSnippets: RagSnippet[];
   /** @nullable */
   additionalNote: string | null;
+  /** @nullable */
+  launchIntent: string | null;
 }

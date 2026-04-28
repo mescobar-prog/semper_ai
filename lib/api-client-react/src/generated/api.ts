@@ -63,6 +63,7 @@ import type {
   LaunchHistoryItem,
   LaunchInitiateResponse,
   LaunchNeedsAffirmation,
+  LaunchPreviewRequest,
   LaunchPreviewResponse,
   LaunchToolRequest,
   LibraryQueryRequest,
@@ -3730,6 +3731,7 @@ export const getPreviewLaunchContextUrl = (toolId: string) => {
 
 export const previewLaunchContext = async (
   toolId: string,
+  launchPreviewRequest?: LaunchPreviewRequest,
   options?: RequestInit,
 ): Promise<LaunchPreviewResponse> => {
   return customFetch<LaunchPreviewResponse>(
@@ -3737,6 +3739,8 @@ export const previewLaunchContext = async (
     {
       ...options,
       method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(launchPreviewRequest),
     },
   );
 };
@@ -3748,14 +3752,14 @@ export const getPreviewLaunchContextMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewLaunchContext>>,
     TError,
-    { toolId: string },
+    { toolId: string; data: BodyType<LaunchPreviewRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof previewLaunchContext>>,
   TError,
-  { toolId: string },
+  { toolId: string; data: BodyType<LaunchPreviewRequest> },
   TContext
 > => {
   const mutationKey = ["previewLaunchContext"];
@@ -3769,11 +3773,11 @@ export const getPreviewLaunchContextMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof previewLaunchContext>>,
-    { toolId: string }
+    { toolId: string; data: BodyType<LaunchPreviewRequest> }
   > = (props) => {
-    const { toolId } = props ?? {};
+    const { toolId, data } = props ?? {};
 
-    return previewLaunchContext(toolId, requestOptions);
+    return previewLaunchContext(toolId, data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -3782,7 +3786,7 @@ export const getPreviewLaunchContextMutationOptions = <
 export type PreviewLaunchContextMutationResult = NonNullable<
   Awaited<ReturnType<typeof previewLaunchContext>>
 >;
-
+export type PreviewLaunchContextMutationBody = BodyType<LaunchPreviewRequest>;
 export type PreviewLaunchContextMutationError = ErrorType<ErrorEnvelope>;
 
 /**
@@ -3795,14 +3799,14 @@ export const usePreviewLaunchContext = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewLaunchContext>>,
     TError,
-    { toolId: string },
+    { toolId: string; data: BodyType<LaunchPreviewRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof previewLaunchContext>>,
   TError,
-  { toolId: string },
+  { toolId: string; data: BodyType<LaunchPreviewRequest> },
   TContext
 > => {
   return useMutation(getPreviewLaunchContextMutationOptions(options));

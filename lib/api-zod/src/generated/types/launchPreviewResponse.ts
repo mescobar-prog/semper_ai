@@ -16,4 +16,8 @@ export interface LaunchPreviewResponse {
   candidateSnippets: RagSnippet[];
   queries: string[];
   launchPreference: LaunchPreviewResponseLaunchPreference;
+  /** @nullable */
+  launchIntent: string | null;
+  selectedDoctrineDocIds: string[];
+  scopedToSelectedDoctrine: boolean;
 }
