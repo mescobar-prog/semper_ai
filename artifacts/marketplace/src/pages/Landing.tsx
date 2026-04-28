@@ -60,8 +60,8 @@ export function Landing() {
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl leading-relaxed mb-10">
           Discover authorized AI tools with full ATO transparency. Build a
-          structured profile and a personal RAG library once — every tool you
-          launch receives mission-relevant context the moment you open it.
+          structured profile and a personal knowledge base once — every tool
+          you launch receives mission-relevant context the moment you open it.
         </p>
         <div className="flex items-center gap-4">
           <a
@@ -80,7 +80,7 @@ export function Landing() {
       </div>
 
       <div id="how" className="relative border-t border-border bg-card/30">
-        <div className="max-w-5xl mx-auto px-8 py-20 grid md:grid-cols-3 gap-10">
+        <div className="max-w-5xl mx-auto px-8 py-20 grid md:grid-cols-2 lg:grid-cols-4 gap-10">
           {[
             {
               n: "01",
@@ -89,13 +89,18 @@ export function Landing() {
             },
             {
               n: "02",
-              t: "Upload your RAG library",
-              d: "Drop in TTPs, SOPs, mission briefs, OPORDs, study materials. The library is indexed and searchable across every tool launch.",
+              t: "Upload your knowledge base",
+              d: "Drop in TTPs, SOPs, mission briefs, OPORDs, study materials. Every tool launch searches this library on your behalf.",
             },
             {
               n: "03",
-              t: "Launch with full context",
-              d: "Every authorized tool you open receives your profile and the relevant snippets from your library. No copy-pasting context into every new session.",
+              t: "Define your context",
+              d: "Spell out the mission, audience, constraints, and success criteria for the work you're about to do. The Context Block ships with every launch so tools never have to guess.",
+            },
+            {
+              n: "04",
+              t: "Launch with context",
+              d: "Every authorized tool you open receives your profile, your Context Block, and the relevant snippets from your library. No copy-pasting context into every new session.",
             },
           ].map((step) => (
             <div key={step.n}>

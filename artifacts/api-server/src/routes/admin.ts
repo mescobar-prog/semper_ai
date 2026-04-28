@@ -959,7 +959,7 @@ router.put(
           "GCS chunk PUT failed",
         );
         res.status(502).json({
-          error: `Storage chunk upload failed (HTTP ${result.status})`,
+          error: `Storage chunk upload failed — please retry.`,
         });
         return;
       }

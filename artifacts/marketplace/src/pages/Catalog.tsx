@@ -180,10 +180,10 @@ export function Catalog() {
           6-Element Context Block
         </h1>
         <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-          Tools may not be launched until the Semantic NLP Evaluator scores
-          your Context Block at <span className="font-mono">10/12</span> or
-          higher and confirms no OPSEC violations. The confirmed block ships
-          with every tool launch.
+          Tools may not be launched until the Evaluator Agent scores your
+          Context Block at <span className="font-mono">10/12</span> or higher
+          and confirms no OPSEC violations. The confirmed block ships with
+          every tool launch.
         </p>
       </div>
 

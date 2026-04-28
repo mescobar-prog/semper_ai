@@ -48,7 +48,9 @@ async function fetchDocBytes(
       },
     });
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+      throw new Error(
+        resp.statusText?.trim() ? resp.statusText : "Request failed",
+      );
     }
     const arr = new Uint8Array(await resp.arrayBuffer());
     if (arr.byteLength > MAX_DOC_BYTES) {

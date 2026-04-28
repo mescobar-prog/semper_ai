@@ -52,8 +52,8 @@ export function Dashboard() {
       </div>
 
       {isLoading || !summary ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+          {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}
               className="bg-card border border-border rounded-md h-24 animate-pulse"
@@ -62,7 +62,7 @@ export function Dashboard() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
             <StatCard
               label="Profile completeness"
               value={`${summary.profileCompletenessPct}%`}
@@ -78,10 +78,8 @@ export function Dashboard() {
             <StatCard
               label="Library documents"
               value={summary.libraryDocumentCount}
-              hint={`${summary.libraryChunkCount.toLocaleString()} indexed chunks`}
             />
             <StatCard label="Favorited tools" value={summary.favoritesCount} />
-            <StatCard label="Total launches" value={summary.launchCount} />
           </div>
 
           <div className="grid lg:grid-cols-3 gap-6">

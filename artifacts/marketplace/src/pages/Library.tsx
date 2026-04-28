@@ -397,14 +397,13 @@ export function Library() {
       <div className="mb-8 flex items-end justify-between gap-6">
         <div>
           <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
-            RAG Library
+            Knowledge Base
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">
             Personal knowledge base
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Documents are chunked and full-text indexed. Every tool launch
-            queries this library on your behalf.
+            Every tool launch searches this library on your behalf.
           </p>
         </div>
         <button
@@ -422,16 +421,8 @@ export function Library() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="mb-8 max-w-xs">
         <StatCard label="Documents" value={stats?.documentCount ?? "—"} />
-        <StatCard
-          label="Indexed chunks"
-          value={stats?.chunkCount.toLocaleString() ?? "—"}
-        />
-        <StatCard
-          label="Total content"
-          value={stats ? formatBytes(stats.totalChars) : "—"}
-        />
       </div>
 
       {showUpload && (
@@ -703,14 +694,10 @@ export function Library() {
                           </>
                         )}
                       </div>
-                      {presetList.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {(d.presetIds ?? []).length === 0 ? (
-                            <span className="text-[10px] font-mono text-rose-400/80 uppercase tracking-wider">
-                              Untagged · not in any preset
-                            </span>
-                          ) : (
-                            (d.presetIds ?? []).map((pid) => {
+                      {presetList.length > 0 &&
+                        (d.presetIds ?? []).length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {(d.presetIds ?? []).map((pid) => {
                               const p = presetList.find((x) => x.id === pid);
                               if (!p) return null;
                               return (
@@ -725,16 +712,11 @@ export function Library() {
                                   {p.name}
                                 </span>
                               );
-                            })
-                          )}
-                        </div>
-                      )}
+                            })}
+                          </div>
+                        )}
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
-                      <Pill tone="neutral">{d.chunkCount} chunks</Pill>
-                      <span className="text-[11px] font-mono text-muted-foreground">
-                        {formatBytes(d.charCount || d.sizeBytes)}
-                      </span>
                       <span data-testid={`doc-status-${d.id}`}>
                         <Pill tone={statusTone(d.status)}>
                           {statusLabel(d.status)}

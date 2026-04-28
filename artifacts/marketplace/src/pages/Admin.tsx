@@ -1531,14 +1531,14 @@ async function pushInstallerChunk(
     throw new Error(
       typeof (data as { error?: string }).error === "string"
         ? (data as { error?: string }).error!
-        : `Upload chunk rejected (HTTP 409)`,
+        : `Upload chunk rejected — server reported a conflict.`,
     );
   }
   if (!response.ok) {
     const data = (await response.json().catch(() => ({}))) as {
       error?: string;
     };
-    throw new Error(data.error ?? `Upload chunk failed (HTTP ${response.status})`);
+    throw new Error(data.error ?? `Upload chunk failed — please retry.`);
   }
   const data = (await response.json()) as ChunkResponse;
   return { kind: "ok", data };
