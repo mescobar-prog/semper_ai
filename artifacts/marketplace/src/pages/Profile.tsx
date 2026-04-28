@@ -40,6 +40,13 @@ import {
   listUnitsForBranch,
 } from "@workspace/mil-data";
 import { PageContainer, ErrorBox, formatDate } from "@/lib/format";
+import {
+  ExportMenu,
+  ImportControl,
+  ImportMessageBanner,
+  parseProfileImport,
+  type ImportMessage,
+} from "@/lib/profileIo";
 
 const BRANCHES = MIL_BRANCHES.map((b) => b.label);
 const CLEARANCES = [
@@ -202,6 +209,66 @@ export function Profile() {
     queueSave({ ...draft, ...suggestion });
   };
 
+  const [importMessage, setImportMessage] = useState<ImportMessage | null>(
+    null,
+  );
+
+  const importProfileFile = useCallback(
+    async (file: File) => {
+      setImportMessage(null);
+      const isJson =
+        file.type === "application/json" ||
+        file.name.toLowerCase().endsWith(".json");
+      if (!isJson) {
+        setImportMessage({
+          kind: "error",
+          text: "Profile import expects a .json file. Other file types are not supported.",
+        });
+        return;
+      }
+      let text: string;
+      try {
+        text = await file.text();
+      } catch {
+        setImportMessage({
+          kind: "error",
+          text: "Could not read the selected file.",
+        });
+        return;
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        setImportMessage({
+          kind: "error",
+          text: "File is not valid JSON.",
+        });
+        return;
+      }
+      const parsed = parseProfileImport(json);
+      if (!parsed.ok) {
+        setImportMessage({ kind: "error", text: parsed.error });
+        return;
+      }
+      // Apply through the same debounced save path the form uses, so the
+      // version-guard in `flush` discards stale in-flight responses and the
+      // "Saving…" / "Saved · …" status reflects the import.
+      const baseDraft = pendingDraftRef.current ?? draft;
+      const nextDraft: ProfileUpdate = baseDraft
+        ? { ...baseDraft, ...parsed.profile }
+        : { ...parsed.profile };
+      queueSave(nextDraft);
+      setImportMessage({
+        kind: "notice",
+        text: parsed.hasContextBlock
+          ? "Profile fields imported. The file also contained a Context Block — import that on the 6-Element Context Block page."
+          : "Profile fields imported. Changes save automatically.",
+      });
+    },
+    [draft, queueSave],
+  );
+
   const exportProfile = useCallback(
     async (format: "md" | "json") => {
       // Flush any pending debounced save so the export reflects the latest edits.
@@ -268,7 +335,10 @@ export function Profile() {
         </div>
         {profile && (
           <div className="flex items-end gap-5">
-            <ExportMenu onExport={exportProfile} />
+            <div className="flex items-center gap-2">
+              <ExportMenu onExport={exportProfile} />
+              <ImportControl onFile={importProfileFile} />
+            </div>
             <div className="text-right">
               <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                 Completeness
@@ -286,6 +356,11 @@ export function Profile() {
           </div>
         )}
       </div>
+
+      <ImportMessageBanner
+        message={importMessage}
+        onDismiss={() => setImportMessage(null)}
+      />
 
       <div className="grid lg:grid-cols-5 gap-6">
         <section className="lg:col-span-3 bg-card border border-border rounded-md p-5">
@@ -997,93 +1072,6 @@ function BilletsEditor({
           Add
         </button>
       </div>
-    </div>
-  );
-}
-
-function ExportMenu({
-  onExport,
-}: {
-  onExport: (format: "md" | "json") => void | Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const choose = (fmt: "md" | "json") => {
-    setOpen(false);
-    void onExport(fmt);
-  };
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-background hover:bg-accent text-sm font-medium"
-      >
-        Export
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-          aria-hidden="true"
-          className="opacity-70"
-        >
-          <path
-            d="M2 3.5l3 3 3-3"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 mt-1 w-48 rounded-md border border-border bg-card shadow-lg z-10 py-1"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose("md")}
-            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent flex items-center justify-between"
-          >
-            <span>Markdown</span>
-            <span className="text-[10px] font-mono text-muted-foreground">
-              .md
-            </span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose("json")}
-            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent flex items-center justify-between"
-          >
-            <span>JSON</span>
-            <span className="text-[10px] font-mono text-muted-foreground">
-              .json
-            </span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }

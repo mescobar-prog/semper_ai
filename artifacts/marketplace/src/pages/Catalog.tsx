@@ -23,6 +23,14 @@ import type {
 } from "@workspace/api-client-react";
 import { parseAutoSource } from "@workspace/mil-data";
 import { PageContainer, ErrorBox, Pill, formatBytes } from "@/lib/format";
+import {
+  ExportMenu,
+  ImportControl,
+  ImportMessageBanner,
+  contextBlockToMarkdown,
+  parseContextBlockImport,
+  type ImportMessage,
+} from "@/lib/profileIo";
 
 // ---------- Doctrine picker — text-region helpers --------------------------
 //
@@ -288,22 +296,130 @@ export function Catalog() {
   const isGo = evaluation?.status === "GO" && !evaluation.opsecFlag;
   const canConfirm = isGo && !evaluationStale && allFilled && !confirming;
 
+  const [importMessage, setImportMessage] = useState<ImportMessage | null>(
+    null,
+  );
+
+  const exportContextBlock = useCallback(
+    (format: "md" | "json") => {
+      const date = new Date().toISOString().slice(0, 10);
+      // Use the live editor `fields` for the six values so unsaved edits are
+      // captured. The metadata block (confirmedAt / lastEvaluation / version)
+      // reflects the persisted server state — those only update on confirm.
+      let content: string;
+      let mime: string;
+      let ext: string;
+      if (format === "md") {
+        content = contextBlockToMarkdown(fields, cb ?? null);
+        mime = "text/markdown;charset=utf-8";
+        ext = "md";
+      } else {
+        const payload = {
+          contextBlock: {
+            ...fields,
+            confirmedAt: cb?.confirmedAt ?? null,
+            version: cb?.version ?? null,
+            lastEvaluation: cb?.lastEvaluation ?? null,
+          },
+        };
+        content = JSON.stringify(payload, null, 2);
+        mime = "application/json;charset=utf-8";
+        ext = "json";
+      }
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `context-block-${date}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    [fields, cb],
+  );
+
+  const importContextBlock = useCallback(
+    async (file: File) => {
+      setImportMessage(null);
+      const isJson =
+        file.type === "application/json" ||
+        file.name.toLowerCase().endsWith(".json");
+      if (!isJson) {
+        setImportMessage({
+          kind: "error",
+          text: "Context Block import expects a .json file. Other file types are not supported.",
+        });
+        return;
+      }
+      let text: string;
+      try {
+        text = await file.text();
+      } catch {
+        setImportMessage({
+          kind: "error",
+          text: "Could not read the selected file.",
+        });
+        return;
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        setImportMessage({
+          kind: "error",
+          text: "File is not valid JSON.",
+        });
+        return;
+      }
+      const parsed = parseContextBlockImport(json);
+      if (!parsed.ok) {
+        setImportMessage({ kind: "error", text: parsed.error });
+        return;
+      }
+      // Load the six fields into the editor as unsaved edits. We deliberately
+      // leave `evaluation` and `evaluatedSnapshot` untouched so the existing
+      // staleness detector flags the imported values as "Changed —
+      // re-evaluate". The operator must Evaluate + Confirm to commit.
+      setFields(parsed.fields);
+      setError(null);
+      setImportMessage({
+        kind: "notice",
+        text: parsed.hasProfile
+          ? "Context Block fields loaded into the editor. The file also contained an operator profile — import that on the Operator Profile page. Evaluate and Confirm to commit."
+          : "Context Block fields loaded into the editor. Evaluate and Confirm to commit.",
+      });
+    },
+    [],
+  );
+
   return (
     <PageContainer>
-      <div className="mb-8">
-        <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
-          Catalog · Verification Gate
+      <div className="mb-8 flex items-end justify-between gap-6">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
+            Catalog · Verification Gate
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight">
+            6-Element Context Block
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
+            Tools may not be launched until the Evaluator Agent scores your
+            Context Block at <span className="font-mono">10/12</span> or higher
+            and confirms no OPSEC violations. The confirmed block ships with
+            every tool launch.
+          </p>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">
-          6-Element Context Block
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-          Tools may not be launched until the Evaluator Agent scores your
-          Context Block at <span className="font-mono">10/12</span> or higher
-          and confirms no OPSEC violations. The confirmed block ships with
-          every tool launch.
-        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <ExportMenu onExport={exportContextBlock} />
+          <ImportControl onFile={importContextBlock} />
+        </div>
       </div>
+
+      <ImportMessageBanner
+        message={importMessage}
+        onDismiss={() => setImportMessage(null)}
+      />
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-6">
         <div className="space-y-4">
