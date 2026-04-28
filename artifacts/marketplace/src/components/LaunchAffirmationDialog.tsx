@@ -118,7 +118,7 @@ export function LaunchAffirmationDialog({
         <DialogHeader>
           <DialogTitle>Confirm your context before launching</DialogTitle>
           <DialogDescription>
-            Tools see this snapshot of your active mission preset. Confirm it
+            Tools see this snapshot of your active profile preset. Confirm it
             still reflects today's mission, environment, and constraints
             before we mint a launch token.
           </DialogDescription>
