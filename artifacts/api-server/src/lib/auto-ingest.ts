@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   db,
   documentsTable,
@@ -16,8 +16,9 @@ import {
   type DoctrineEntry,
 } from "@workspace/mil-data";
 import { extractDocumentText } from "./document-extract";
-import { chunkText } from "./rag";
+import { chunkText } from "./chunker";
 import { ingestChunks } from "./chunk-ingest";
+import type { Chunk } from "./chunker";
 import { logger } from "./logger";
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -64,6 +65,44 @@ async function fetchDocBytes(
   }
 }
 
+/**
+ * Fetch + extract + chunk one doctrine URL. Returns the chunks and the
+ * resolved metadata, or throws with a user-facing message on any failure
+ * along the way (network, extraction, empty text, zero chunks).
+ *
+ * Used by both the initial ingest path and the single-doc retry path so
+ * both behave identically (same fetch, same limits, same extraction).
+ */
+async function fetchAndExtract(
+  url: string,
+  sourceFilename: string,
+  mimeTypeHint?: string,
+): Promise<{
+  buffer: Buffer;
+  mimeType: string;
+  text: string;
+  chunks: Chunk[];
+}> {
+  const { buffer, contentType } = await fetchDocBytes(url);
+  const mime = contentType || mimeTypeHint || "application/pdf";
+  const extracted = await extractDocumentText({
+    buffer,
+    mimeType: mime,
+    sourceFilename,
+  });
+  const text = extracted.text.trim();
+  if (text.length === 0) {
+    throw new Error(
+      "No extractable text (the PDF is likely scanned images).",
+    );
+  }
+  const chunks = chunkText(text);
+  if (chunks.length === 0) {
+    throw new Error("Document chunked to zero pieces");
+  }
+  return { buffer, mimeType: extracted.mimeType, text, chunks };
+}
+
 async function ingestOne(
   userId: string,
   autoSource: string,
@@ -87,30 +126,18 @@ async function ingestOne(
     entry.url.split("/").pop()?.split("?")[0] || "doctrine.pdf";
 
   try {
-    const { buffer, contentType } = await fetchDocBytes(entry.url);
-    const mime = contentType || entry.mimeTypeHint || "application/pdf";
-    const extracted = await extractDocumentText({
-      buffer,
-      mimeType: mime,
+    const { buffer, mimeType, text, chunks } = await fetchAndExtract(
+      entry.url,
       sourceFilename,
-    });
-    const text = extracted.text.trim();
-    if (text.length === 0) {
-      throw new Error(
-        "No extractable text (the PDF is likely scanned images).",
-      );
-    }
-    const chunks = chunkText(text);
-    if (chunks.length === 0) {
-      throw new Error("Document chunked to zero pieces");
-    }
+      entry.mimeTypeHint,
+    );
     const [doc] = await db
       .insert(documentsTable)
       .values({
         userId,
         title: entry.title,
         sourceFilename,
-        mimeType: extracted.mimeType,
+        mimeType,
         sizeBytes: buffer.byteLength,
         charCount: text.length,
         chunkCount: chunks.length,
@@ -162,6 +189,86 @@ async function ingestOne(
       processedAt: new Date(),
     });
     return "failed";
+  }
+}
+
+/**
+ * Re-run the auto-ingest fetch/extract pipeline for a single existing
+ * document row, updating it in place. Caller must have already verified
+ * the row is owned by the current user, currently `failed`, and has a
+ * usable `sourceUrl`.
+ *
+ * Always increments `retryCount`, regardless of outcome, so the UI can
+ * decide whether to surface the manual-upload fallback. Returns the
+ * post-retry document row.
+ */
+export async function retryFailedAutoDocument(
+  doc: typeof documentsTable.$inferSelect,
+): Promise<typeof documentsTable.$inferSelect> {
+  if (!doc.sourceUrl) {
+    throw new Error("Document has no source URL to retry against.");
+  }
+
+  // Flip to processing so polling clients see a spinner immediately.
+  await db
+    .update(documentsTable)
+    .set({ status: "processing", errorMessage: null })
+    .where(eq(documentsTable.id, doc.id));
+
+  try {
+    const { buffer, mimeType, text, chunks } = await fetchAndExtract(
+      doc.sourceUrl,
+      doc.sourceFilename,
+      doc.mimeType || undefined,
+    );
+
+    // Drop any chunks that may have been left over from a previous attempt
+    // before inserting the fresh ones.
+    await db
+      .delete(docChunksTable)
+      .where(eq(docChunksTable.documentId, doc.id));
+
+    const ingestResult = await ingestChunks(doc.id, doc.userId, chunks);
+
+    const [updated] = await db
+      .update(documentsTable)
+      .set({
+        status: "ready",
+        mimeType,
+        sizeBytes: buffer.byteLength,
+        charCount: text.length,
+        chunkCount: chunks.length,
+        // If embeddings failed mid-retry, keep the doc as ready (FTS still
+        // works) but surface a warning so the UI can hint that semantic
+        // search will activate after backfill.
+        errorMessage: ingestResult.embeddingError
+          ? "Indexed for keyword search; semantic search will activate once embeddings finish processing."
+          : null,
+        processedAt: new Date(),
+        retryCount: sql`${documentsTable.retryCount} + 1`,
+      })
+      .where(eq(documentsTable.id, doc.id))
+      .returning();
+    return updated;
+  } catch (err) {
+    logger.warn(
+      { err, docId: doc.id, url: doc.sourceUrl },
+      "auto-ingest retry failed",
+    );
+    const [updated] = await db
+      .update(documentsTable)
+      .set({
+        status: "failed",
+        charCount: 0,
+        chunkCount: 0,
+        errorMessage:
+          err instanceof Error ? err.message.slice(0, 500) : "Fetch failed",
+        processedAt: new Date(),
+        retryCount: sql`${documentsTable.retryCount} + 1`,
+      })
+      .where(eq(documentsTable.id, doc.id))
+      .returning();
+    return updated;
   }
 }
 

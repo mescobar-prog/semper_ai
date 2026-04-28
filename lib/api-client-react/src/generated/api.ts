@@ -3447,6 +3447,92 @@ export const useDeleteDocument = <
 };
 
 /**
+ * Re-runs the same fetch + extract + chunk path that auto-ingest uses for a single document, updating the existing row in place. Only valid when the document is owned by the caller, currently in `failed` status, and has both `autoSource` and `sourceUrl` set. On success the row flips to `ready` with chunks; on failure it stays `failed` with a refreshed `errorMessage`. Either way the document's `retryCount` is incremented.
+
+ * @summary Retry the auto-ingest fetch + extract for a single failed document
+ */
+export const getRetryAutoIngestedDocumentUrl = (id: string) => {
+  return `/api/library/documents/${id}/retry`;
+};
+
+export const retryAutoIngestedDocument = async (
+  id: string,
+  options?: RequestInit,
+): Promise<DocumentSummary> => {
+  return customFetch<DocumentSummary>(getRetryAutoIngestedDocumentUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRetryAutoIngestedDocumentMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["retryAutoIngestedDocument"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return retryAutoIngestedDocument(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RetryAutoIngestedDocumentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof retryAutoIngestedDocument>>
+>;
+
+export type RetryAutoIngestedDocumentMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Retry the auto-ingest fetch + extract for a single failed document
+ */
+export const useRetryAutoIngestedDocument = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof retryAutoIngestedDocument>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getRetryAutoIngestedDocumentMutationOptions(options));
+};
+
+/**
  * @summary Replace the set of presets a document belongs to
  */
 export const getSetDocumentPresetTagsUrl = (id: string) => {

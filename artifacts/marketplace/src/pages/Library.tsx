@@ -9,6 +9,7 @@ import {
   useTestLibraryQuery,
   useListMyPresets,
   useSetDocumentPresetTags,
+  useRetryAutoIngestedDocument,
   requestUploadUrl,
   getGetLibraryStatsQueryKey,
   getListDocumentsQueryKey,
@@ -104,14 +105,23 @@ export function Library() {
   const uploadMutation = useUploadTextDocument();
   const deleteMutation = useDeleteDocument();
   const testMutation = useTestLibraryQuery();
+  const retryMutation = useRetryAutoIngestedDocument();
 
   const [showUpload, setShowUpload] = useState(false);
   const [uploadMode, setUploadMode] = useState<"file" | "paste">("file");
+  // When set, the next upload will supersede this failed auto-doc instead of
+  // creating a fresh entry. Carries title and preset tags through.
+  const [supersedeTarget, setSupersedeTarget] = useState<{
+    id: string;
+    title: string;
+    presetIds: string[];
+  } | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
   const [activeOnly, setActiveOnly] = useState(false);
   const [sourceFilter, setSourceFilter] =
     useState<"all" | "uploaded" | "auto">("all");
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const presetList: MissionPreset[] = presets ?? [];
   const activePreset = presetList.find((p) => p.isActive);
@@ -254,6 +264,9 @@ export function Library() {
             mimeType: inferMimeType(pendingFile.name, pendingFile.type),
             storageObjectPath: objectPath,
             sizeBytes: pendingFile.size,
+            ...(supersedeTarget
+              ? { replacesDocumentId: supersedeTarget.id }
+              : {}),
           },
         });
       } else {
@@ -267,12 +280,16 @@ export function Library() {
             sourceFilename: form.sourceFilename || `${form.title}.txt`,
             mimeType: "text/plain",
             content: form.content,
+            ...(supersedeTarget
+              ? { replacesDocumentId: supersedeTarget.id }
+              : {}),
           },
         });
       }
       setForm({ title: "", sourceFilename: "", content: "" });
       setPendingFile(null);
       setShowUpload(false);
+      setSupersedeTarget(null);
       setUploadStage("idle");
       setUploadProgress(0);
       queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
@@ -282,6 +299,53 @@ export function Library() {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
       setUploadStage("idle");
       setUploadProgress(0);
+    }
+  };
+
+  // Open the upload dialog pre-filled with a failed auto-doc's title and
+  // preset tags. The next upload submit will pass `replacesDocumentId` so
+  // the backend supersedes the failed row.
+  const startSupersedeUpload = (doc: DocumentSummary) => {
+    setSupersedeTarget({
+      id: doc.id,
+      title: doc.title,
+      presetIds: doc.presetIds ?? [],
+    });
+    setUploadMode("file");
+    setForm({
+      title: doc.title,
+      sourceFilename: "",
+      content: "",
+    });
+    setPendingFile(null);
+    setUploadError(null);
+    setShowUpload(true);
+  };
+
+  const onRetryDoc = async (id: string) => {
+    setRetryError(null);
+    // Optimistically flip the row to "processing" so the user immediately
+    // sees that the retry kicked off; this also re-engages the
+    // refetchInterval poller (which only polls while at least one row is
+    // uploaded/processing). The mutation runs synchronously on the server,
+    // so this state is brief, but it removes the dead-air feeling between
+    // click and terminal status.
+    const queryKey = getListDocumentsQueryKey();
+    queryClient.setQueryData<DocumentSummary[]>(queryKey, (prev) =>
+      prev
+        ? prev.map((d) =>
+            d.id === id
+              ? { ...d, status: "processing", errorMessage: null }
+              : d,
+          )
+        : prev,
+    );
+    try {
+      await retryMutation.mutateAsync({ id });
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : "Retry failed");
+    } finally {
+      queryClient.invalidateQueries({ queryKey });
     }
   };
 
@@ -345,7 +409,13 @@ export function Library() {
         </div>
         <button
           data-testid="button-toggle-upload"
-          onClick={() => setShowUpload((v) => !v)}
+          onClick={() => {
+            setShowUpload((v) => {
+              const next = !v;
+              if (!next) setSupersedeTarget(null);
+              return next;
+            });
+          }}
           className="h-10 px-5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
         >
           {showUpload ? "Cancel" : "Add document"}
@@ -369,6 +439,18 @@ export function Library() {
           onSubmit={onUpload}
           className="bg-card border border-border rounded-md p-5 mb-6 space-y-3"
         >
+          {supersedeTarget && (
+            <div
+              data-testid="supersede-banner"
+              className="text-[11px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2"
+            >
+              Replacing failed auto-fetch:{" "}
+              <span className="text-foreground">{supersedeTarget.title}</span>
+              {" — "}
+              the new file will inherit its tags and the failed row will be
+              removed.
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               type="button"
@@ -498,7 +580,7 @@ export function Library() {
             </div>
           )}
 
-          {activePreset && (
+          {activePreset && !supersedeTarget && (
             <div className="text-[11px] font-mono text-muted-foreground">
               New uploads are auto-tagged into the active preset:{" "}
               <span className="text-primary">{activePreset.name}</span>. You
@@ -683,16 +765,21 @@ export function Library() {
                       </button>
                     </div>
                   </div>
-                  {d.status === "failed" && d.errorMessage && (
-                    <div
-                      className="border-t border-border bg-rose-500/10 px-5 py-3 text-xs text-rose-300"
-                      data-testid={`doc-error-${d.id}`}
-                    >
-                      <span className="font-mono uppercase tracking-wider text-[10px] mr-2">
-                        Extraction failed:
-                      </span>
-                      {d.errorMessage}
-                    </div>
+                  {d.status === "failed" && (
+                    <FailedDocBanner
+                      doc={d}
+                      isRetrying={
+                        retryMutation.isPending &&
+                        retryMutation.variables?.id === d.id
+                      }
+                      retryError={
+                        retryMutation.variables?.id === d.id
+                          ? retryError
+                          : null
+                      }
+                      onRetry={() => onRetryDoc(d.id)}
+                      onSupersede={() => startSupersedeUpload(d)}
+                    />
                   )}
                   {editingTagsId === d.id && (
                     <PresetTagEditor
@@ -782,6 +869,98 @@ export function Library() {
         </>
       )}
     </PageContainer>
+  );
+}
+
+function FailedDocBanner({
+  doc,
+  isRetrying,
+  retryError,
+  onRetry,
+  onSupersede,
+}: {
+  doc: DocumentSummary;
+  isRetrying: boolean;
+  retryError: string | null;
+  onRetry: () => void;
+  onSupersede: () => void;
+}) {
+  const isAuto = !!doc.autoSource && !!doc.sourceUrl;
+  // Manual upload required: shown only after the user has tried Retry at
+  // least once and we still ended up failed.
+  const showManualUpload = isAuto && (doc.retryCount ?? 0) >= 1;
+  // Retry: shown for an auto-doc that has never been retried yet.
+  const showRetry = isAuto && (doc.retryCount ?? 0) === 0;
+
+  return (
+    <div
+      className="border-t border-border bg-rose-500/10 px-5 py-3 text-xs text-rose-300 space-y-2"
+      data-testid={`doc-error-${doc.id}`}
+    >
+      <div>
+        <span className="font-mono uppercase tracking-wider text-[10px] mr-2">
+          Extraction failed:
+        </span>
+        {doc.errorMessage ?? "Unknown error"}
+      </div>
+      {showManualUpload && (
+        <div className="text-rose-200/90">
+          The automatic fetch did not work twice. Open the source document
+          and upload it manually below.
+        </div>
+      )}
+      {retryError && (
+        <div
+          className="text-rose-200 font-mono text-[11px]"
+          data-testid={`doc-retry-error-${doc.id}`}
+        >
+          Retry failed: {retryError}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 pt-1">
+        {showRetry && (
+          <button
+            type="button"
+            data-testid={`button-retry-${doc.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry();
+            }}
+            disabled={isRetrying}
+            className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-rose-400/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25 disabled:opacity-50"
+          >
+            {isRetrying ? "Retrying…" : "Retry"}
+          </button>
+        )}
+        {showManualUpload && (
+          <>
+            {doc.sourceUrl && (
+              <a
+                data-testid={`link-open-source-${doc.id}`}
+                href={doc.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-rose-400/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+              >
+                Open source
+              </a>
+            )}
+            <button
+              type="button"
+              data-testid={`button-supersede-${doc.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSupersede();
+              }}
+              className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Upload manually
+            </button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

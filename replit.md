@@ -60,6 +60,7 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 - Ownership is enforced via the object's ACL custom-metadata: when a user POSTs `storageObjectPath` to `/library/documents`, the server claims the object by writing `{ owner: userId, visibility: "private" }` if no ACL exists, or rejects with 403 if a different owner is already recorded. Random UUID object paths plus this claim defend against IDOR.
 - There is intentionally no `GET /storage/objects/*` route — private files are only ever read server-side by the document-processing pipeline.
 - The Library page polls `GET /api/library/documents` every 1.5s while any doc is in a non-terminal state, so users see `uploaded → processing → ready/failed` live.
+- Failed auto-ingested rows (autoSource + sourceUrl set, status=failed) get a one-click `Retry` (`POST /api/library/documents/:id/retry` → re-runs `retryFailedAutoDocument`, which re-fetches via the same URL, replaces chunks in-place, and increments `documents.retry_count`). After `retry_count >= 1`, the row UI swaps Retry for an "Open source" link + "Upload manually" button. Manual upload then posts to `POST /api/library/documents` with `replacesDocumentId` — the route runs in a transaction that deletes the failed row, inserts the new row inheriting `autoSource`/`sourceUrl`/preset tag links, and returns the new doc. Out of scope for now: package-level retry, OCR, retrying user-uploaded docs.
 - Paste-text uploads still use the synchronous `content` field on the same endpoint.
 
 ### Auth & admin

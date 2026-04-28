@@ -1098,6 +1098,11 @@ export const ListDocumentsResponseItem = zod.object({
     .string()
     .nullable()
     .describe("Populated when status is `failed`."),
+  retryCount: zod
+    .number()
+    .describe(
+      'Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a \"Retry\" button to the manual-upload fallback once the in-place retry has also failed).\n',
+    ),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
   presetIds: zod
@@ -1134,6 +1139,12 @@ export const UploadTextDocumentBody = zod.object({
     .describe(
       "File size in bytes — required when storageObjectPath is set so the UI can display size before extraction completes.\n",
     ),
+  replacesDocumentId: zod
+    .string()
+    .optional()
+    .describe(
+      "Optional id of a failed auto-ingested document that this upload should supersede. When set, the new document inherits the failed row's autoSource, sourceUrl, and preset tags, and the failed row is deleted in the same transaction so the user only sees one entry. Only valid when the named document is owned by the caller, currently in `failed` status, and has an `autoSource` set.\n",
+    ),
 });
 
 export const UploadTextDocumentResponse = zod.object({
@@ -1163,6 +1174,11 @@ export const UploadTextDocumentResponse = zod.object({
     .string()
     .nullable()
     .describe("Populated when status is `failed`."),
+  retryCount: zod
+    .number()
+    .describe(
+      'Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a \"Retry\" button to the manual-upload fallback once the in-place retry has also failed).\n',
+    ),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
   presetIds: zod
@@ -1279,6 +1295,11 @@ export const GetDocumentResponse = zod
       .string()
       .nullable()
       .describe("Populated when status is `failed`."),
+    retryCount: zod
+      .number()
+      .describe(
+        'Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a \"Retry\" button to the manual-upload fallback once the in-place retry has also failed).\n',
+      ),
     uploadedAt: zod.coerce.date(),
     processedAt: zod.coerce.date().nullable(),
     presetIds: zod
@@ -1309,6 +1330,56 @@ export const DeleteDocumentParams = zod.object({
 
 export const DeleteDocumentResponse = zod.object({
   success: zod.boolean(),
+});
+
+/**
+ * Re-runs the same fetch + extract + chunk path that auto-ingest uses for a single document, updating the existing row in place. Only valid when the document is owned by the caller, currently in `failed` status, and has both `autoSource` and `sourceUrl` set. On success the row flips to `ready` with chunks; on failure it stays `failed` with a refreshed `errorMessage`. Either way the document's `retryCount` is incremented.
+
+ * @summary Retry the auto-ingest fetch + extract for a single failed document
+ */
+export const RetryAutoIngestedDocumentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const RetryAutoIngestedDocumentResponse = zod.object({
+  id: zod.string(),
+  title: zod.string(),
+  sourceFilename: zod.string(),
+  mimeType: zod.string(),
+  sizeBytes: zod.number(),
+  charCount: zod.number(),
+  chunkCount: zod.number(),
+  status: zod
+    .string()
+    .describe("One of `uploaded`, `processing`, `ready`, `failed`."),
+  autoSource: zod
+    .string()
+    .nullable()
+    .describe(
+      'Stable identifier of the auto-ingest source that produced this doc, e.g. \"mos:army:11B\" or \"unit:marines:MALS-12\". Null for documents the user uploaded by hand.\n',
+    ),
+  sourceUrl: zod
+    .string()
+    .nullable()
+    .describe(
+      "Original public URL the doc was downloaded from (auto-ingest only).",
+    ),
+  errorMessage: zod
+    .string()
+    .nullable()
+    .describe("Populated when status is `failed`."),
+  retryCount: zod
+    .number()
+    .describe(
+      'Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a \"Retry\" button to the manual-upload fallback once the in-place retry has also failed).\n',
+    ),
+  uploadedAt: zod.coerce.date(),
+  processedAt: zod.coerce.date().nullable(),
+  presetIds: zod
+    .array(zod.string())
+    .describe(
+      "IDs of every mission preset this document is currently linked to.",
+    ),
 });
 
 /**
@@ -1349,6 +1420,11 @@ export const SetDocumentPresetTagsResponse = zod.object({
     .string()
     .nullable()
     .describe("Populated when status is `failed`."),
+  retryCount: zod
+    .number()
+    .describe(
+      'Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a \"Retry\" button to the manual-upload fallback once the in-place retry has also failed).\n',
+    ),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
   presetIds: zod

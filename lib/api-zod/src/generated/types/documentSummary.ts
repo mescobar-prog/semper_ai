@@ -32,6 +32,9 @@ export interface DocumentSummary {
    * @nullable
    */
   errorMessage: string | null;
+  /** Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a "Retry" button to the manual-upload fallback once the in-place retry has also failed).
+   */
+  retryCount: number;
   uploadedAt: Date;
   /** @nullable */
   processedAt: Date | null;

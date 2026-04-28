@@ -21,6 +21,7 @@ import { extractDocumentText } from "../lib/document-extract";
 import {
   ingestMosPackage,
   ingestUnitPackage,
+  retryFailedAutoDocument,
 } from "../lib/auto-ingest";
 import { ensureActivePreset } from "../lib/profile-helpers";
 import { parseAutoSource } from "@workspace/mil-data";
@@ -74,6 +75,7 @@ function serializeDocument(
     autoSource: d.autoSource ?? null,
     sourceUrl: d.sourceUrl ?? null,
     errorMessage: d.errorMessage ?? null,
+    retryCount: d.retryCount ?? 0,
     uploadedAt: d.uploadedAt.toISOString(),
     processedAt: d.processedAt ? d.processedAt.toISOString() : null,
     presetIds,
@@ -186,9 +188,56 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Invalid document upload" });
     return;
   }
-  const { title, sourceFilename, mimeType, content, storageObjectPath, sizeBytes } =
-    parsed.data;
+  const {
+    title,
+    sourceFilename,
+    mimeType,
+    content,
+    storageObjectPath,
+    sizeBytes,
+    replacesDocumentId,
+  } = parsed.data;
   const userId = req.user!.id;
+
+  // If this upload is replacing a failed auto-ingested row, validate the
+  // target up front and grab the metadata we need to inherit (autoSource,
+  // sourceUrl, preset tags). Doing this before any heavy lifting keeps the
+  // error path simple.
+  let supersedeTarget: typeof documentsTable.$inferSelect | null = null;
+  let inheritedPresetIds: string[] = [];
+  if (typeof replacesDocumentId === "string" && replacesDocumentId.length > 0) {
+    const [target] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        and(
+          eq(documentsTable.id, replacesDocumentId),
+          eq(documentsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (!target) {
+      res
+        .status(404)
+        .json({ error: "Document to be replaced not found" });
+      return;
+    }
+    if (target.status !== "failed") {
+      res.status(400).json({
+        error: "Can only supersede a document that is in the failed state",
+      });
+      return;
+    }
+    if (!target.autoSource) {
+      res.status(400).json({
+        error: "Can only supersede an auto-ingested document",
+      });
+      return;
+    }
+    supersedeTarget = target;
+    const presetMap = await loadDocPresetMap(userId, [target.id]);
+    inheritedPresetIds = presetMap.get(target.id) ?? [];
+  }
 
   // Path A: storage-backed binary upload — file already in GCS via presigned URL.
   // Create the document in "uploaded" state and process asynchronously.
@@ -253,20 +302,44 @@ router.post("/library/documents", requireAuth, async (req, res) => {
       return;
     }
 
-    const [doc] = await db
-      .insert(documentsTable)
-      .values({
-        userId,
-        title,
-        sourceFilename,
-        mimeType: mimeType || "application/octet-stream",
-        sizeBytes: typeof sizeBytes === "number" ? sizeBytes : 0,
-        charCount: 0,
-        chunkCount: 0,
-        status: "uploaded",
-        storageObjectPath,
-      })
-      .returning();
+    // When superseding a failed auto row, delete the old row + create the
+    // new one + carry over preset tags inside a single transaction so the
+    // user never sees a duplicate or a moment with neither row.
+    const doc = await db.transaction(async (tx) => {
+      if (supersedeTarget) {
+        await tx
+          .delete(documentsTable)
+          .where(eq(documentsTable.id, supersedeTarget.id));
+      }
+      const [newDoc] = await tx
+        .insert(documentsTable)
+        .values({
+          userId,
+          title,
+          sourceFilename,
+          mimeType: mimeType || "application/octet-stream",
+          sizeBytes: typeof sizeBytes === "number" ? sizeBytes : 0,
+          charCount: 0,
+          chunkCount: 0,
+          status: "uploaded",
+          storageObjectPath,
+          autoSource: supersedeTarget?.autoSource ?? null,
+          sourceUrl: supersedeTarget?.sourceUrl ?? null,
+        })
+        .returning();
+      if (supersedeTarget && inheritedPresetIds.length > 0) {
+        await tx
+          .insert(presetDocumentsTable)
+          .values(
+            inheritedPresetIds.map((pid) => ({
+              presetId: pid,
+              documentId: newDoc.id,
+            })),
+          )
+          .onConflictDoNothing();
+      }
+      return newDoc;
+    });
 
     // Kick off background processing — do NOT await; the client will poll
     // /library/documents to watch the status field flip to "processing" and
@@ -275,7 +348,7 @@ router.post("/library/documents", requireAuth, async (req, res) => {
       logger.error({ err, documentId: doc.id }, "background processing crashed");
     });
 
-    res.json(serializeDocument(doc));
+    res.json(serializeDocument(doc, inheritedPresetIds));
     return;
   }
 
@@ -321,20 +394,41 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     return;
   }
 
-  const [doc] = await db
-    .insert(documentsTable)
-    .values({
-      userId,
-      title,
-      sourceFilename,
-      mimeType: extracted.mimeType,
-      sizeBytes: buffer.byteLength,
-      charCount: text.length,
-      chunkCount: chunks.length,
-      status: "ready",
-      processedAt: new Date(),
-    })
-    .returning();
+  // For non-supersede uploads we auto-link into the active preset (so the
+  // new doc is immediately in scope). For supersede uploads we instead
+  // inherit the failed row's preset tags exactly.
+  const { preset } = supersedeTarget
+    ? { preset: null as { id: string } | null }
+    : await ensureActivePreset(userId);
+
+  // Atomically delete the failed supersede target (if any) and insert the
+  // replacement row, so the user never observes a duplicate or empty gap.
+  // Embedding ingestion happens after this transaction because it issues
+  // network calls that must not run inside a DB transaction.
+  const doc = await db.transaction(async (tx) => {
+    if (supersedeTarget) {
+      await tx
+        .delete(documentsTable)
+        .where(eq(documentsTable.id, supersedeTarget.id));
+    }
+    const [newDoc] = await tx
+      .insert(documentsTable)
+      .values({
+        userId,
+        title,
+        sourceFilename,
+        mimeType: extracted.mimeType,
+        sizeBytes: buffer.byteLength,
+        charCount: text.length,
+        chunkCount: chunks.length,
+        status: "ready",
+        processedAt: new Date(),
+        autoSource: supersedeTarget?.autoSource ?? null,
+        sourceUrl: supersedeTarget?.sourceUrl ?? null,
+      })
+      .returning();
+    return newDoc;
+  });
 
   try {
     const result = await ingestChunks(doc.id, userId, chunks);
@@ -356,15 +450,27 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     return;
   }
 
-  // Auto-link new uploads to the active preset so freshly uploaded material
-  // is immediately part of the user's current mission scope.
-  const { preset } = await ensureActivePreset(userId);
-  await db
-    .insert(presetDocumentsTable)
-    .values({ presetId: preset.id, documentId: doc.id })
-    .onConflictDoNothing();
+  // For supersede uploads, inherit the failed row's preset tags exactly.
+  // For fresh uploads, auto-link into the active preset so the doc is
+  // immediately in mission scope.
+  const presetIdsToLink = supersedeTarget
+    ? inheritedPresetIds
+    : preset
+      ? [preset.id]
+      : [];
+  if (presetIdsToLink.length > 0) {
+    await db
+      .insert(presetDocumentsTable)
+      .values(
+        presetIdsToLink.map((pid) => ({
+          presetId: pid,
+          documentId: doc.id,
+        })),
+      )
+      .onConflictDoNothing();
+  }
 
-  res.json(serializeDocument(doc, [preset.id]));
+  res.json(serializeDocument(doc, presetIdsToLink));
 });
 
 router.get("/library/documents/:id", requireAuth, async (req, res) => {
@@ -462,6 +568,53 @@ router.put(
     res.json(serializeDocument(doc, ownedPresetIds));
   },
 );
+
+router.post("/library/documents/:id/retry", requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  const docId = String(req.params.id);
+
+  const [doc] = await db
+    .select()
+    .from(documentsTable)
+    .where(
+      and(
+        eq(documentsTable.id, docId),
+        eq(documentsTable.userId, userId),
+      ),
+    )
+    .limit(1);
+  if (!doc) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+  if (doc.status !== "failed") {
+    res.status(400).json({
+      error: "Only failed documents can be retried",
+    });
+    return;
+  }
+  if (!doc.autoSource || !doc.sourceUrl) {
+    res.status(400).json({
+      error:
+        "Retry is only available for auto-ingested documents with a source URL",
+    });
+    return;
+  }
+  // Defend against retrying a manually-uploaded supersede row that happens
+  // to also carry an autoSource — those go through the regular upload-retry
+  // flow (Task #25) instead of the auto-ingest URL fetch.
+  if (doc.storageObjectPath) {
+    res.status(400).json({
+      error:
+        "This document was uploaded manually; use the upload-retry flow instead",
+    });
+    return;
+  }
+
+  const updated = await retryFailedAutoDocument(doc);
+  const presetMap = await loadDocPresetMap(userId, [updated.id]);
+  res.json(serializeDocument(updated, presetMap.get(updated.id) ?? []));
+});
 
 router.delete("/library/documents/:id", requireAuth, async (req, res) => {
   const result = await db

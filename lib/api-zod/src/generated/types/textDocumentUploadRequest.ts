@@ -21,4 +21,7 @@ export interface TextDocumentUploadRequest {
   /** File size in bytes — required when storageObjectPath is set so the UI can display size before extraction completes.
    */
   sizeBytes?: number;
+  /** Optional id of a failed auto-ingested document that this upload should supersede. When set, the new document inherits the failed row's autoSource, sourceUrl, and preset tags, and the failed row is deleted in the same transaction so the user only sees one entry. Only valid when the named document is owned by the caller, currently in `failed` status, and has an `autoSource` set.
+   */
+  replacesDocumentId?: string;
 }

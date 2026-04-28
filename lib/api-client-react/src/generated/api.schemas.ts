@@ -622,6 +622,9 @@ export interface DocumentSummary {
    * @nullable
    */
   errorMessage: string | null;
+  /** Number of times the user has manually retried processing this document. 0 means it has never been retried; >=1 means at least one retry attempt has happened (used by the UI to switch a failed auto-ingested row from a "Retry" button to the manual-upload fallback once the in-place retry has also failed).
+   */
+  retryCount: number;
   uploadedAt: string;
   /** @nullable */
   processedAt: string | null;
@@ -655,6 +658,9 @@ export interface TextDocumentUploadRequest {
   /** File size in bytes — required when storageObjectPath is set so the UI can display size before extraction completes.
    */
   sizeBytes?: number;
+  /** Optional id of a failed auto-ingested document that this upload should supersede. When set, the new document inherits the failed row's autoSource, sourceUrl, and preset tags, and the failed row is deleted in the same transaction so the user only sees one entry. Only valid when the named document is owned by the caller, currently in `failed` status, and has an `autoSource` set.
+   */
+  replacesDocumentId?: string;
 }
 
 export interface LibraryTestQueryRequest {

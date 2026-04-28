@@ -43,6 +43,11 @@ export const documentsTable = pgTable(
     // file (e.g. "/objects/uploads/<uuid>"). Null for paste-text and for
     // auto-ingested documents.
     storageObjectPath: varchar("storage_object_path"),
+    // Number of times the user has manually retried processing this row.
+    // 0 = never retried; >=1 = at least one retry attempt has happened.
+    // Used by the UI to switch a failed auto-ingested row from a "Retry"
+    // button to the "Manual upload required" fallback after the first retry.
+    retryCount: integer("retry_count").notNull().default(0),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
