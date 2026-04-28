@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetLibraryStats,
@@ -9,6 +9,7 @@ import {
   useTestLibraryQuery,
   useListMyPresets,
   useSetDocumentPresetTags,
+  requestUploadUrl,
   getGetLibraryStatsQueryKey,
   getListDocumentsQueryKey,
   getGetDocumentQueryKey,
@@ -42,21 +43,61 @@ function inferMimeType(filename: string, declared: string): string {
   return "text/plain";
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunkSize = 0x8000; // avoid call-stack overflow on big PDFs
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const slice = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...slice);
+type UploadStage = "idle" | "requesting-url" | "uploading" | "registering";
+
+function statusTone(
+  status: string,
+): "good" | "warn" | "destructive" | "neutral" {
+  switch (status) {
+    case "ready":
+      return "good";
+    case "failed":
+      return "destructive";
+    case "uploaded":
+    case "processing":
+      return "warn";
+    default:
+      return "neutral";
   }
-  return btoa(binary);
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "uploaded":
+      return "uploaded · queued";
+    case "processing":
+      return "extracting…";
+    case "ready":
+      return "ready";
+    case "failed":
+      return "failed";
+    default:
+      return status;
+  }
 }
 
 export function Library() {
   const queryClient = useQueryClient();
   const { data: stats } = useGetLibraryStats();
-  const { data: docs, isLoading, error } = useListDocuments();
+
+  // Poll the documents list while any document is still in a non-terminal
+  // state so the user sees the status flip from "uploaded" to "processing"
+  // to "ready"/"failed" without a manual refresh.
+  const { data: docs, isLoading, error } = useListDocuments({
+    query: {
+      queryKey: getListDocumentsQueryKey(),
+      refetchInterval: (query) => {
+        const list = query.state.data as
+          | Array<{ status: string }>
+          | undefined;
+        if (!list) return false;
+        const stillWorking = list.some(
+          (d) => d.status === "uploaded" || d.status === "processing",
+        );
+        return stillWorking ? 1500 : false;
+      },
+    },
+  });
   const { data: presets } = useListMyPresets({
     query: { queryKey: getListMyPresetsQueryKey(), retry: false },
   });
@@ -100,13 +141,24 @@ export function Library() {
     sourceFilename: "",
     content: "",
   });
-  const [pendingFile, setPendingFile] = useState<{
-    filename: string;
-    mimeType: string;
-    sizeBytes: number;
-    contentBase64: string;
-  } | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+
+  // When polling flips a doc to "ready", refresh stats too so the header
+  // counters stay accurate.
+  useEffect(() => {
+    if (!docs) return;
+    queryClient.invalidateQueries({ queryKey: getGetLibraryStatsQueryKey() });
+  }, [
+    queryClient,
+    // Recompute when any status changes
+    useMemo(
+      () => (docs ?? []).map((d) => `${d.id}:${d.status}`).join(","),
+      [docs],
+    ),
+  ]);
 
   const [testQuery, setTestQuery] = useState("");
   const [testResults, setTestResults] = useState<{
@@ -122,7 +174,7 @@ export function Library() {
   } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
-  const onPickFile = async (file: File) => {
+  const onPickFile = (file: File) => {
     setUploadError(null);
     if (file.size > MAX_BYTES) {
       setUploadError(
@@ -130,19 +182,57 @@ export function Library() {
       );
       return;
     }
-    const buffer = await file.arrayBuffer();
-    const contentBase64 = arrayBufferToBase64(buffer);
-    setPendingFile({
-      filename: file.name,
-      mimeType: inferMimeType(file.name, file.type),
-      sizeBytes: file.size,
-      contentBase64,
-    });
+    setPendingFile(file);
     setForm((f) => ({
       title: f.title || file.name.replace(/\.[^.]+$/, ""),
       sourceFilename: file.name,
       content: "",
     }));
+  };
+
+  // Two-step upload: request a presigned URL, PUT the file directly to GCS,
+  // then register the document with the API. The browser uploads the bytes
+  // straight to object storage so the API server never has to buffer big
+  // PDFs/DOCX in memory.
+  const uploadFileViaStorage = async (file: File): Promise<string> => {
+    setUploadStage("requesting-url");
+    const mimeType = inferMimeType(file.name, file.type);
+    const { uploadURL, objectPath } = await requestUploadUrl({
+      name: file.name,
+      size: file.size,
+      contentType: mimeType,
+    });
+
+    setUploadStage("uploading");
+    setUploadProgress(0);
+
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadURL, true);
+      xhr.setRequestHeader("Content-Type", mimeType);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          setUploadProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setUploadProgress(100);
+          resolve();
+        } else {
+          reject(
+            new Error(
+              `Upload to storage failed (${xhr.status} ${xhr.statusText || ""})`,
+            ),
+          );
+        }
+      };
+      xhr.onerror = () =>
+        reject(new Error("Network error while uploading the file."));
+      xhr.send(file);
+    });
+
+    return objectPath;
   };
 
   const onUpload = async (e: React.FormEvent) => {
@@ -154,12 +244,16 @@ export function Library() {
           setUploadError("Choose a file first.");
           return;
         }
+        const objectPath = await uploadFileViaStorage(pendingFile);
+
+        setUploadStage("registering");
         await uploadMutation.mutateAsync({
           data: {
-            title: form.title || pendingFile.filename,
-            sourceFilename: pendingFile.filename,
-            mimeType: pendingFile.mimeType,
-            contentBase64: pendingFile.contentBase64,
+            title: form.title || pendingFile.name,
+            sourceFilename: pendingFile.name,
+            mimeType: inferMimeType(pendingFile.name, pendingFile.type),
+            storageObjectPath: objectPath,
+            sizeBytes: pendingFile.size,
           },
         });
       } else {
@@ -179,11 +273,15 @@ export function Library() {
       setForm({ title: "", sourceFilename: "", content: "" });
       setPendingFile(null);
       setShowUpload(false);
+      setUploadStage("idle");
+      setUploadProgress(0);
       queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetLibraryStatsQueryKey() });
       queryClient.invalidateQueries({ queryKey: getListMyPresetsQueryKey() });
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
+      setUploadStage("idle");
+      setUploadProgress(0);
     }
   };
 
@@ -210,6 +308,25 @@ export function Library() {
       setTestError(err instanceof Error ? err.message : "Query failed");
     }
   };
+
+  const submitDisabled =
+    uploadMutation.isPending ||
+    uploadStage === "requesting-url" ||
+    uploadStage === "uploading" ||
+    uploadStage === "registering";
+
+  const submitLabel = (() => {
+    switch (uploadStage) {
+      case "requesting-url":
+        return "Preparing upload…";
+      case "uploading":
+        return `Uploading… ${uploadProgress}%`;
+      case "registering":
+        return "Registering…";
+      default:
+        return uploadMutation.isPending ? "Uploading…" : "Upload & index";
+    }
+  })();
 
   return (
     <PageContainer>
@@ -303,8 +420,29 @@ export function Library() {
               />
               {pendingFile && (
                 <div className="mt-2 text-[11px] text-muted-foreground font-mono">
-                  Loaded: {pendingFile.filename} · {pendingFile.mimeType} ·{" "}
-                  {formatBytes(pendingFile.sizeBytes)}
+                  Selected: {pendingFile.name} ·{" "}
+                  {inferMimeType(pendingFile.name, pendingFile.type)} ·{" "}
+                  {formatBytes(pendingFile.size)}
+                </div>
+              )}
+              {(uploadStage === "uploading" ||
+                uploadStage === "requesting-url") && (
+                <div
+                  className="mt-3"
+                  data-testid="upload-progress"
+                  aria-label="Upload progress"
+                >
+                  <div className="h-1.5 w-full bg-background border border-border rounded overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-150"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                    {uploadStage === "requesting-url"
+                      ? "Requesting upload URL…"
+                      : `Uploading to storage… ${uploadProgress}%`}
+                  </div>
                 </div>
               )}
             </div>
@@ -372,10 +510,10 @@ export function Library() {
             <button
               type="submit"
               data-testid="button-upload-submit"
-              disabled={uploadMutation.isPending}
+              disabled={submitDisabled}
               className="h-10 px-5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
             >
-              {uploadMutation.isPending ? "Uploading…" : "Upload & index"}
+              {submitLabel}
             </button>
           </div>
         </form>
@@ -513,11 +651,13 @@ export function Library() {
                     <div className="flex items-center gap-3 shrink-0">
                       <Pill tone="neutral">{d.chunkCount} chunks</Pill>
                       <span className="text-[11px] font-mono text-muted-foreground">
-                        {formatBytes(d.charCount)}
+                        {formatBytes(d.charCount || d.sizeBytes)}
                       </span>
-                      <Pill tone={d.status === "ready" ? "good" : "warn"}>
-                        {d.status}
-                      </Pill>
+                      <span data-testid={`doc-status-${d.id}`}>
+                        <Pill tone={statusTone(d.status)}>
+                          {statusLabel(d.status)}
+                        </Pill>
+                      </span>
                       {presetList.length > 0 && (
                         <button
                           data-testid={`button-tags-${d.id}`}
@@ -543,6 +683,17 @@ export function Library() {
                       </button>
                     </div>
                   </div>
+                  {d.status === "failed" && d.errorMessage && (
+                    <div
+                      className="border-t border-border bg-rose-500/10 px-5 py-3 text-xs text-rose-300"
+                      data-testid={`doc-error-${d.id}`}
+                    >
+                      <span className="font-mono uppercase tracking-wider text-[10px] mr-2">
+                        Extraction failed:
+                      </span>
+                      {d.errorMessage}
+                    </div>
+                  )}
                   {editingTagsId === d.id && (
                     <PresetTagEditor
                       doc={d}
@@ -550,7 +701,17 @@ export function Library() {
                       onClose={() => setEditingTagsId(null)}
                     />
                   )}
-                  {expandedId === d.id && <DocChunks documentId={d.id} />}
+                  {expandedId === d.id && d.status === "ready" && (
+                    <DocChunks documentId={d.id} />
+                  )}
+                  {expandedId === d.id &&
+                    (d.status === "uploaded" ||
+                      d.status === "processing") && (
+                      <div className="border-t border-border p-5 text-xs text-muted-foreground">
+                        Indexing in progress — chunks will appear when
+                        extraction finishes.
+                      </div>
+                    )}
                 </div>
               ))
             )}

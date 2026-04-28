@@ -72,4 +72,6 @@ export * from "./textDocumentUploadRequest";
 export * from "./toolDetail";
 export * from "./toolSummary";
 export * from "./toolUpsert";
+export * from "./uploadUrlRequest";
+export * from "./uploadUrlResponse";
 export * from "./userProfile";

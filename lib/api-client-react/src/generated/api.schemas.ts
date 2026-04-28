@@ -390,6 +390,7 @@ export interface DocumentSummary {
   sizeBytes: number;
   charCount: number;
   chunkCount: number;
+  /** One of `uploaded`, `processing`, `ready`, `failed`. */
   status: string;
   /**
    * Stable identifier of the auto-ingest source that produced this doc, e.g. "mos:army:11B" or "unit:marines:MALS-12". Null for documents the user uploaded by hand.
@@ -402,7 +403,10 @@ export interface DocumentSummary {
    * @nullable
    */
   sourceUrl: string | null;
-  /** @nullable */
+  /**
+   * Populated when status is `failed`.
+   * @nullable
+   */
   errorMessage: string | null;
   uploadedAt: string;
   /** @nullable */
@@ -428,12 +432,15 @@ export interface TextDocumentUploadRequest {
   /** @minLength 1 */
   sourceFilename: string;
   mimeType?: string;
-  /** UTF-8 plain-text body. Set this for paste-text uploads. Either content or contentBase64 must be provided.
+  /** UTF-8 plain-text body. Set this for paste-text uploads. Either content or storageObjectPath must be provided.
    */
   content?: string;
-  /** Base64-encoded binary body for PDF/DOCX/MD/TXT uploads. The server picks the right extractor based on mimeType. Either content or contentBase64 must be provided.
+  /** Object storage path returned by `POST /storage/uploads/request-url` after the file was uploaded directly to GCS via the presigned URL. The server downloads the file and runs the matching extractor based on the file's mimeType (PDF, DOCX, MD, TXT). Either content or storageObjectPath must be provided.
    */
-  contentBase64?: string;
+  storageObjectPath?: string;
+  /** File size in bytes — required when storageObjectPath is set so the UI can display size before extraction completes.
+   */
+  sizeBytes?: number;
 }
 
 export interface LibraryTestQueryRequest {
@@ -599,6 +606,32 @@ export interface LaunchHistoryItem {
   toolSlug: string;
   status: string;
   createdAt: string;
+}
+
+export interface UploadUrlRequest {
+  /**
+   * Original file name.
+   * @minLength 1
+   */
+  name: string;
+  /**
+   * File size in bytes.
+   * @minimum 1
+   */
+  size: number;
+  /**
+   * MIME type of the file.
+   * @minLength 1
+   */
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  /** Presigned GCS URL for PUT upload. */
+  uploadURL: string;
+  /** Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database. */
+  objectPath: string;
+  metadata?: UploadUrlRequest;
 }
 
 export type DashboardSummaryAtoStatusBreakdownItem = {

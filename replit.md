@@ -47,6 +47,17 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 - Search uses Postgres `to_tsquery` with OR'd prefix lexemes (e.g. `uas:* | platoon:* | recon:*`) so any matching keyword in a chunk produces a hit. Stopwords are stripped client-side before building the tsquery.
 - Primer queries are generated per-launch by Gemini (`gemini-3-flash-preview` via the Replit Gemini AI integration) from `profile + tool description`, then **always merged** with profile-derived queries (primaryMission, dutyTitle+MOS, aiUseCases, unit) to guarantee personal-doc recall even when the LLM focuses on tool terminology. The same Gemini model also powers the profile intake chat. Helper module: `artifacts/api-server/src/lib/gemini-helpers.ts`.
 
+### Library uploads (PDF/DOCX/MD/TXT)
+- Binary uploads use object storage (App Storage / GCS) via presigned PUT URLs. Flow:
+  1. Client → `POST /api/storage/uploads/request-url` → presigned URL + objectPath
+  2. Client → PUT file directly to GCS (browser shows upload progress via XHR)
+  3. Client → `POST /api/library/documents` with `{ storageObjectPath, sizeBytes, ... }`
+- The server creates the document with `status="uploaded"` and kicks off async processing (`artifacts/api-server/src/lib/document-processing.ts`): downloads from GCS, runs `extractDocumentText` (pdf-parse for PDFs, mammoth for DOCX, utf-8 for MD/TXT), chunks the text, inserts chunks, and flips status to `ready` or `failed` (with `errorMessage`).
+- Ownership is enforced via the object's ACL custom-metadata: when a user POSTs `storageObjectPath` to `/library/documents`, the server claims the object by writing `{ owner: userId, visibility: "private" }` if no ACL exists, or rejects with 403 if a different owner is already recorded. Random UUID object paths plus this claim defend against IDOR.
+- There is intentionally no `GET /storage/objects/*` route — private files are only ever read server-side by the document-processing pipeline.
+- The Library page polls `GET /api/library/documents` every 1.5s while any doc is in a non-terminal state, so users see `uploaded → processing → ready/failed` live.
+- Paste-text uploads still use the synchronous `content` field on the same endpoint.
+
 ### Auth & admin
 - Replit OIDC via `@workspace/replit-auth-web`. Layout fetches `/api/profile` to determine `isAdmin` (which lives on UserProfile, not AuthUser).
 - The first user is a normal operator. Promote to admin with `UPDATE profiles SET is_admin = true WHERE user_id = '...'`.

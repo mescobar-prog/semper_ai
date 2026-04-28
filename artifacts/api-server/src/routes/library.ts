@@ -24,6 +24,15 @@ import {
 import { ensureActivePreset } from "../lib/profile-helpers";
 import { parseAutoSource } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
+import { processStoredDocument } from "../lib/document-processing";
+import {
+  ObjectNotFoundError,
+  ObjectStorageService,
+} from "../lib/objectStorage";
+import { getObjectAclPolicy, setObjectAclPolicy } from "../lib/objectAcl";
+import { MAX_UPLOAD_SIZE_BYTES } from "./storage";
+
+const objectStorageService = new ObjectStorageService();
 
 const router: IRouter = Router();
 
@@ -176,51 +185,114 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Invalid document upload" });
     return;
   }
-  const { title, sourceFilename, mimeType, content, contentBase64 } =
+  const { title, sourceFilename, mimeType, content, storageObjectPath, sizeBytes } =
     parsed.data;
   const userId = req.user!.id;
 
-  // Determine the source bytes. Either content (UTF-8 text) or contentBase64
-  // (binary, e.g. PDF/DOCX) must be provided.
-  let buffer: Buffer;
-  if (typeof content === "string" && content.length > 0) {
-    buffer = Buffer.from(content, "utf-8");
-  } else if (typeof contentBase64 === "string" && contentBase64.length > 0) {
-    // Node's Buffer.from(..., 'base64') is permissive — it silently drops
-    // invalid characters instead of throwing. To actually reject malformed
-    // payloads we strip whitespace, require the alphabet+padding to be valid,
-    // and confirm a round-trip re-encode matches the (whitespace-stripped)
-    // input exactly.
-    const stripped = contentBase64.replace(/\s+/g, "");
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(stripped) || stripped.length % 4 !== 0) {
-      res.status(400).json({ error: "Invalid base64 contentBase64 payload" });
+  // Path A: storage-backed binary upload — file already in GCS via presigned URL.
+  // Create the document in "uploaded" state and process asynchronously.
+  if (typeof storageObjectPath === "string" && storageObjectPath.length > 0) {
+    if (!storageObjectPath.startsWith("/objects/")) {
+      res
+        .status(400)
+        .json({ error: "Invalid storageObjectPath — must start with /objects/" });
       return;
     }
+
+    if (typeof sizeBytes === "number" && sizeBytes > MAX_UPLOAD_SIZE_BYTES) {
+      res.status(413).json({
+        error: `File too large. Maximum size is ${Math.floor(
+          MAX_UPLOAD_SIZE_BYTES / (1024 * 1024),
+        )} MB.`,
+      });
+      return;
+    }
+
+    // Verify the uploaded object exists and claim ownership via ACL metadata.
+    // - If no ACL is set yet, this is a fresh upload — record the current user
+    //   as owner so future operations on this object can be authorized.
+    // - If an ACL is already set with a different owner, reject. This blocks an
+    //   IDOR-style attack where one user POSTs another user's object path
+    //   (paths are random UUIDs so the realistic attack surface is small, but
+    //   we still defend in depth).
+    let objectFile;
     try {
-      buffer = Buffer.from(stripped, "base64");
-      if (buffer.toString("base64") !== stripped) {
+      objectFile = await objectStorageService.getObjectEntityFile(
+        storageObjectPath,
+      );
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
         res
-          .status(400)
-          .json({ error: "Invalid base64 contentBase64 payload" });
+          .status(404)
+          .json({ error: "Uploaded file not found in object storage" });
         return;
       }
-    } catch (err) {
-      logger.warn({ err }, "invalid base64 payload");
-      res.status(400).json({ error: "Invalid base64 contentBase64 payload" });
+      logger.error({ err, storageObjectPath }, "failed to load uploaded object");
+      res.status(500).json({ error: "Could not access uploaded file" });
       return;
     }
-  } else {
-    res
-      .status(400)
-      .json({ error: "Either content or contentBase64 must be provided" });
+
+    try {
+      const existingAcl = await getObjectAclPolicy(objectFile);
+      if (existingAcl && existingAcl.owner !== userId) {
+        res
+          .status(403)
+          .json({ error: "You do not own this uploaded file" });
+        return;
+      }
+      if (!existingAcl) {
+        await setObjectAclPolicy(objectFile, {
+          owner: userId,
+          visibility: "private",
+        });
+      }
+    } catch (err) {
+      logger.error({ err, storageObjectPath }, "failed to claim object ACL");
+      res.status(500).json({ error: "Could not register uploaded file" });
+      return;
+    }
+
+    const [doc] = await db
+      .insert(documentsTable)
+      .values({
+        userId,
+        title,
+        sourceFilename,
+        mimeType: mimeType || "application/octet-stream",
+        sizeBytes: typeof sizeBytes === "number" ? sizeBytes : 0,
+        charCount: 0,
+        chunkCount: 0,
+        status: "uploaded",
+        storageObjectPath,
+      })
+      .returning();
+
+    // Kick off background processing — do NOT await; the client will poll
+    // /library/documents to watch the status field flip to "processing" and
+    // then "ready" or "failed".
+    void processStoredDocument(doc.id).catch((err) => {
+      logger.error({ err, documentId: doc.id }, "background processing crashed");
+    });
+
+    res.json(serializeDocument(doc));
     return;
   }
+
+  // Path B: paste-text upload — process synchronously (small payload, no GCS).
+  if (typeof content !== "string" || content.length === 0) {
+    res
+      .status(400)
+      .json({ error: "Either content or storageObjectPath must be provided" });
+    return;
+  }
+
+  const buffer = Buffer.from(content, "utf-8");
 
   let extracted: { text: string; mimeType: string };
   try {
     extracted = await extractDocumentText({
       buffer,
-      mimeType: mimeType || "",
+      mimeType: mimeType || "text/plain",
       sourceFilename,
     });
   } catch (err) {
@@ -237,8 +309,7 @@ router.post("/library/documents", requireAuth, async (req, res) => {
   const text = extracted.text.trim();
   if (text.length === 0) {
     res.status(400).json({
-      error:
-        "No extractable text found in this document. PDFs that are scanned images or password-protected are not supported.",
+      error: "No extractable text found in this document.",
     });
     return;
   }
@@ -249,9 +320,6 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     return;
   }
 
-  const sizeBytes = buffer.byteLength;
-  const charCount = text.length;
-
   const [doc] = await db
     .insert(documentsTable)
     .values({
@@ -259,8 +327,8 @@ router.post("/library/documents", requireAuth, async (req, res) => {
       title,
       sourceFilename,
       mimeType: extracted.mimeType,
-      sizeBytes,
-      charCount,
+      sizeBytes: buffer.byteLength,
+      charCount: text.length,
       chunkCount: chunks.length,
       status: "ready",
       processedAt: new Date(),

@@ -14,6 +14,7 @@ export interface DocumentSummary {
   sizeBytes: number;
   charCount: number;
   chunkCount: number;
+  /** One of `uploaded`, `processing`, `ready`, `failed`. */
   status: string;
   /**
    * Stable identifier of the auto-ingest source that produced this doc, e.g. "mos:army:11B" or "unit:marines:MALS-12". Null for documents the user uploaded by hand.
@@ -26,7 +27,10 @@ export interface DocumentSummary {
    * @nullable
    */
   sourceUrl: string | null;
-  /** @nullable */
+  /**
+   * Populated when status is `failed`.
+   * @nullable
+   */
   errorMessage: string | null;
   uploadedAt: Date;
   /** @nullable */

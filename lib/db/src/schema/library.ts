@@ -30,6 +30,10 @@ export const documentsTable = pgTable(
     // sourceUrl this lets us de-duplicate re-ingests of the same package.
     autoSource: varchar("auto_source"),
     sourceUrl: text("source_url"),
+    // For binary uploads (PDF/DOCX), the object-storage path of the uploaded
+    // file (e.g. "/objects/uploads/<uuid>"). Null for paste-text and for
+    // auto-ingested documents.
+    storageObjectPath: varchar("storage_object_path"),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -26,6 +26,8 @@ tags:
     description: Vendor tool submissions and admin review queue.
   - name: Dashboard
     description: Aggregated dashboard summaries.
+  - name: Storage
+    description: Object storage upload and serving endpoints.
 
 paths:
   /healthz:
@@ -1193,6 +1195,53 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  # ---------- Storage ----------
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      description: |
+        Returns a presigned GCS URL for direct upload. The client sends JSON
+        metadata here, then uploads the file directly to the returned URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadUrlResponse' }
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '413':
+          description: File too large.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '415':
+          description: Unsupported file type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '500':
+          description: Failed to generate upload URL.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   # ---------- Dashboard ----------
   /dashboard/summary:
     get:
@@ -1650,7 +1699,9 @@ components:
         sizeBytes: { type: integer }
         charCount: { type: integer }
         chunkCount: { type: integer }
-        status: { type: string }
+        status:
+          type: string
+          description: One of `uploaded`, `processing`, `ready`, `failed`.
         autoSource:
           type: [string, 'null']
           description: >
@@ -1660,7 +1711,9 @@ components:
         sourceUrl:
           type: [string, 'null']
           description: Original public URL the doc was downloaded from (auto-ingest only).
-        errorMessage: { type: [string, 'null'] }
+        errorMessage:
+          type: [string, 'null']
+          description: Populated when status is `failed`.
         uploadedAt: { type: string, format: date-time }
         processedAt: { type: [string, 'null'], format: date-time }
         presetIds:
@@ -1698,13 +1751,20 @@ components:
           type: string
           description: >
             UTF-8 plain-text body. Set this for paste-text uploads. Either
-            content or contentBase64 must be provided.
-        contentBase64:
+            content or storageObjectPath must be provided.
+        storageObjectPath:
           type: string
           description: >
-            Base64-encoded binary body for PDF/DOCX/MD/TXT uploads. The server
-            picks the right extractor based on mimeType. Either content or
-            contentBase64 must be provided.
+            Object storage path returned by `POST /storage/uploads/request-url`
+            after the file was uploaded directly to GCS via the presigned URL.
+            The server downloads the file and runs the matching extractor based
+            on the file's mimeType (PDF, DOCX, MD, TXT). Either content or
+            storageObjectPath must be provided.
+        sizeBytes:
+          type: integer
+          description: >
+            File size in bytes — required when storageObjectPath is set so the
+            UI can display size before extraction completes.
 
     LibraryTestQueryRequest:
       type: object
@@ -1908,6 +1968,36 @@ components:
         toolSlug: { type: string }
         status: { type: string }
         createdAt: { type: string, format: date-time }
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Original file name.
+        size:
+          type: integer
+          minimum: 1
+          description: File size in bytes.
+        contentType:
+          type: string
+          minLength: 1
+          description: MIME type of the file.
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+          description: Presigned GCS URL for PUT upload.
+        objectPath:
+          type: string
+          description: Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database.
+        metadata:
+          $ref: '#/components/schemas/UploadUrlRequest'
 
     DashboardSummary:
       type: object

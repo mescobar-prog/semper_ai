@@ -810,7 +810,9 @@ export const ListDocumentsResponseItem = zod.object({
   sizeBytes: zod.number(),
   charCount: zod.number(),
   chunkCount: zod.number(),
-  status: zod.string(),
+  status: zod
+    .string()
+    .describe("One of `uploaded`, `processing`, `ready`, `failed`."),
   autoSource: zod
     .string()
     .nullable()
@@ -823,7 +825,10 @@ export const ListDocumentsResponseItem = zod.object({
     .describe(
       "Original public URL the doc was downloaded from (auto-ingest only).",
     ),
-  errorMessage: zod.string().nullable(),
+  errorMessage: zod
+    .string()
+    .nullable()
+    .describe("Populated when status is `failed`."),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
   presetIds: zod
@@ -846,13 +851,19 @@ export const UploadTextDocumentBody = zod.object({
     .string()
     .optional()
     .describe(
-      "UTF-8 plain-text body. Set this for paste-text uploads. Either content or contentBase64 must be provided.\n",
+      "UTF-8 plain-text body. Set this for paste-text uploads. Either content or storageObjectPath must be provided.\n",
     ),
-  contentBase64: zod
+  storageObjectPath: zod
     .string()
     .optional()
     .describe(
-      "Base64-encoded binary body for PDF\/DOCX\/MD\/TXT uploads. The server picks the right extractor based on mimeType. Either content or contentBase64 must be provided.\n",
+      "Object storage path returned by `POST \/storage\/uploads\/request-url` after the file was uploaded directly to GCS via the presigned URL. The server downloads the file and runs the matching extractor based on the file's mimeType (PDF, DOCX, MD, TXT). Either content or storageObjectPath must be provided.\n",
+    ),
+  sizeBytes: zod
+    .number()
+    .optional()
+    .describe(
+      "File size in bytes — required when storageObjectPath is set so the UI can display size before extraction completes.\n",
     ),
 });
 
@@ -864,7 +875,9 @@ export const UploadTextDocumentResponse = zod.object({
   sizeBytes: zod.number(),
   charCount: zod.number(),
   chunkCount: zod.number(),
-  status: zod.string(),
+  status: zod
+    .string()
+    .describe("One of `uploaded`, `processing`, `ready`, `failed`."),
   autoSource: zod
     .string()
     .nullable()
@@ -877,7 +890,10 @@ export const UploadTextDocumentResponse = zod.object({
     .describe(
       "Original public URL the doc was downloaded from (auto-ingest only).",
     ),
-  errorMessage: zod.string().nullable(),
+  errorMessage: zod
+    .string()
+    .nullable()
+    .describe("Populated when status is `failed`."),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
   presetIds: zod
@@ -975,7 +991,9 @@ export const GetDocumentResponse = zod
     sizeBytes: zod.number(),
     charCount: zod.number(),
     chunkCount: zod.number(),
-    status: zod.string(),
+    status: zod
+      .string()
+      .describe("One of `uploaded`, `processing`, `ready`, `failed`."),
     autoSource: zod
       .string()
       .nullable()
@@ -988,7 +1006,10 @@ export const GetDocumentResponse = zod
       .describe(
         "Original public URL the doc was downloaded from (auto-ingest only).",
       ),
-    errorMessage: zod.string().nullable(),
+    errorMessage: zod
+      .string()
+      .nullable()
+      .describe("Populated when status is `failed`."),
     uploadedAt: zod.coerce.date(),
     processedAt: zod.coerce.date().nullable(),
     presetIds: zod
@@ -1040,7 +1061,9 @@ export const SetDocumentPresetTagsResponse = zod.object({
   sizeBytes: zod.number(),
   charCount: zod.number(),
   chunkCount: zod.number(),
-  status: zod.string(),
+  status: zod
+    .string()
+    .describe("One of `uploaded`, `processing`, `ready`, `failed`."),
   autoSource: zod
     .string()
     .nullable()
@@ -1053,7 +1076,10 @@ export const SetDocumentPresetTagsResponse = zod.object({
     .describe(
       "Original public URL the doc was downloaded from (auto-ingest only).",
     ),
-  errorMessage: zod.string().nullable(),
+  errorMessage: zod
+    .string()
+    .nullable()
+    .describe("Populated when status is `failed`."),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
   presetIds: zod
@@ -1811,6 +1837,35 @@ export const ReviewSubmissionResponse = zod
       submitterDisplayName: zod.string().nullable(),
     }),
   );
+
+/**
+ * Returns a presigned GCS URL for direct upload. The client sends JSON
+metadata here, then uploads the file directly to the returned URL.
+
+ * @summary Request a presigned URL for file upload
+ */
+
+export const RequestUploadUrlBody = zod.object({
+  name: zod.string().min(1).describe("Original file name."),
+  size: zod.number().min(1).describe("File size in bytes."),
+  contentType: zod.string().min(1).describe("MIME type of the file."),
+});
+
+export const RequestUploadUrlResponse = zod.object({
+  uploadURL: zod.string().url().describe("Presigned GCS URL for PUT upload."),
+  objectPath: zod
+    .string()
+    .describe(
+      "Normalized object path (e.g. `\/objects\/uploads\/uuid`). Store this in your database.",
+    ),
+  metadata: zod
+    .object({
+      name: zod.string().min(1).describe("Original file name."),
+      size: zod.number().min(1).describe("File size in bytes."),
+      contentType: zod.string().min(1).describe("MIME type of the file."),
+    })
+    .optional(),
+});
 
 /**
  * @summary Aggregated dashboard summary
