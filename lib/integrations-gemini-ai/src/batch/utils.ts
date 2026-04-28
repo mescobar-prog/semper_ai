@@ -9,19 +9,18 @@ import pRetry, { AbortError } from "p-retry";
  *
  * USAGE:
  * ```typescript
- * import { batchProcess } from "@workspace/integrations-anthropic-ai/batch";
- * import { anthropic } from "@workspace/integrations-anthropic-ai";
+ * import { batchProcess } from "@workspace/integrations-gemini-ai/batch";
+ * import { ai } from "@workspace/integrations-gemini-ai";
  *
  * const results = await batchProcess(
  *   artworks,
  *   async (artwork) => {
- *     const message = await anthropic.messages.create({
- *       model: "claude-sonnet-4-6",
- *       max_tokens: 8192,
- *       messages: [{ role: "user", content: `Categorize: ${artwork.name}` }],
+ *     const response = await ai.models.generateContent({
+ *       model: "gemini-2.5-flash",
+ *       contents: [{ role: "user", parts: [{ text: `Categorize: ${artwork.name}` }] }],
+ *       config: { responseMimeType: "application/json" },
  *     });
- *     const block = message.content[0];
- *     return block.type === "text" ? block.text : "";
+ *     return JSON.parse(response.text ?? "{}");
  *   },
  *   { concurrency: 2, retries: 5 }
  * );

@@ -16,7 +16,7 @@ import { requireAuth } from "../middlewares/requireAuth";
 import { generateOpaqueToken } from "../lib/tokens";
 import {
   generateRagQueries,
-} from "../lib/anthropic-helpers";
+} from "../lib/gemini-helpers";
 import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
   buildContextBlock,

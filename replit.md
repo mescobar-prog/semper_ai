@@ -44,7 +44,7 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 ### RAG
 - Documents are paragraph-chunked (~900 chars target) on ingest and stored in `doc_chunks`.
 - Search uses Postgres `to_tsquery` with OR'd prefix lexemes (e.g. `uas:* | platoon:* | recon:*`) so any matching keyword in a chunk produces a hit. Stopwords are stripped client-side before building the tsquery.
-- Primer queries are generated per-launch by Anthropic from `profile + tool description`, then **always merged** with profile-derived queries (primaryMission, dutyTitle+MOS, aiUseCases, unit) to guarantee personal-doc recall even when the LLM focuses on tool terminology.
+- Primer queries are generated per-launch by Gemini (`gemini-3-flash-preview` via the Replit Gemini AI integration) from `profile + tool description`, then **always merged** with profile-derived queries (primaryMission, dutyTitle+MOS, aiUseCases, unit) to guarantee personal-doc recall even when the LLM focuses on tool terminology. The same Gemini model also powers the profile intake chat. Helper module: `artifacts/api-server/src/lib/gemini-helpers.ts`.
 
 ### Auth & admin
 - Replit OIDC via `@workspace/replit-auth-web`. Layout fetches `/api/profile` to determine `isAdmin` (which lives on UserProfile, not AuthUser).

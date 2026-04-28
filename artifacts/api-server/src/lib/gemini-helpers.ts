@@ -1,8 +1,8 @@
-import { anthropic } from "@workspace/integrations-anthropic-ai";
+import { ai } from "@workspace/integrations-gemini-ai";
 import type { Profile } from "@workspace/db";
 import { logger } from "./logger";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "gemini-3-flash-preview";
 
 function profileSummary(profile: Profile | null): string {
   if (!profile) return "No structured profile data available yet.";
@@ -85,20 +85,21 @@ Output format (CRITICAL):
 - Followed by a JSON object containing ONLY the fields you learned new values for (omit unchanged fields). Use the exact field names listed above. For aiUseCases, use a string array. Do not include the separator or JSON if no structured updates were made.
 - Never put the separator inside your reply text.`;
 
-  const messages = history.map((m) => ({
-    role: m.role,
-    content: m.content,
+  const contents = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
   }));
 
-  const response = await anthropic.messages.create({
+  const response = await ai.models.generateContent({
     model: MODEL,
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages,
+    contents,
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 8192,
+    },
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  const raw = textBlock && "text" in textBlock ? textBlock.text : "";
+  const raw = response.text ?? "";
 
   const sepIdx = raw.indexOf("---PROFILE---");
   if (sepIdx === -1) {
@@ -227,14 +228,15 @@ Generate the JSON object now.`;
 
   let llmQueries: string[] = [];
   try {
-    const response = await anthropic.messages.create({
+    const response = await ai.models.generateContent({
       model: MODEL,
-      max_tokens: 400,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: 8192,
+      },
     });
-    const textBlock = response.content.find((b) => b.type === "text");
-    const raw = textBlock && "text" in textBlock ? textBlock.text : "";
+    const raw = response.text ?? "";
     const cleaned = raw
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")

@@ -14,7 +14,7 @@ import {
   getOrCreateProfile,
   serializeProfile,
 } from "../lib/profile-helpers";
-import { runProfileChat } from "../lib/anthropic-helpers";
+import { runProfileChat } from "../lib/gemini-helpers";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
