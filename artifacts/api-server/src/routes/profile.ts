@@ -107,6 +107,22 @@ router.put("/profile", requireAuth, async (req, res) => {
     update.launchPreference = data.launchPreference;
   }
 
+  // viewMode is admin presentation state. Only honor it for users whose
+  // profile is actually flagged admin — non-admins quietly remain in
+  // "admin" view (which is the default and contains no admin-only UI for
+  // them anyway). This keeps the field from being a covert privilege
+  // signal: server-side authorization always reads isAdmin, never viewMode.
+  const rawForView = (req.body ?? {}) as Record<string, unknown>;
+  if ("viewMode" in rawForView) {
+    const v = rawForView.viewMode;
+    if (
+      previous.isAdmin === "true" &&
+      (v === "admin" || v === "operator")
+    ) {
+      update.viewMode = v;
+    }
+  }
+
   // Allow the client to switch the active mission preset via PUT /profile in
   // addition to the dedicated /profile/presets/:id/activate endpoint. The
   // generated zod schema may not include this key yet; tolerate it being

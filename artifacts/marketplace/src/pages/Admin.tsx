@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetMyProfile,
@@ -92,7 +93,21 @@ const EMPTY_TOOL: ToolUpsert = {
 export function Admin() {
   const { data: profileEnvelope, isLoading: profileLoading } =
     useGetMyProfile();
+  const [, setLocation] = useLocation();
   const isAdmin = profileEnvelope?.profile.isAdmin === true;
+  const viewMode = profileEnvelope?.profile.viewMode === "operator"
+    ? "operator"
+    : "admin";
+  // An admin who has chosen Operator view should not see admin pages
+  // even if they URL-type their way here. Bounce them to the dashboard
+  // — they can flip back via the header switch whenever they like.
+  const inOperatorView = isAdmin && viewMode === "operator";
+
+  useEffect(() => {
+    if (inOperatorView) {
+      setLocation("/dashboard");
+    }
+  }, [inOperatorView, setLocation]);
 
   if (profileLoading) {
     return (
@@ -100,6 +115,17 @@ export function Admin() {
         <div className="text-muted-foreground font-mono text-xs uppercase tracking-widest">
           Verifying credentials…
         </div>
+      </PageContainer>
+    );
+  }
+
+  if (inOperatorView) {
+    return (
+      <PageContainer>
+        <EmptyState
+          title="Operator view is on"
+          description="You're an administrator, but Operator view hides admin pages. Use the Admin/Operator switch in the top-right header to return to Admin view."
+        />
       </PageContainer>
     );
   }

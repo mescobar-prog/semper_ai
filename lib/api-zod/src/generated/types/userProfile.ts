@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { UserProfileLaunchPreference } from "./userProfileLaunchPreference";
+import type { UserProfileViewMode } from "./userProfileViewMode";
 
 /**
  * Persistent identity / assignment data for the operator. The task-dependent 6-element Context Block is returned as a sibling `contextBlock` field, never embedded here.
@@ -40,6 +41,9 @@ export interface UserProfile {
   /** @nullable */
   freeFormContext: string | null;
   isAdmin: boolean;
+  /** Per-admin presentation toggle controlling whether admin-only UI affordances render. Always "admin" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.
+   */
+  viewMode: UserProfileViewMode;
   launchPreference: UserProfileLaunchPreference;
   completenessPct: number;
   /** @nullable */

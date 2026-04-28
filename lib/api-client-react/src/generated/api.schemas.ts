@@ -55,6 +55,18 @@ export const LogoutSuccessValue = {
 } as const;
 export type LogoutSuccess = typeof LogoutSuccessValue;
 
+/**
+ * Per-admin presentation toggle controlling whether admin-only UI affordances render. Always "admin" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.
+
+ */
+export type UserProfileViewMode =
+  (typeof UserProfileViewMode)[keyof typeof UserProfileViewMode];
+
+export const UserProfileViewMode = {
+  admin: "admin",
+  operator: "operator",
+} as const;
+
 export type UserProfileLaunchPreference =
   (typeof UserProfileLaunchPreference)[keyof typeof UserProfileLaunchPreference];
 
@@ -96,6 +108,9 @@ export interface UserProfile {
   /** @nullable */
   freeFormContext: string | null;
   isAdmin: boolean;
+  /** Per-admin presentation toggle controlling whether admin-only UI affordances render. Always "admin" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.
+   */
+  viewMode: UserProfileViewMode;
   launchPreference: UserProfileLaunchPreference;
   completenessPct: number;
   /** @nullable */
@@ -192,6 +207,18 @@ export const ProfileUpdateLaunchPreference = {
 } as const;
 
 /**
+ * Persist the admin's chosen presentation mode. Server silently ignores this field for non-admins.
+
+ */
+export type ProfileUpdateViewMode =
+  (typeof ProfileUpdateViewMode)[keyof typeof ProfileUpdateViewMode];
+
+export const ProfileUpdateViewMode = {
+  admin: "admin",
+  operator: "operator",
+} as const;
+
+/**
  * Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use /profile/context-block/confirm instead.
 
  */
@@ -223,6 +250,9 @@ export interface ProfileUpdate {
   /** @nullable */
   freeFormContext?: string | null;
   launchPreference?: ProfileUpdateLaunchPreference;
+  /** Persist the admin's chosen presentation mode. Server silently ignores this field for non-admins.
+   */
+  viewMode?: ProfileUpdateViewMode;
 }
 
 export type ChatMessageRole =

@@ -421,12 +421,60 @@ export function serializeProfile(
     billets: profile.billets ?? [],
     freeFormContext: profile.freeFormContext,
     isAdmin: profile.isAdmin === "true",
+    viewMode:
+      profile.isAdmin === "true" && profile.viewMode === "operator"
+        ? "operator"
+        : "admin",
     activePresetId: activePresetId ?? profile.activePresetId ?? null,
     launchPreference:
       profile.launchPreference === "direct" ? "direct" : "preview",
     completenessPct: completenessPct(profile, contextBlock),
     updatedAt: profile.updatedAt.toISOString(),
   };
+}
+
+// Comma-separated list of operator emails (case-insensitive) that should
+// be auto-promoted to admin when they sign in. Reading the env var on each
+// call keeps tests + dev workflows simple — there is no caching.
+export function getAdminEmails(): string[] {
+  const raw = process.env.ADMIN_EMAILS;
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+}
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const list = getAdminEmails();
+  if (list.length === 0) return false;
+  return list.includes(email.trim().toLowerCase());
+}
+
+/**
+ * If the given user's email is on the configured admin list and their
+ * profile is not yet flagged as admin, set is_admin=true. Idempotent —
+ * repeated logins are safe and never demote an already-admin account.
+ * If the env var is unset/empty, this is a no-op.
+ */
+export async function autoPromoteAdminIfListed(
+  userId: string,
+  email: string | null | undefined,
+): Promise<void> {
+  if (!isAdminEmail(email)) return;
+  // Make sure a profile row exists, then flip the flag if it's not already
+  // true. The conditional WHERE keeps this idempotent on re-login.
+  await getOrCreateProfile(userId);
+  await db
+    .update(profilesTable)
+    .set({ isAdmin: "true" })
+    .where(
+      and(
+        eq(profilesTable.userId, userId),
+        sql`${profilesTable.isAdmin} <> 'true'`,
+      ),
+    );
 }
 
 // Lazily ensure the user has at least one preset and an active-preset

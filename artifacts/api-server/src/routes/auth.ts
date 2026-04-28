@@ -18,6 +18,8 @@ import {
   ISSUER_URL,
   type SessionData,
 } from "../lib/auth";
+import { autoPromoteAdminIfListed } from "../lib/profile-helpers";
+import { logger } from "../lib/logger";
 
 const OIDC_COOKIE_TTL = 10 * 60 * 1000;
 
@@ -79,6 +81,17 @@ async function upsertUser(claims: Record<string, unknown>) {
       },
     })
     .returning();
+
+  // Auto-promote to admin if the user's email is on the configured admin
+  // list. Idempotent: only flips the flag from "false" to "true", never
+  // demotes. A failure here must not block sign-in — the user can still
+  // operate as a non-admin while we surface the error in logs.
+  try {
+    await autoPromoteAdminIfListed(user.id, user.email);
+  } catch (err) {
+    logger.error({ err, userId: user.id }, "auto-promote admin failed");
+  }
+
   return user;
 }
 

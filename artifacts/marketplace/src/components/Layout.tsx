@@ -6,6 +6,7 @@ import {
   useGetMyProfile,
   useListMyPresets,
   useActivateMyPreset,
+  useUpdateMyProfile,
   getGetMyProfileQueryKey,
   getListMyPresetsQueryKey,
   getListDocumentsQueryKey,
@@ -39,6 +40,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
   }
 
   const isAdmin = profileEnvelope?.profile.isAdmin === true;
+  const viewMode = profileEnvelope?.profile.viewMode === "operator"
+    ? "operator"
+    : "admin";
+  // Single source of truth for whether admin-only UI affordances render.
+  // Server-side authorization keys off `isAdmin` only — flipping into
+  // operator view is purely presentation and never demotes the user.
+  const effectiveRole: "admin" | "operator" =
+    isAdmin && viewMode === "admin" ? "admin" : "operator";
+  const showAdminAffordances = effectiveRole === "admin";
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard" },
@@ -47,7 +57,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/profile", label: "Profile" },
     { href: "/launches", label: "Launches" },
     { href: "/submissions", label: "My submissions" },
-    ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
+    ...(showAdminAffordances ? [{ href: "/admin", label: "Admin" }] : []),
   ];
 
   return (
@@ -93,7 +103,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider truncate">
-              {isAdmin ? "Admin" : "Operator"}
+              {effectiveRole === "admin" ? "Admin" : "Operator"}
             </span>
             <button
               onClick={logout}
@@ -105,11 +115,84 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <main className="flex-1 overflow-auto flex flex-col">
-        <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-end">
+        <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-end gap-3">
+          {isAdmin && <ViewModeSwitch viewMode={viewMode} />}
           <PresetSwitcher />
         </header>
         <div className="flex-1 overflow-auto">{children}</div>
       </main>
+    </div>
+  );
+}
+
+function ViewModeSwitch({
+  viewMode,
+}: {
+  viewMode: "admin" | "operator";
+}) {
+  const queryClient = useQueryClient();
+  const update = useUpdateMyProfile();
+  const [, setLocation] = useLocation();
+  const [location] = useLocation();
+
+  const setMode = async (next: "admin" | "operator") => {
+    if (next === viewMode || update.isPending) return;
+    // Optimistically patch the cached profile so the UI flips immediately
+    // even before the server round-trip resolves.
+    queryClient.setQueriesData(
+      { queryKey: getGetMyProfileQueryKey() },
+      (prev: unknown) => {
+        if (!prev || typeof prev !== "object") return prev;
+        const env = prev as { profile?: Record<string, unknown> };
+        if (!env.profile) return prev;
+        return { ...env, profile: { ...env.profile, viewMode: next } };
+      },
+    );
+    try {
+      await update.mutateAsync({
+        data: { viewMode: next } as never,
+      });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+    }
+    // If we just switched out of admin view while sitting on an admin
+    // page, send the user home so they don't keep staring at the Admin
+    // screen they no longer want to see.
+    if (next === "operator" && location.startsWith("/admin")) {
+      setLocation("/dashboard");
+    }
+  };
+
+  return (
+    <div
+      className="inline-flex items-center rounded-md border border-border bg-background p-0.5"
+      role="group"
+      aria-label="View mode"
+    >
+      <button
+        type="button"
+        onClick={() => setMode("admin")}
+        aria-pressed={viewMode === "admin"}
+        className={`text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 rounded ${
+          viewMode === "admin"
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Admin view
+      </button>
+      <button
+        type="button"
+        onClick={() => setMode("operator")}
+        aria-pressed={viewMode === "operator"}
+        className={`text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 rounded ${
+          viewMode === "operator"
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Operator view
+      </button>
     </div>
   );
 }

@@ -1757,8 +1757,8 @@ components:
       required:
         [userId, branch, rank, mosCode, dutyTitle, unit, baseLocation,
          securityClearance, deploymentStatus, command, billets,
-         freeFormContext, isAdmin, launchPreference, completenessPct,
-         activePresetId, updatedAt]
+         freeFormContext, isAdmin, viewMode, launchPreference,
+         completenessPct, activePresetId, updatedAt]
       properties:
         userId: { type: string }
         branch: { type: [string, 'null'] }
@@ -1779,6 +1779,14 @@ components:
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
         isAdmin: { type: boolean }
+        viewMode:
+          type: string
+          enum: [admin, operator]
+          description: >
+            Per-admin presentation toggle controlling whether admin-only
+            UI affordances render. Always "admin" for non-admin users
+            and ignored by server-side authorization, which keys off
+            isAdmin only.
         launchPreference: { type: string, enum: [preview, direct] }
         completenessPct: { type: integer }
         activePresetId: { type: [string, 'null'] }
@@ -1914,6 +1922,12 @@ components:
           items: { type: string }
         freeFormContext: { type: [string, 'null'] }
         launchPreference: { type: string, enum: [preview, direct] }
+        viewMode:
+          type: string
+          enum: [admin, operator]
+          description: >
+            Persist the admin's chosen presentation mode. Server silently
+            ignores this field for non-admins.
 
     ChatMessage:
       type: object

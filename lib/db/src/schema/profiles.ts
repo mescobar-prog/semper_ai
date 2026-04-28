@@ -29,6 +29,13 @@ export const profilesTable = pgTable("profiles", {
   billets: jsonb("billets").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   freeFormContext: text("free_form_context"),
   isAdmin: varchar("is_admin").notNull().default("false"),
+  // Per-admin presentation toggle. "admin" (default) shows the Admin nav
+  // link and admin-only widgets; "operator" hides them and renders the
+  // same screens a regular operator sees. Persisted on the profile so the
+  // choice follows the user across browsers and reloads. Ignored entirely
+  // for non-admins (server-side authorization continues to key off
+  // isAdmin, never viewMode).
+  viewMode: varchar("view_mode").notNull().default("admin"),
   // Pointer to the user's currently active mission preset (presets.id).
   // Nullable so we can lazily backfill via ensureActivePreset for users
   // created before the presets feature shipped.

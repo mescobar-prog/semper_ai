@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProfileUpdateLaunchPreference } from "./profileUpdateLaunchPreference";
+import type { ProfileUpdateViewMode } from "./profileUpdateViewMode";
 
 /**
  * Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use /profile/context-block/confirm instead.
@@ -39,4 +40,7 @@ export interface ProfileUpdate {
   /** @nullable */
   freeFormContext?: string | null;
   launchPreference?: ProfileUpdateLaunchPreference;
+  /** Persist the admin's chosen presentation mode. Server silently ignores this field for non-admins.
+   */
+  viewMode?: ProfileUpdateViewMode;
 }

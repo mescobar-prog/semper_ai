@@ -120,6 +120,11 @@ export const GetMyProfileResponse = zod
           .describe("Billet titles the operator currently holds."),
         freeFormContext: zod.string().nullable(),
         isAdmin: zod.boolean(),
+        viewMode: zod
+          .enum(["admin", "operator"])
+          .describe(
+            'Per-admin presentation toggle controlling whether admin-only UI affordances render. Always \"admin\" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.\n',
+          ),
         launchPreference: zod.enum(["preview", "direct"]),
         completenessPct: zod.number(),
         activePresetId: zod.string().nullable(),
@@ -206,6 +211,12 @@ export const UpdateMyProfileBody = zod
       .describe("Billet titles the operator currently holds."),
     freeFormContext: zod.string().nullish(),
     launchPreference: zod.enum(["preview", "direct"]).optional(),
+    viewMode: zod
+      .enum(["admin", "operator"])
+      .optional()
+      .describe(
+        "Persist the admin's chosen presentation mode. Server silently ignores this field for non-admins.\n",
+      ),
   })
   .describe(
     "Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use \/profile\/context-block\/confirm instead.\n",
@@ -235,6 +246,11 @@ export const UpdateMyProfileResponse = zod
           .describe("Billet titles the operator currently holds."),
         freeFormContext: zod.string().nullable(),
         isAdmin: zod.boolean(),
+        viewMode: zod
+          .enum(["admin", "operator"])
+          .describe(
+            'Per-admin presentation toggle controlling whether admin-only UI affordances render. Always \"admin\" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.\n',
+          ),
         launchPreference: zod.enum(["preview", "direct"]),
         completenessPct: zod.number(),
         activePresetId: zod.string().nullable(),
@@ -342,6 +358,12 @@ export const SendProfileChatResponse = zod.object({
           .describe("Billet titles the operator currently holds."),
         freeFormContext: zod.string().nullish(),
         launchPreference: zod.enum(["preview", "direct"]).optional(),
+        viewMode: zod
+          .enum(["admin", "operator"])
+          .optional()
+          .describe(
+            "Persist the admin's chosen presentation mode. Server silently ignores this field for non-admins.\n",
+          ),
       })
       .describe(
         "Partial update for the persistent identity profile. Only the supplied fields are written. The 6-element Context Block is NOT updated through this endpoint — use \/profile\/context-block\/confirm instead.\n",
@@ -450,6 +472,11 @@ export const ConfirmContextBlockResponse = zod.object({
         .describe("Billet titles the operator currently holds."),
       freeFormContext: zod.string().nullable(),
       isAdmin: zod.boolean(),
+      viewMode: zod
+        .enum(["admin", "operator"])
+        .describe(
+          'Per-admin presentation toggle controlling whether admin-only UI affordances render. Always \"admin\" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.\n',
+        ),
       launchPreference: zod.enum(["preview", "direct"]),
       completenessPct: zod.number(),
       activePresetId: zod.string().nullable(),
@@ -1672,6 +1699,11 @@ export const ExchangeContextTokenResponse = zod.object({
         .describe("Billet titles the operator currently holds."),
       freeFormContext: zod.string().nullable(),
       isAdmin: zod.boolean(),
+      viewMode: zod
+        .enum(["admin", "operator"])
+        .describe(
+          'Per-admin presentation toggle controlling whether admin-only UI affordances render. Always \"admin\" for non-admin users and ignored by server-side authorization, which keys off isAdmin only.\n',
+        ),
       launchPreference: zod.enum(["preview", "direct"]),
       completenessPct: zod.number(),
       activePresetId: zod.string().nullable(),
@@ -2205,7 +2237,7 @@ export const SyncToolFromGithubResponse = zod
       ragQueryTemplates: zod
         .array(zod.string())
         .describe(
-          'Admin-authored seed query templates (e.g. \"{primaryMission}\", \"{dutyTitle} SOPs\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
+          'Admin-authored seed query templates (e.g. \"{dutyTitle} SOPs\", \"{billets} OPORD\"). Variables in {curlies} are interpolated from the launching user\'s profile; the resolved strings are merged with LLM-generated queries before searching the user\'s library.\n',
         ),
       version: zod.string().nullable(),
       homepageUrl: zod.string().nullable(),
