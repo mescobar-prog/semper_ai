@@ -258,7 +258,7 @@ function PresetSwitcher() {
       >
         <div className="text-left">
           <div className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground leading-none">
-            Active mission preset
+            Active profile preset
           </div>
           <div className="text-sm font-medium leading-tight mt-0.5">
             {active.name}
