@@ -70,6 +70,12 @@ A TradeWinds-style marketplace where service members sign in once, build a struc
 - Failed auto-ingested rows (autoSource + sourceUrl set, status=failed) get a one-click `Retry` (`POST /api/library/documents/:id/retry` → re-runs `retryFailedAutoDocument`, which re-fetches via the same URL, replaces chunks in-place, and increments `documents.retry_count`). After `retry_count >= 1`, the row UI swaps Retry for an "Open source" link + "Upload manually" button. Manual upload then posts to `POST /api/library/documents` with `replacesDocumentId` — the route runs in a transaction that deletes the failed row, inserts the new row inheriting `autoSource`/`sourceUrl`/preset tag links, and returns the new doc. Out of scope for now: package-level retry, OCR, retrying user-uploaded docs.
 - Paste-text uploads still use the synchronous `content` field on the same endpoint.
 
+### Tests
+- API-level tests live in `artifacts/api-server/src/__tests__/` and run with `vitest run` (script: `pnpm --filter @workspace/api-server test`, or `pnpm test` from the repo root which fans out via `pnpm -r --if-present run test`).
+- They exercise the real Postgres DB pointed to by `DATABASE_URL` (no schema mocking — they create per-test users/tools with random IDs and clean them up in `afterAll`).
+- External integrations are mocked at the module boundary with `vi.mock` (see `admin-sync-github.test.ts` for `lib/github` and `admin-draft-text.test.ts` for `lib/gemini-helpers`), so tests don't hit GitHub or Gemini. Vitest is configured (in `vitest.config.ts`) with `pool: "forks"` and `singleFork: true` so DB-touching tests don't race each other, and with `resolve.conditions: ["workspace"]` to match the TS `customConditions` setup.
+- Auth in tests goes through `createTestUser`, which inserts a real `users` + `profiles` row, calls `createSession`, and returns an `Authorization: Bearer <sid>` header — exactly the wire path that production uses.
+
 ### Auth & admin
 - Replit OIDC via `@workspace/replit-auth-web`. Layout fetches `/api/profile` to determine `isAdmin` (which lives on `envelope.profile`, not AuthUser).
 - The first user is a normal operator. Promote to admin with `UPDATE profiles SET is_admin = true WHERE user_id = '...'`.
