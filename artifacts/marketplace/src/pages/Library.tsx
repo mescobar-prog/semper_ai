@@ -7,11 +7,17 @@ import {
   useGetDocument,
   useDeleteDocument,
   useTestLibraryQuery,
+  useListMyPresets,
+  useSetDocumentPresetTags,
   getGetLibraryStatsQueryKey,
   getListDocumentsQueryKey,
   getGetDocumentQueryKey,
+  getListMyPresetsQueryKey,
 } from "@workspace/api-client-react";
-import type { DocumentSummary } from "@workspace/api-client-react";
+import type {
+  DocumentSummary,
+  MissionPreset,
+} from "@workspace/api-client-react";
 import { parseAutoSource, BRANCHES as MIL_BRANCHES } from "@workspace/mil-data";
 import {
   PageContainer,
@@ -51,6 +57,9 @@ export function Library() {
   const queryClient = useQueryClient();
   const { data: stats } = useGetLibraryStats();
   const { data: docs, isLoading, error } = useListDocuments();
+  const { data: presets } = useListMyPresets({
+    query: { queryKey: getListMyPresetsQueryKey(), retry: false },
+  });
   const uploadMutation = useUploadTextDocument();
   const deleteMutation = useDeleteDocument();
   const testMutation = useTestLibraryQuery();
@@ -58,18 +67,29 @@ export function Library() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploadMode, setUploadMode] = useState<"file" | "paste">("file");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [activeOnly, setActiveOnly] = useState(false);
   const [sourceFilter, setSourceFilter] =
     useState<"all" | "uploaded" | "auto">("all");
 
+  const presetList: MissionPreset[] = presets ?? [];
+  const activePreset = presetList.find((p) => p.isActive);
+
   // Filter the docs list locally — the user-facing buckets are uploaded vs.
   // auto-ingested. Counts drive the filter buttons so the UI is honest about
-  // which sources actually exist.
+  // which sources actually exist. The "active preset only" toggle further
+  // narrows the list to documents tagged into the active preset.
   const filteredDocs = useMemo<DocumentSummary[]>(() => {
     if (!docs) return [];
-    if (sourceFilter === "uploaded") return docs.filter((d) => !d.autoSource);
-    if (sourceFilter === "auto") return docs.filter((d) => !!d.autoSource);
-    return docs;
-  }, [docs, sourceFilter]);
+    let list = docs;
+    if (sourceFilter === "uploaded") list = list.filter((d) => !d.autoSource);
+    else if (sourceFilter === "auto") list = list.filter((d) => !!d.autoSource);
+    if (activeOnly && activePreset) {
+      const inScope = new Set(activePreset.documentIds);
+      list = list.filter((d) => inScope.has(d.id));
+    }
+    return list;
+  }, [docs, sourceFilter, activeOnly, activePreset]);
   const counts = useMemo(() => {
     const total = docs?.length ?? 0;
     const auto = docs?.filter((d) => !!d.autoSource).length ?? 0;
@@ -161,6 +181,7 @@ export function Library() {
       setShowUpload(false);
       queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetLibraryStatsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListMyPresetsQueryKey() });
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     }
@@ -170,8 +191,10 @@ export function Library() {
     if (!confirm("Delete this document?")) return;
     await deleteMutation.mutateAsync({ id });
     if (expandedId === id) setExpandedId(null);
+    if (editingTagsId === id) setEditingTagsId(null);
     queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
     queryClient.invalidateQueries({ queryKey: getGetLibraryStatsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListMyPresetsQueryKey() });
   };
 
   const onRunTestQuery = async (e: React.FormEvent) => {
@@ -337,6 +360,13 @@ export function Library() {
             </div>
           )}
 
+          {activePreset && (
+            <div className="text-[11px] font-mono text-muted-foreground">
+              New uploads are auto-tagged into the active preset:{" "}
+              <span className="text-primary">{activePreset.name}</span>. You
+              can adjust tags after upload.
+            </div>
+          )}
           {uploadError && <ErrorBox>{uploadError}</ErrorBox>}
           <div className="flex justify-end">
             <button
@@ -377,7 +407,7 @@ export function Library() {
         />
       ) : (
         <>
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <FilterChip
               active={sourceFilter === "all"}
               onClick={() => setSourceFilter("all")}
@@ -396,6 +426,22 @@ export function Library() {
               label={`Auto-ingested (${counts.auto})`}
               testId="filter-auto"
             />
+            {presetList.length > 0 && (
+              <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="filter-active-preset-only"
+                  checked={activeOnly}
+                  onChange={(e) => setActiveOnly(e.target.checked)}
+                />
+                Show only documents in active preset
+                {activePreset && (
+                  <span className="text-primary font-mono">
+                    ({activePreset.name})
+                  </span>
+                )}
+              </label>
+            )}
           </div>
           <div className="space-y-2">
             {filteredDocs.length === 0 ? (
@@ -437,6 +483,32 @@ export function Library() {
                           </>
                         )}
                       </div>
+                      {presetList.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {(d.presetIds ?? []).length === 0 ? (
+                            <span className="text-[10px] font-mono text-rose-400/80 uppercase tracking-wider">
+                              Untagged · not in any preset
+                            </span>
+                          ) : (
+                            (d.presetIds ?? []).map((pid) => {
+                              const p = presetList.find((x) => x.id === pid);
+                              if (!p) return null;
+                              return (
+                                <span
+                                  key={pid}
+                                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                                    p.isActive
+                                      ? "border-primary/40 bg-primary/10 text-primary"
+                                      : "border-border text-muted-foreground"
+                                  }`}
+                                >
+                                  {p.name}
+                                </span>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <Pill tone="neutral">{d.chunkCount} chunks</Pill>
@@ -446,6 +518,20 @@ export function Library() {
                       <Pill tone={d.status === "ready" ? "good" : "warn"}>
                         {d.status}
                       </Pill>
+                      {presetList.length > 0 && (
+                        <button
+                          data-testid={`button-tags-${d.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTagsId(
+                              editingTagsId === d.id ? null : d.id,
+                            );
+                          }}
+                          className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground hover:text-foreground"
+                        >
+                          Tags
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -457,6 +543,13 @@ export function Library() {
                       </button>
                     </div>
                   </div>
+                  {editingTagsId === d.id && (
+                    <PresetTagEditor
+                      doc={d}
+                      presets={presetList}
+                      onClose={() => setEditingTagsId(null)}
+                    />
+                  )}
                   {expandedId === d.id && <DocChunks documentId={d.id} />}
                 </div>
               ))
@@ -587,6 +680,92 @@ function AutoSourceBadge({
     >
       Auto · {branchLabel} {kindLabel} {parsed.identifier}
     </span>
+  );
+}
+
+function PresetTagEditor({
+  doc,
+  presets,
+  onClose,
+}: {
+  doc: DocumentSummary;
+  presets: MissionPreset[];
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const setTags = useSetDocumentPresetTags();
+  const [selected, setSelected] = useState<string[]>(doc.presetIds ?? []);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSave = async () => {
+    setError(null);
+    try {
+      await setTags.mutateAsync({
+        id: doc.id,
+        data: { presetIds: selected },
+      });
+      queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListMyPresetsQueryKey() });
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    }
+  };
+
+  return (
+    <div className="border-t border-border bg-background/50 p-5">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-3">
+        Tag this document into presets
+      </div>
+      {presets.length === 0 ? (
+        <div className="text-xs text-muted-foreground italic">
+          You don't have any presets yet.
+        </div>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-1.5 mb-3">
+          {presets.map((p) => (
+            <label
+              key={p.id}
+              className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent/30 px-2 py-1 rounded"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(p.id)}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelected([...selected, p.id]);
+                  } else {
+                    setSelected(selected.filter((x) => x !== p.id));
+                  }
+                }}
+              />
+              <span>{p.name}</span>
+              {p.isActive && (
+                <span className="text-[9px] font-mono uppercase tracking-wider text-primary">
+                  active
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+      {error && <ErrorBox>{error}</ErrorBox>}
+      <div className="flex gap-2 justify-end">
+        <button
+          onClick={onClose}
+          className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground px-2.5 py-1"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onSave}
+          disabled={setTags.isPending}
+          className="text-[11px] font-medium px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {setTags.isPending ? "Saving…" : "Save tags"}
+        </button>
+      </div>
+    </div>
   );
 }
 

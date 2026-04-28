@@ -13,6 +13,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
+  ensureActivePreset,
   getOrCreateProfile,
   serializeProfile,
 } from "../lib/profile-helpers";
@@ -31,8 +32,10 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 router.get("/profile", requireAuth, async (req, res) => {
-  const profile = await getOrCreateProfile(req.user!.id);
-  res.json(serializeProfile(profile));
+  // Lazy-create the user's default mission preset on first read so that
+  // the returned activePresetId is always populated.
+  const { profile, preset } = await ensureActivePreset(req.user!.id);
+  res.json(serializeProfile(profile, preset.id));
 });
 
 router.put("/profile", requireAuth, async (req, res) => {
@@ -61,6 +64,18 @@ router.put("/profile", requireAuth, async (req, res) => {
     if (k in data) update[k] = data[k];
   }
   if (Array.isArray(data.aiUseCases)) update.aiUseCases = data.aiUseCases;
+
+  // Allow the client to switch the active mission preset via PUT /profile in
+  // addition to the dedicated /profile/presets/:id/activate endpoint. The
+  // generated zod schema may not include this key yet; tolerate it being
+  // present on the raw body.
+  const rawBody = (req.body ?? {}) as Record<string, unknown>;
+  if ("activePresetId" in rawBody) {
+    const v = rawBody.activePresetId;
+    if (v === null || typeof v === "string") {
+      update.activePresetId = v;
+    }
+  }
 
   // Server-side branch+MOS validity enforcement. The catalog is the source of
   // truth: if a client (current UI, stale UI, or direct API call) tries to
@@ -131,7 +146,7 @@ router.put("/profile", requireAuth, async (req, res) => {
     );
   }
 
-  res.json(serializeProfile(updated));
+  res.json(serializeProfile(updated, updated.activePresetId));
 });
 
 router.get("/profile/chat", requireAuth, async (req, res) => {
@@ -276,7 +291,7 @@ router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
     .returning();
 
   res.json({
-    profile: serializeProfile(updated),
+    profile: serializeProfile(updated, updated.activePresetId),
     evaluation,
   });
 });

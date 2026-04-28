@@ -20,10 +20,13 @@ import {
 import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
   buildContextBlock,
+  ensureActivePreset,
+  getActiveContext,
   getOrCreateProfile,
   hasConfirmedContextBlock,
   serializeContextBlock,
   serializeProfile,
+  snapshotAsProfile,
 } from "../lib/profile-helpers";
 import { logger } from "../lib/logger";
 
@@ -57,6 +60,11 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     return;
   }
 
+  // Ensure the user has an active mission preset before issuing a launch
+  // token, so by the time the tool calls /tools/context-exchange we have a
+  // consistent preset to pull from.
+  const { preset } = await ensureActivePreset(req.user!.id);
+
   const [launch] = await db
     .insert(launchesTable)
     .values({
@@ -73,6 +81,10 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
     launchId: launch.id,
     expiresAt,
   });
+  logger.info(
+    { launchId: launch.id, toolId: tool.id, presetId: preset.id },
+    "launch initiated",
+  );
 
   let launchUrl = tool.launchUrl;
   if (launchUrl.startsWith("/")) {
@@ -145,12 +157,17 @@ router.post("/tools/context-exchange", async (req, res) => {
     return;
   }
 
-  const profile = await getOrCreateProfile(user.id);
+  // Resolve the active mission preset for this user — its snapshot becomes
+  // the "profile" the tool sees, and its document set scopes RAG. The live
+  // profile is still kept around so the user's confirmed Context Block
+  // (cb_* fields) and other live-only fields ride along.
+  const ctx = await getActiveContext(user.id);
+  const snapshotProfile = snapshotAsProfile(ctx.snapshot, ctx.profile);
 
   let queries: string[] = [];
   let snippets: Awaited<ReturnType<typeof searchChunksMultiQuery>> = [];
   try {
-    queries = await generateRagQueries(profile, {
+    queries = await generateRagQueries(snapshotProfile, {
       name: tool.name,
       vendor: tool.vendor,
       shortDescription: tool.shortDescription,
@@ -158,7 +175,9 @@ router.post("/tools/context-exchange", async (req, res) => {
       purpose: tool.purpose,
       ragQueryTemplates: tool.ragQueryTemplates,
     });
-    snippets = await searchChunksMultiQuery(user.id, queries, 4, 12);
+    snippets = await searchChunksMultiQuery(user.id, queries, 4, 12, {
+      documentIds: ctx.documentIds,
+    });
   } catch (err) {
     logger.warn({ err }, "RAG primer failed; returning empty primer");
   }
@@ -202,13 +221,14 @@ router.post("/tools/context-exchange", async (req, res) => {
       atoStatus: tool.atoStatus,
     },
     user: userPayload,
-    profile: serializeProfile(profile),
-    contextBlock: buildContextBlock(userPayload, profile),
+    profile: serializeProfile(snapshotProfile, ctx.activePreset.id),
+    contextBlock: buildContextBlock(userPayload, snapshotProfile),
     // Per spec: structuredContextBlock is null when the operator has not
     // confirmed a Context Block yet; otherwise it carries the full state
-    // including the most recent evaluation.
-    structuredContextBlock: hasConfirmedContextBlock(profile)
-      ? serializeContextBlock(profile)
+    // including the most recent evaluation. The cb_* fields ride on the
+    // live profile (snapshotAsProfile carries them through from fallback).
+    structuredContextBlock: hasConfirmedContextBlock(snapshotProfile)
+      ? serializeContextBlock(snapshotProfile)
       : null,
     primer: { queries, snippets },
   });
@@ -236,16 +256,25 @@ router.post("/tools/library-query", async (req, res) => {
     return;
   }
 
+  // Apply the same active-preset doc scope used at exchange time so a tool
+  // can't reach outside the user's chosen mission scope mid-session.
+  const ctx = await getActiveContext(sess.userId);
+
   const snippets = await searchChunks(
     sess.userId,
     query,
     Math.min(Math.max(limit ?? 6, 1), 20),
+    { documentIds: ctx.documentIds },
   );
 
   res.json({ query, snippets });
 });
 
 router.get("/launches/recent", requireAuth, async (req, res) => {
+  // Touch ensureActivePreset so brand-new accounts get a preset minted on
+  // their first dashboard load; we don't actually use the result here.
+  await getOrCreateProfile(req.user!.id);
+
   const rows = await db
     .select({
       id: launchesTable.id,

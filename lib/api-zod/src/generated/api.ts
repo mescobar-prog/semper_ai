@@ -157,6 +157,7 @@ export const GetMyProfileResponse = zod.object({
       zod.null(),
     ]),
   }),
+  activePresetId: zod.string().nullable(),
   updatedAt: zod.coerce.date(),
 });
 
@@ -238,6 +239,7 @@ export const UpdateMyProfileResponse = zod.object({
       zod.null(),
     ]),
   }),
+  activePresetId: zod.string().nullable(),
   updatedAt: zod.coerce.date(),
 });
 
@@ -423,6 +425,7 @@ export const ConfirmContextBlockResponse = zod.object({
         zod.null(),
       ]),
     }),
+    activePresetId: zod.string().nullable(),
     updatedAt: zod.coerce.date(),
   }),
   evaluation: zod.object({
@@ -456,6 +459,211 @@ export const ConfirmContextBlockResponse = zod.object({
         'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
       ),
   }),
+});
+
+/**
+ * @summary List the current user's mission presets
+ */
+export const ListMyPresetsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullable(),
+  profileSnapshot: zod.object({
+    branch: zod.string().nullable(),
+    rank: zod.string().nullable(),
+    mosCode: zod.string().nullable(),
+    dutyTitle: zod.string().nullable(),
+    unit: zod.string().nullable(),
+    baseLocation: zod.string().nullable(),
+    securityClearance: zod.string().nullable(),
+    deploymentStatus: zod.string().nullable(),
+    primaryMission: zod.string().nullable(),
+    aiUseCases: zod.array(zod.string()),
+    freeFormContext: zod.string().nullable(),
+  }),
+  documentIds: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const ListMyPresetsResponse = zod.array(ListMyPresetsResponseItem);
+
+/**
+ * @summary Create a new mission preset (snapshots the current profile by default)
+ */
+
+export const CreateMyPresetBody = zod.object({
+  name: zod.string().min(1),
+  description: zod.string().nullish(),
+  profileSnapshot: zod
+    .union([
+      zod.object({
+        branch: zod.string().nullable(),
+        rank: zod.string().nullable(),
+        mosCode: zod.string().nullable(),
+        dutyTitle: zod.string().nullable(),
+        unit: zod.string().nullable(),
+        baseLocation: zod.string().nullable(),
+        securityClearance: zod.string().nullable(),
+        deploymentStatus: zod.string().nullable(),
+        primaryMission: zod.string().nullable(),
+        aiUseCases: zod.array(zod.string()),
+        freeFormContext: zod.string().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  documentIds: zod.array(zod.string()).optional(),
+  activate: zod.boolean().optional(),
+});
+
+export const CreateMyPresetResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullable(),
+  profileSnapshot: zod.object({
+    branch: zod.string().nullable(),
+    rank: zod.string().nullable(),
+    mosCode: zod.string().nullable(),
+    dutyTitle: zod.string().nullable(),
+    unit: zod.string().nullable(),
+    baseLocation: zod.string().nullable(),
+    securityClearance: zod.string().nullable(),
+    deploymentStatus: zod.string().nullable(),
+    primaryMission: zod.string().nullable(),
+    aiUseCases: zod.array(zod.string()),
+    freeFormContext: zod.string().nullable(),
+  }),
+  documentIds: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update a preset's name, description, snapshot, or document scope
+ */
+export const UpdateMyPresetParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateMyPresetBody = zod.object({
+  name: zod.string().min(1).optional(),
+  description: zod.string().nullish(),
+  profileSnapshot: zod
+    .union([
+      zod.object({
+        branch: zod.string().nullable(),
+        rank: zod.string().nullable(),
+        mosCode: zod.string().nullable(),
+        dutyTitle: zod.string().nullable(),
+        unit: zod.string().nullable(),
+        baseLocation: zod.string().nullable(),
+        securityClearance: zod.string().nullable(),
+        deploymentStatus: zod.string().nullable(),
+        primaryMission: zod.string().nullable(),
+        aiUseCases: zod.array(zod.string()),
+        freeFormContext: zod.string().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  documentIds: zod.array(zod.string()).optional(),
+});
+
+export const UpdateMyPresetResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullable(),
+  profileSnapshot: zod.object({
+    branch: zod.string().nullable(),
+    rank: zod.string().nullable(),
+    mosCode: zod.string().nullable(),
+    dutyTitle: zod.string().nullable(),
+    unit: zod.string().nullable(),
+    baseLocation: zod.string().nullable(),
+    securityClearance: zod.string().nullable(),
+    deploymentStatus: zod.string().nullable(),
+    primaryMission: zod.string().nullable(),
+    aiUseCases: zod.array(zod.string()),
+    freeFormContext: zod.string().nullable(),
+  }),
+  documentIds: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a preset (the user must always have at least one)
+ */
+export const DeleteMyPresetParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteMyPresetResponse = zod.object({
+  success: zod.boolean(),
+  activePresetId: zod.string(),
+});
+
+/**
+ * @summary Duplicate an existing preset (snapshot + document scope)
+ */
+export const DuplicateMyPresetParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DuplicateMyPresetResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullable(),
+  profileSnapshot: zod.object({
+    branch: zod.string().nullable(),
+    rank: zod.string().nullable(),
+    mosCode: zod.string().nullable(),
+    dutyTitle: zod.string().nullable(),
+    unit: zod.string().nullable(),
+    baseLocation: zod.string().nullable(),
+    securityClearance: zod.string().nullable(),
+    deploymentStatus: zod.string().nullable(),
+    primaryMission: zod.string().nullable(),
+    aiUseCases: zod.array(zod.string()),
+    freeFormContext: zod.string().nullable(),
+  }),
+  documentIds: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Set a preset as the user's active preset
+ */
+export const ActivateMyPresetParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ActivateMyPresetResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullable(),
+  profileSnapshot: zod.object({
+    branch: zod.string().nullable(),
+    rank: zod.string().nullable(),
+    mosCode: zod.string().nullable(),
+    dutyTitle: zod.string().nullable(),
+    unit: zod.string().nullable(),
+    baseLocation: zod.string().nullable(),
+    securityClearance: zod.string().nullable(),
+    deploymentStatus: zod.string().nullable(),
+    primaryMission: zod.string().nullable(),
+    aiUseCases: zod.array(zod.string()),
+    freeFormContext: zod.string().nullable(),
+  }),
+  documentIds: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
 });
 
 /**
@@ -585,6 +793,15 @@ export const GetLibraryStatsResponse = zod.object({
 /**
  * @summary List the user's documents
  */
+export const ListDocumentsQueryParams = zod.object({
+  presetId: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "When set, only return documents currently linked to that mission preset.\n",
+    ),
+});
+
 export const ListDocumentsResponseItem = zod.object({
   id: zod.string(),
   title: zod.string(),
@@ -609,6 +826,11 @@ export const ListDocumentsResponseItem = zod.object({
   errorMessage: zod.string().nullable(),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
+  presetIds: zod
+    .array(zod.string())
+    .describe(
+      "IDs of every mission preset this document is currently linked to.",
+    ),
 });
 export const ListDocumentsResponse = zod.array(ListDocumentsResponseItem);
 
@@ -658,6 +880,11 @@ export const UploadTextDocumentResponse = zod.object({
   errorMessage: zod.string().nullable(),
   uploadedAt: zod.coerce.date(),
   processedAt: zod.coerce.date().nullable(),
+  presetIds: zod
+    .array(zod.string())
+    .describe(
+      "IDs of every mission preset this document is currently linked to.",
+    ),
 });
 
 /**
@@ -764,6 +991,11 @@ export const GetDocumentResponse = zod
     errorMessage: zod.string().nullable(),
     uploadedAt: zod.coerce.date(),
     processedAt: zod.coerce.date().nullable(),
+    presetIds: zod
+      .array(zod.string())
+      .describe(
+        "IDs of every mission preset this document is currently linked to.",
+      ),
   })
   .and(
     zod.object({
@@ -787,6 +1019,48 @@ export const DeleteDocumentParams = zod.object({
 
 export const DeleteDocumentResponse = zod.object({
   success: zod.boolean(),
+});
+
+/**
+ * @summary Replace the set of presets a document belongs to
+ */
+export const SetDocumentPresetTagsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SetDocumentPresetTagsBody = zod.object({
+  presetIds: zod.array(zod.string()),
+});
+
+export const SetDocumentPresetTagsResponse = zod.object({
+  id: zod.string(),
+  title: zod.string(),
+  sourceFilename: zod.string(),
+  mimeType: zod.string(),
+  sizeBytes: zod.number(),
+  charCount: zod.number(),
+  chunkCount: zod.number(),
+  status: zod.string(),
+  autoSource: zod
+    .string()
+    .nullable()
+    .describe(
+      'Stable identifier of the auto-ingest source that produced this doc, e.g. \"mos:army:11B\" or \"unit:marines:MALS-12\". Null for documents the user uploaded by hand.\n',
+    ),
+  sourceUrl: zod
+    .string()
+    .nullable()
+    .describe(
+      "Original public URL the doc was downloaded from (auto-ingest only).",
+    ),
+  errorMessage: zod.string().nullable(),
+  uploadedAt: zod.coerce.date(),
+  processedAt: zod.coerce.date().nullable(),
+  presetIds: zod
+    .array(zod.string())
+    .describe(
+      "IDs of every mission preset this document is currently linked to.",
+    ),
 });
 
 /**
@@ -889,6 +1163,7 @@ export const ExchangeContextTokenResponse = zod.object({
         zod.null(),
       ]),
     }),
+    activePresetId: zod.string().nullable(),
     updatedAt: zod.coerce.date(),
   }),
   contextBlock: zod

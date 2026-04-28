@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { db, docChunksTable, documentsTable } from "@workspace/db";
 
 const TARGET_CHUNK_CHARS = 900;
@@ -74,10 +74,18 @@ function tokenizeForOrQuery(query: string): string[] {
     .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
 }
 
+export interface SearchOptions {
+  // When provided, restrict the candidate set to chunks belonging to these
+  // document ids. An empty array means "no candidate documents" — we return
+  // [] without touching the database, because Postgres rejects an empty IN ().
+  documentIds?: string[];
+}
+
 export async function searchChunks(
   userId: string,
   query: string,
   limit = 5,
+  opts: SearchOptions = {},
 ): Promise<RagSnippet[]> {
   const tokens = tokenizeForOrQuery(query);
   if (tokens.length === 0) return [];
@@ -85,6 +93,18 @@ export async function searchChunks(
   // OR the tokens together; use ':*' for prefix matching so "uas" matches
   // both "uas" and "uass" etc. Each token already escaped (alphanumeric only).
   const tsqueryStr = tokens.map((t) => `${t}:*`).join(" | ");
+
+  // Document-scope filter for active mission preset. Note we early-return on
+  // an explicit empty list so the caller's "preset has no docs" semantics
+  // produce zero results instead of being silently ignored.
+  let scopeClause: SQL | undefined;
+  if (opts.documentIds !== undefined) {
+    if (opts.documentIds.length === 0) return [];
+    scopeClause = sql`AND dc.document_id IN (${sql.join(
+      opts.documentIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})`;
+  }
 
   const rows = await db.execute(sql`
     SELECT
@@ -101,6 +121,7 @@ export async function searchChunks(
     JOIN ${documentsTable} d ON d.id = dc.document_id
     WHERE dc.user_id = ${userId}
       AND to_tsvector('english', dc.content) @@ to_tsquery('english', ${tsqueryStr})
+      ${scopeClause ?? sql``}
     ORDER BY "score" DESC
     LIMIT ${limit}
   `);
@@ -116,9 +137,10 @@ export async function searchChunksMultiQuery(
   queries: string[],
   perQuery = 4,
   totalLimit = 12,
+  opts: SearchOptions = {},
 ): Promise<RagSnippet[]> {
   const all = await Promise.all(
-    queries.map((q) => searchChunks(userId, q, perQuery)),
+    queries.map((q) => searchChunks(userId, q, perQuery, opts)),
   );
 
   const seen = new Set<string>();

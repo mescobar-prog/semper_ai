@@ -31,4 +31,6 @@ export interface DocumentSummary {
   uploadedAt: Date;
   /** @nullable */
   processedAt: Date | null;
+  /** IDs of every mission preset this document is currently linked to. */
+  presetIds: string[];
 }

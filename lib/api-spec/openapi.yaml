@@ -312,6 +312,164 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  # ---------- Presets ----------
+  /profile/presets:
+    get:
+      tags: [Profile]
+      operationId: listMyPresets
+      summary: List the current user's mission presets
+      responses:
+        '200':
+          description: Presets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MissionPreset' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    post:
+      tags: [Profile]
+      operationId: createMyPreset
+      summary: Create a new mission preset (snapshots the current profile by default)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MissionPresetCreate' }
+      responses:
+        '200':
+          description: Created preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MissionPreset' }
+        '400':
+          description: Invalid
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/presets/{id}:
+    put:
+      tags: [Profile]
+      operationId: updateMyPreset
+      summary: Update a preset's name, description, snapshot, or document scope
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MissionPresetUpdate' }
+      responses:
+        '200':
+          description: Updated preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MissionPreset' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      tags: [Profile]
+      operationId: deleteMyPreset
+      summary: Delete a preset (the user must always have at least one)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted, with the new active preset id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PresetDeleteResponse' }
+        '400':
+          description: Cannot delete the only remaining preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/presets/{id}/duplicate:
+    post:
+      tags: [Profile]
+      operationId: duplicateMyPreset
+      summary: Duplicate an existing preset (snapshot + document scope)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Duplicated preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MissionPreset' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/presets/{id}/activate:
+    post:
+      tags: [Profile]
+      operationId: activateMyPreset
+      summary: Set a preset as the user's active preset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Activated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MissionPreset' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   # ---------- Catalog ----------
   /catalog/categories:
     get:
@@ -445,6 +603,13 @@ paths:
       tags: [Library]
       operationId: listDocuments
       summary: List the user's documents
+      parameters:
+        - name: presetId
+          in: query
+          required: false
+          description: >
+            When set, only return documents currently linked to that mission preset.
+          schema: { type: string }
       responses:
         '200':
           description: Documents
@@ -596,6 +761,38 @@ paths:
               schema: { $ref: '#/components/schemas/SimpleSuccess' }
         '404':
           description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /library/documents/{id}/presets:
+    put:
+      tags: [Library]
+      operationId: setDocumentPresetTags
+      summary: Replace the set of presets a document belongs to
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentPresetTagsUpdate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentSummary' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -1063,7 +1260,7 @@ components:
         [userId, branch, rank, mosCode, dutyTitle, unit, baseLocation,
          securityClearance, deploymentStatus, primaryMission,
          aiUseCases, freeFormContext, isAdmin, completenessPct,
-         contextBlock, updatedAt]
+         contextBlock, activePresetId, updatedAt]
       properties:
         userId: { type: string }
         branch: { type: [string, 'null'] }
@@ -1082,6 +1279,7 @@ components:
         isAdmin: { type: boolean }
         completenessPct: { type: integer }
         contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
+        activePresetId: { type: [string, 'null'] }
         updatedAt: { type: string, format: date-time }
 
     ContextBlockFields:
@@ -1412,7 +1610,7 @@ components:
       required:
         [id, title, sourceFilename, mimeType, sizeBytes, charCount,
          chunkCount, status, autoSource, sourceUrl, errorMessage,
-         uploadedAt, processedAt]
+         uploadedAt, processedAt, presetIds]
       properties:
         id: { type: string }
         title: { type: string }
@@ -1434,6 +1632,10 @@ components:
         errorMessage: { type: [string, 'null'] }
         uploadedAt: { type: string, format: date-time }
         processedAt: { type: [string, 'null'], format: date-time }
+        presetIds:
+          type: array
+          description: IDs of every mission preset this document is currently linked to.
+          items: { type: string }
 
     DocumentDetail:
       allOf:
@@ -1667,3 +1869,84 @@ components:
         topTools:
           type: array
           items: { $ref: '#/components/schemas/ToolSummary' }
+
+    PresetProfileSnapshot:
+      type: object
+      required:
+        [branch, rank, mosCode, dutyTitle, unit, baseLocation,
+         securityClearance, deploymentStatus, primaryMission,
+         aiUseCases, freeFormContext]
+      properties:
+        branch: { type: [string, 'null'] }
+        rank: { type: [string, 'null'] }
+        mosCode: { type: [string, 'null'] }
+        dutyTitle: { type: [string, 'null'] }
+        unit: { type: [string, 'null'] }
+        baseLocation: { type: [string, 'null'] }
+        securityClearance: { type: [string, 'null'] }
+        deploymentStatus: { type: [string, 'null'] }
+        primaryMission: { type: [string, 'null'] }
+        aiUseCases:
+          type: array
+          items: { type: string }
+        freeFormContext: { type: [string, 'null'] }
+
+    MissionPreset:
+      type: object
+      required:
+        [id, name, description, profileSnapshot, documentIds, isActive,
+         createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        profileSnapshot: { $ref: '#/components/schemas/PresetProfileSnapshot' }
+        documentIds:
+          type: array
+          items: { type: string }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    MissionPresetCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: [string, 'null'] }
+        profileSnapshot:
+          oneOf:
+            - $ref: '#/components/schemas/PresetProfileSnapshot'
+            - type: 'null'
+        documentIds:
+          type: array
+          items: { type: string }
+        activate: { type: boolean }
+
+    MissionPresetUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: [string, 'null'] }
+        profileSnapshot:
+          oneOf:
+            - $ref: '#/components/schemas/PresetProfileSnapshot'
+            - type: 'null'
+        documentIds:
+          type: array
+          items: { type: string }
+
+    PresetDeleteResponse:
+      type: object
+      required: [success, activePresetId]
+      properties:
+        success: { type: boolean }
+        activePresetId: { type: string }
+
+    DocumentPresetTagsUpdate:
+      type: object
+      required: [presetIds]
+      properties:
+        presetIds:
+          type: array
+          items: { type: string }

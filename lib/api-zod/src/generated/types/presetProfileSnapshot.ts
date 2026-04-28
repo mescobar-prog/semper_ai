@@ -5,10 +5,8 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
-import type { ContextBlockState } from "./contextBlockState";
 
-export interface UserProfile {
-  userId: string;
+export interface PresetProfileSnapshot {
   /** @nullable */
   branch: string | null;
   /** @nullable */
@@ -30,10 +28,4 @@ export interface UserProfile {
   aiUseCases: string[];
   /** @nullable */
   freeFormContext: string | null;
-  isAdmin: boolean;
-  completenessPct: number;
-  contextBlock: ContextBlockState;
-  /** @nullable */
-  activePresetId: string | null;
-  updatedAt: Date;
 }

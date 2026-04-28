@@ -32,6 +32,10 @@ export const profilesTable = pgTable("profiles", {
   aiUseCases: jsonb("ai_use_cases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   freeFormContext: text("free_form_context"),
   isAdmin: varchar("is_admin").notNull().default("false"),
+  // Pointer to the user's currently active mission preset (presets.id).
+  // Nullable so we can lazily backfill via ensureActivePreset for users
+  // created before the presets feature shipped.
+  activePresetId: varchar("active_preset_id"),
   // ----- 6-element Context Block (verification gate before catalog) -----
   cbDoctrine: text("cb_doctrine"),
   cbIntent: text("cb_intent"),

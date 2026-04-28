@@ -7,15 +7,26 @@ import {
   useSendProfileChat,
   useResetProfileChat,
   useGetAutoIngestStatus,
+  useListMyPresets,
+  useCreateMyPreset,
+  useUpdateMyPreset,
+  useDeleteMyPreset,
+  useDuplicateMyPreset,
+  useActivateMyPreset,
+  useListDocuments,
   getGetMyProfileQueryKey,
   getGetProfileChatHistoryQueryKey,
   getGetAutoIngestStatusQueryKey,
   getListDocumentsQueryKey,
+  getListMyPresetsQueryKey,
+  getGetDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
 import type {
   ProfileUpdate,
   UserProfile,
   ChatMessage,
+  MissionPreset,
+  DocumentSummary,
 } from "@workspace/api-client-react";
 import {
   BRANCHES as MIL_BRANCHES,
@@ -368,7 +379,425 @@ export function Profile() {
 
         <ChatPanel onApply={applySuggestion} />
       </div>
+
+      <PresetsSection />
     </PageContainer>
+  );
+}
+
+function PresetsSection() {
+  const queryClient = useQueryClient();
+  const { data: presets, isLoading } = useListMyPresets({
+    query: { queryKey: getListMyPresetsQueryKey() },
+  });
+  const { data: documents } = useListDocuments(undefined, {
+    query: { queryKey: getListDocumentsQueryKey() },
+  });
+
+  const createMutation = useCreateMyPreset();
+  const activateMutation = useActivateMyPreset();
+  const duplicateMutation = useDuplicateMyPreset();
+  const deleteMutation = useDeleteMyPreset();
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    name: "",
+    description: "",
+    activate: false,
+  });
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: getListMyPresetsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
+    queryClient.invalidateQueries({
+      queryKey: getGetDashboardSummaryQueryKey(),
+    });
+  };
+
+  const onCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError(null);
+    try {
+      await createMutation.mutateAsync({
+        data: {
+          name: createForm.name.trim(),
+          description: createForm.description.trim() || null,
+          activate: createForm.activate,
+        },
+      });
+      setCreateForm({ name: "", description: "", activate: false });
+      setShowCreate(false);
+      invalidateAll();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Create failed");
+    }
+  };
+
+  const onActivate = async (id: string) => {
+    await activateMutation.mutateAsync({ id });
+    invalidateAll();
+  };
+
+  const onDuplicate = async (id: string) => {
+    await duplicateMutation.mutateAsync({ id });
+    invalidateAll();
+  };
+
+  const onDelete = async (id: string) => {
+    if (!confirm("Delete this preset? Documents stay in your library.")) return;
+    try {
+      await deleteMutation.mutateAsync({ id });
+      invalidateAll();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  const list: MissionPreset[] = presets ?? [];
+  const docs: DocumentSummary[] = documents ?? [];
+
+  return (
+    <section className="mt-10">
+      <div className="flex items-end justify-between mb-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-1">
+            Mission Presets
+          </div>
+          <h2 className="text-xl font-semibold tracking-tight">
+            Saved profile + library configurations
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            Switch between contexts — garrison vs. deployment, primary MOS vs.
+            additional duty — without rewriting your profile each time. Tools
+            you launch use the active preset's snapshot and document scope.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreate((v) => !v)}
+          className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
+        >
+          {showCreate ? "Cancel" : "New preset"}
+        </button>
+      </div>
+
+      {showCreate && (
+        <form
+          onSubmit={onCreate}
+          className="bg-card border border-border rounded-md p-4 mb-4 space-y-3"
+        >
+          <div>
+            <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+              Name (required)
+            </label>
+            <input
+              type="text"
+              required
+              value={createForm.name}
+              onChange={(e) =>
+                setCreateForm({ ...createForm, name: e.target.value })
+              }
+              placeholder="JRTC Rotation – Platoon Sgt"
+              className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+              Description
+            </label>
+            <input
+              type="text"
+              value={createForm.description}
+              onChange={(e) =>
+                setCreateForm({
+                  ...createForm,
+                  description: e.target.value,
+                })
+              }
+              placeholder="Pre-rotation prep, light infantry"
+              className="w-full px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={createForm.activate}
+              onChange={(e) =>
+                setCreateForm({ ...createForm, activate: e.target.checked })
+              }
+            />
+            Switch to this preset immediately
+          </label>
+          <p className="text-xs text-muted-foreground">
+            The preset is created from your current profile snapshot. You can
+            edit the description, name, and document scope after creating it.
+          </p>
+          {createError && <ErrorBox>{createError}</ErrorBox>}
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+            >
+              {createMutation.isPending ? "Creating…" : "Create preset"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading presets…</div>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-3">
+          {list.map((p) => (
+            <PresetCard
+              key={p.id}
+              preset={p}
+              isEditing={editingId === p.id}
+              onEditOpen={() => setEditingId(p.id)}
+              onEditClose={() => setEditingId(null)}
+              docs={docs}
+              onActivate={() => onActivate(p.id)}
+              onDuplicate={() => onDuplicate(p.id)}
+              onDelete={() => onDelete(p.id)}
+              onChanged={invalidateAll}
+              canDelete={list.length > 1}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PresetCard({
+  preset,
+  isEditing,
+  onEditOpen,
+  onEditClose,
+  docs,
+  onActivate,
+  onDuplicate,
+  onDelete,
+  onChanged,
+  canDelete,
+}: {
+  preset: MissionPreset;
+  isEditing: boolean;
+  onEditOpen: () => void;
+  onEditClose: () => void;
+  docs: DocumentSummary[];
+  onActivate: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onChanged: () => void;
+  canDelete: boolean;
+}) {
+  const updateMutation = useUpdateMyPreset();
+  const [name, setName] = useState(preset.name);
+  const [description, setDescription] = useState(preset.description ?? "");
+  const [docIds, setDocIds] = useState<string[]>(preset.documentIds);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isEditing) {
+      setName(preset.name);
+      setDescription(preset.description ?? "");
+      setDocIds(preset.documentIds);
+      setError(null);
+    }
+  }, [isEditing, preset]);
+
+  const onSave = async () => {
+    setError(null);
+    try {
+      await updateMutation.mutateAsync({
+        id: preset.id,
+        data: {
+          name: name.trim(),
+          description: description.trim() || null,
+          documentIds: docIds,
+        },
+      });
+      onChanged();
+      onEditClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    }
+  };
+
+  const docCountInScope = preset.documentIds.length;
+  const snap = preset.profileSnapshot;
+
+  return (
+    <div
+      className={`bg-card border rounded-md p-4 ${
+        preset.isActive
+          ? "border-primary/50 shadow-[0_0_0_1px_var(--primary)]"
+          : "border-border"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="text-base font-semibold truncate">{preset.name}</div>
+            {preset.isActive && (
+              <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary">
+                Active
+              </span>
+            )}
+          </div>
+          {preset.description && (
+            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
+              {preset.description}
+            </div>
+          )}
+        </div>
+        {!preset.isActive && (
+          <button
+            onClick={onActivate}
+            className="shrink-0 text-[11px] font-medium px-2.5 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary"
+          >
+            Activate
+          </button>
+        )}
+      </div>
+
+      {!isEditing && (
+        <>
+          <div className="text-[11px] font-mono text-muted-foreground space-y-0.5 mb-3">
+            {snap.branch && <div>Branch: {snap.branch}</div>}
+            {snap.rank && <div>Rank: {snap.rank}</div>}
+            {snap.dutyTitle && <div>Duty: {snap.dutyTitle}</div>}
+            {snap.unit && <div>Unit: {snap.unit}</div>}
+            {snap.deploymentStatus && (
+              <div>Status: {snap.deploymentStatus}</div>
+            )}
+          </div>
+          <div className="text-[11px] font-mono text-muted-foreground mb-3">
+            {docCountInScope} doc{docCountInScope === 1 ? "" : "s"} in scope
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onEditOpen}
+              className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              Edit
+            </button>
+            <button
+              onClick={onDuplicate}
+              className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              Duplicate
+            </button>
+            <button
+              onClick={onDelete}
+              disabled={!canDelete}
+              title={!canDelete ? "You need at least one preset" : undefined}
+              className="ml-auto text-[11px] font-mono uppercase tracking-wider text-muted-foreground hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Delete
+            </button>
+          </div>
+        </>
+      )}
+
+      {isEditing && (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+              Name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+              Description
+            </label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                Documents in scope ({docIds.length}/{docs.length})
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDocIds(docs.map((d) => d.id))}
+                  className="text-[10px] font-mono uppercase tracking-wider text-primary hover:underline"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocIds([])}
+                  className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                >
+                  None
+                </button>
+              </div>
+            </div>
+            <div className="max-h-40 overflow-y-auto border border-border rounded p-2 bg-background space-y-1">
+              {docs.length === 0 && (
+                <div className="text-xs text-muted-foreground italic">
+                  No documents in your library yet.
+                </div>
+              )}
+              {docs.map((d) => (
+                <label
+                  key={d.id}
+                  className="flex items-center gap-2 text-xs cursor-pointer hover:bg-accent/30 px-1.5 py-0.5 rounded"
+                >
+                  <input
+                    type="checkbox"
+                    checked={docIds.includes(d.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setDocIds([...docIds, d.id]);
+                      } else {
+                        setDocIds(docIds.filter((x) => x !== d.id));
+                      }
+                    }}
+                  />
+                  <span className="truncate">{d.title}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          {error && <ErrorBox>{error}</ErrorBox>}
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onEditClose}
+              className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground px-2.5 py-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={updateMutation.isPending}
+              className="text-[11px] font-medium px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {updateMutation.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

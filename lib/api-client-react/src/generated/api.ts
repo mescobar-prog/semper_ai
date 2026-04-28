@@ -32,6 +32,7 @@ import type {
   ContextExchangeResponse,
   DashboardSummary,
   DocumentDetail,
+  DocumentPresetTagsUpdate,
   DocumentSummary,
   ErrorEnvelope,
   GetAutoIngestStatusParams,
@@ -44,10 +45,15 @@ import type {
   LibraryStats,
   LibraryTestQueryRequest,
   LibraryTestQueryResponse,
+  ListDocumentsParams,
   ListToolsParams,
   LogoutSuccess,
+  MissionPreset,
+  MissionPresetCreate,
+  MissionPresetUpdate,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
+  PresetDeleteResponse,
   ProfileChatRequest,
   ProfileChatResponse,
   ProfileUpdate,
@@ -1253,6 +1259,506 @@ export const useConfirmContextBlock = <
 };
 
 /**
+ * @summary List the current user's mission presets
+ */
+export const getListMyPresetsUrl = () => {
+  return `/api/profile/presets`;
+};
+
+export const listMyPresets = async (
+  options?: RequestInit,
+): Promise<MissionPreset[]> => {
+  return customFetch<MissionPreset[]>(getListMyPresetsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListMyPresetsQueryKey = () => {
+  return [`/api/profile/presets`] as const;
+};
+
+export const getListMyPresetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMyPresets>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listMyPresets>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListMyPresetsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyPresets>>> = ({
+    signal,
+  }) => listMyPresets({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMyPresets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMyPresetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMyPresets>>
+>;
+export type ListMyPresetsQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary List the current user's mission presets
+ */
+
+export function useListMyPresets<
+  TData = Awaited<ReturnType<typeof listMyPresets>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listMyPresets>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMyPresetsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new mission preset (snapshots the current profile by default)
+ */
+export const getCreateMyPresetUrl = () => {
+  return `/api/profile/presets`;
+};
+
+export const createMyPreset = async (
+  missionPresetCreate: MissionPresetCreate,
+  options?: RequestInit,
+): Promise<MissionPreset> => {
+  return customFetch<MissionPreset>(getCreateMyPresetUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(missionPresetCreate),
+  });
+};
+
+export const getCreateMyPresetMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createMyPreset>>,
+    TError,
+    { data: BodyType<MissionPresetCreate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createMyPreset>>,
+  TError,
+  { data: BodyType<MissionPresetCreate> },
+  TContext
+> => {
+  const mutationKey = ["createMyPreset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createMyPreset>>,
+    { data: BodyType<MissionPresetCreate> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createMyPreset(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateMyPresetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createMyPreset>>
+>;
+export type CreateMyPresetMutationBody = BodyType<MissionPresetCreate>;
+export type CreateMyPresetMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Create a new mission preset (snapshots the current profile by default)
+ */
+export const useCreateMyPreset = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createMyPreset>>,
+    TError,
+    { data: BodyType<MissionPresetCreate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createMyPreset>>,
+  TError,
+  { data: BodyType<MissionPresetCreate> },
+  TContext
+> => {
+  return useMutation(getCreateMyPresetMutationOptions(options));
+};
+
+/**
+ * @summary Update a preset's name, description, snapshot, or document scope
+ */
+export const getUpdateMyPresetUrl = (id: string) => {
+  return `/api/profile/presets/${id}`;
+};
+
+export const updateMyPreset = async (
+  id: string,
+  missionPresetUpdate: MissionPresetUpdate,
+  options?: RequestInit,
+): Promise<MissionPreset> => {
+  return customFetch<MissionPreset>(getUpdateMyPresetUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(missionPresetUpdate),
+  });
+};
+
+export const getUpdateMyPresetMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyPreset>>,
+    TError,
+    { id: string; data: BodyType<MissionPresetUpdate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyPreset>>,
+  TError,
+  { id: string; data: BodyType<MissionPresetUpdate> },
+  TContext
+> => {
+  const mutationKey = ["updateMyPreset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyPreset>>,
+    { id: string; data: BodyType<MissionPresetUpdate> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateMyPreset(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyPresetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyPreset>>
+>;
+export type UpdateMyPresetMutationBody = BodyType<MissionPresetUpdate>;
+export type UpdateMyPresetMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Update a preset's name, description, snapshot, or document scope
+ */
+export const useUpdateMyPreset = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyPreset>>,
+    TError,
+    { id: string; data: BodyType<MissionPresetUpdate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyPreset>>,
+  TError,
+  { id: string; data: BodyType<MissionPresetUpdate> },
+  TContext
+> => {
+  return useMutation(getUpdateMyPresetMutationOptions(options));
+};
+
+/**
+ * @summary Delete a preset (the user must always have at least one)
+ */
+export const getDeleteMyPresetUrl = (id: string) => {
+  return `/api/profile/presets/${id}`;
+};
+
+export const deleteMyPreset = async (
+  id: string,
+  options?: RequestInit,
+): Promise<PresetDeleteResponse> => {
+  return customFetch<PresetDeleteResponse>(getDeleteMyPresetUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteMyPresetMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteMyPreset>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteMyPreset>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteMyPreset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteMyPreset>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteMyPreset(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteMyPresetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteMyPreset>>
+>;
+
+export type DeleteMyPresetMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Delete a preset (the user must always have at least one)
+ */
+export const useDeleteMyPreset = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteMyPreset>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteMyPreset>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteMyPresetMutationOptions(options));
+};
+
+/**
+ * @summary Duplicate an existing preset (snapshot + document scope)
+ */
+export const getDuplicateMyPresetUrl = (id: string) => {
+  return `/api/profile/presets/${id}/duplicate`;
+};
+
+export const duplicateMyPreset = async (
+  id: string,
+  options?: RequestInit,
+): Promise<MissionPreset> => {
+  return customFetch<MissionPreset>(getDuplicateMyPresetUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDuplicateMyPresetMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof duplicateMyPreset>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof duplicateMyPreset>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["duplicateMyPreset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof duplicateMyPreset>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return duplicateMyPreset(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DuplicateMyPresetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof duplicateMyPreset>>
+>;
+
+export type DuplicateMyPresetMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Duplicate an existing preset (snapshot + document scope)
+ */
+export const useDuplicateMyPreset = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof duplicateMyPreset>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof duplicateMyPreset>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDuplicateMyPresetMutationOptions(options));
+};
+
+/**
+ * @summary Set a preset as the user's active preset
+ */
+export const getActivateMyPresetUrl = (id: string) => {
+  return `/api/profile/presets/${id}/activate`;
+};
+
+export const activateMyPreset = async (
+  id: string,
+  options?: RequestInit,
+): Promise<MissionPreset> => {
+  return customFetch<MissionPreset>(getActivateMyPresetUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getActivateMyPresetMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof activateMyPreset>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof activateMyPreset>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["activateMyPreset"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof activateMyPreset>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return activateMyPreset(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ActivateMyPresetMutationResult = NonNullable<
+  Awaited<ReturnType<typeof activateMyPreset>>
+>;
+
+export type ActivateMyPresetMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Set a preset as the user's active preset
+ */
+export const useActivateMyPreset = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof activateMyPreset>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof activateMyPreset>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getActivateMyPresetMutationOptions(options));
+};
+
+/**
  * @summary List all tool categories
  */
 export const getListCategoriesUrl = () => {
@@ -1754,41 +2260,57 @@ export function useGetLibraryStats<
 /**
  * @summary List the user's documents
  */
-export const getListDocumentsUrl = () => {
-  return `/api/library/documents`;
+export const getListDocumentsUrl = (params?: ListDocumentsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/library/documents?${stringifiedParams}`
+    : `/api/library/documents`;
 };
 
 export const listDocuments = async (
+  params?: ListDocumentsParams,
   options?: RequestInit,
 ): Promise<DocumentSummary[]> => {
-  return customFetch<DocumentSummary[]>(getListDocumentsUrl(), {
+  return customFetch<DocumentSummary[]>(getListDocumentsUrl(params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getListDocumentsQueryKey = () => {
-  return [`/api/library/documents`] as const;
+export const getListDocumentsQueryKey = (params?: ListDocumentsParams) => {
+  return [`/api/library/documents`, ...(params ? [params] : [])] as const;
 };
 
 export const getListDocumentsQueryOptions = <
   TData = Awaited<ReturnType<typeof listDocuments>>,
   TError = ErrorType<ErrorEnvelope>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listDocuments>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: ListDocumentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListDocumentsQueryKey();
+  const queryKey = queryOptions?.queryKey ?? getListDocumentsQueryKey(params);
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof listDocuments>>> = ({
     signal,
-  }) => listDocuments({ signal, ...requestOptions });
+  }) => listDocuments(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listDocuments>>,
@@ -1809,15 +2331,18 @@ export type ListDocumentsQueryError = ErrorType<ErrorEnvelope>;
 export function useListDocuments<
   TData = Awaited<ReturnType<typeof listDocuments>>,
   TError = ErrorType<ErrorEnvelope>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listDocuments>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListDocumentsQueryOptions(options);
+>(
+  params?: ListDocumentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDocumentsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -2364,6 +2889,94 @@ export const useDeleteDocument = <
   TContext
 > => {
   return useMutation(getDeleteDocumentMutationOptions(options));
+};
+
+/**
+ * @summary Replace the set of presets a document belongs to
+ */
+export const getSetDocumentPresetTagsUrl = (id: string) => {
+  return `/api/library/documents/${id}/presets`;
+};
+
+export const setDocumentPresetTags = async (
+  id: string,
+  documentPresetTagsUpdate: DocumentPresetTagsUpdate,
+  options?: RequestInit,
+): Promise<DocumentSummary> => {
+  return customFetch<DocumentSummary>(getSetDocumentPresetTagsUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(documentPresetTagsUpdate),
+  });
+};
+
+export const getSetDocumentPresetTagsMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setDocumentPresetTags>>,
+    TError,
+    { id: string; data: BodyType<DocumentPresetTagsUpdate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setDocumentPresetTags>>,
+  TError,
+  { id: string; data: BodyType<DocumentPresetTagsUpdate> },
+  TContext
+> => {
+  const mutationKey = ["setDocumentPresetTags"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setDocumentPresetTags>>,
+    { id: string; data: BodyType<DocumentPresetTagsUpdate> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return setDocumentPresetTags(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetDocumentPresetTagsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setDocumentPresetTags>>
+>;
+export type SetDocumentPresetTagsMutationBody =
+  BodyType<DocumentPresetTagsUpdate>;
+export type SetDocumentPresetTagsMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Replace the set of presets a document belongs to
+ */
+export const useSetDocumentPresetTags = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setDocumentPresetTags>>,
+    TError,
+    { id: string; data: BodyType<DocumentPresetTagsUpdate> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof setDocumentPresetTags>>,
+  TError,
+  { id: string; data: BodyType<DocumentPresetTagsUpdate> },
+  TContext
+> => {
+  return useMutation(getSetDocumentPresetTagsMutationOptions(options));
 };
 
 /**

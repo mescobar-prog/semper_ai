@@ -1,9 +1,17 @@
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@workspace/replit-auth-web";
 import { Link, useLocation } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetMyProfile,
+  useListMyPresets,
+  useActivateMyPreset,
   getGetMyProfileQueryKey,
+  getListMyPresetsQueryKey,
+  getListDocumentsQueryKey,
+  getGetDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
+import type { MissionPreset } from "@workspace/api-client-react";
 
 function displayName(user: {
   firstName: string | null;
@@ -96,7 +104,125 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto flex flex-col">
+        <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-end">
+          <PresetSwitcher />
+        </header>
+        <div className="flex-1 overflow-auto">{children}</div>
+      </main>
+    </div>
+  );
+}
+
+function PresetSwitcher() {
+  const queryClient = useQueryClient();
+  const { data: presets } = useListMyPresets({
+    query: { queryKey: getListMyPresetsQueryKey(), retry: false },
+  });
+  const activate = useActivateMyPreset();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const list: MissionPreset[] = presets ?? [];
+  const active = list.find((p) => p.isActive) ?? list[0];
+
+  const onSwitch = async (id: string) => {
+    setOpen(false);
+    if (!active || id === active.id) return;
+    await activate.mutateAsync({ id });
+    // Anything that depends on the active preset's profile or doc scope must
+    // refresh: the profile sidebar (active preset id), preset list, library
+    // (per-doc filter), dashboard summaries.
+    queryClient.invalidateQueries({ queryKey: getListMyPresetsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
+    queryClient.invalidateQueries({
+      queryKey: getGetDashboardSummaryQueryKey(),
+    });
+  };
+
+  if (!active) {
+    return (
+      <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
+        Loading mission preset…
+      </div>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-3 px-3 py-1.5 rounded-md border border-border bg-background hover:border-primary/50 transition-colors"
+        aria-label="Switch active preset"
+      >
+        <div className="text-left">
+          <div className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground leading-none">
+            Active mission preset
+          </div>
+          <div className="text-sm font-medium leading-tight mt-0.5">
+            {active.name}
+          </div>
+        </div>
+        <span className="text-muted-foreground text-xs">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-72 bg-card border border-border rounded-md shadow-lg z-50 overflow-hidden">
+          <div className="px-3 py-2 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            Switch preset
+          </div>
+          {list.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onSwitch(p.id)}
+              className={`block w-full text-left px-3 py-2.5 hover:bg-accent transition-colors ${
+                p.isActive ? "bg-primary/5" : ""
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    p.isActive ? "bg-primary" : "bg-border"
+                  }`}
+                />
+                <div className="text-sm font-medium">{p.name}</div>
+                {p.isActive && (
+                  <span className="ml-auto text-[9px] font-mono uppercase tracking-wider text-primary">
+                    Active
+                  </span>
+                )}
+              </div>
+              {p.description && (
+                <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2 ml-3.5">
+                  {p.description}
+                </div>
+              )}
+              <div className="text-[10px] font-mono text-muted-foreground mt-1 ml-3.5">
+                {p.documentIds.length} doc{p.documentIds.length === 1 ? "" : "s"}
+              </div>
+            </button>
+          ))}
+          <div className="border-t border-border px-3 py-2">
+            <Link
+              href="/profile"
+              onClick={() => setOpen(false)}
+              className="text-[11px] font-mono uppercase tracking-wider text-primary hover:underline"
+            >
+              Manage presets →
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

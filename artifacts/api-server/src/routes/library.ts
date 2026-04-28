@@ -1,15 +1,18 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   documentsTable,
   docChunksTable,
   ingestJobsTable,
+  presetDocumentsTable,
+  presetsTable,
 } from "@workspace/db";
 import {
   UploadTextDocumentBody,
   TestLibraryQueryBody,
   TriggerAutoIngestBody,
+  SetDocumentPresetTagsBody,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { chunkText, searchChunks } from "../lib/rag";
@@ -18,6 +21,7 @@ import {
   ingestMosPackage,
   ingestUnitPackage,
 } from "../lib/auto-ingest";
+import { ensureActivePreset } from "../lib/profile-helpers";
 import { parseAutoSource } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
 
@@ -44,7 +48,10 @@ router.get("/library/stats", requireAuth, async (req, res) => {
   });
 });
 
-function serializeDocument(d: typeof documentsTable.$inferSelect) {
+function serializeDocument(
+  d: typeof documentsTable.$inferSelect,
+  presetIds: string[] = [],
+) {
   return {
     id: d.id,
     title: d.title,
@@ -59,6 +66,7 @@ function serializeDocument(d: typeof documentsTable.$inferSelect) {
     errorMessage: d.errorMessage ?? null,
     uploadedAt: d.uploadedAt.toISOString(),
     processedAt: d.processedAt ? d.processedAt.toISOString() : null,
+    presetIds,
   };
 }
 
@@ -77,13 +85,89 @@ function serializeJob(j: typeof ingestJobsTable.$inferSelect) {
   };
 }
 
+async function loadDocPresetMap(
+  userId: string,
+  docIds: string[],
+): Promise<Map<string, string[]>> {
+  if (docIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      documentId: presetDocumentsTable.documentId,
+      presetId: presetDocumentsTable.presetId,
+    })
+    .from(presetDocumentsTable)
+    .innerJoin(presetsTable, eq(presetsTable.id, presetDocumentsTable.presetId))
+    .where(
+      and(
+        eq(presetsTable.userId, userId),
+        inArray(presetDocumentsTable.documentId, docIds),
+      ),
+    );
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const arr = map.get(r.documentId) ?? [];
+    arr.push(r.presetId);
+    map.set(r.documentId, arr);
+  }
+  return map;
+}
+
 router.get("/library/documents", requireAuth, async (req, res) => {
+  // Make sure the user has at least one preset (lazy migration) so brand-new
+  // accounts immediately see a meaningful presetIds value on every doc.
+  await ensureActivePreset(req.user!.id);
+
+  // Optional ?presetId=... filter: when supplied, only return documents
+  // that are linked to that preset (and that preset must be owned by the
+  // user). An unknown/cross-user preset id silently returns [].
+  const presetIdFilterRaw = req.query.presetId;
+  const presetIdFilter =
+    typeof presetIdFilterRaw === "string" && presetIdFilterRaw.trim().length > 0
+      ? presetIdFilterRaw.trim()
+      : null;
+
+  let allowedDocIds: Set<string> | null = null;
+  if (presetIdFilter) {
+    const [ownedPreset] = await db
+      .select({ id: presetsTable.id })
+      .from(presetsTable)
+      .where(
+        and(
+          eq(presetsTable.id, presetIdFilter),
+          eq(presetsTable.userId, req.user!.id),
+        ),
+      )
+      .limit(1);
+    if (!ownedPreset) {
+      res.json([]);
+      return;
+    }
+    const linkedRows = await db
+      .select({ documentId: presetDocumentsTable.documentId })
+      .from(presetDocumentsTable)
+      .where(eq(presetDocumentsTable.presetId, presetIdFilter));
+    allowedDocIds = new Set(linkedRows.map((r) => r.documentId));
+    if (allowedDocIds.size === 0) {
+      res.json([]);
+      return;
+    }
+  }
+
   const docs = await db
     .select()
     .from(documentsTable)
     .where(eq(documentsTable.userId, req.user!.id))
     .orderBy(desc(documentsTable.uploadedAt));
-  res.json(docs.map(serializeDocument));
+
+  const filtered = allowedDocIds
+    ? docs.filter((d) => allowedDocIds!.has(d.id))
+    : docs;
+
+  const presetMap = await loadDocPresetMap(
+    req.user!.id,
+    filtered.map((d) => d.id),
+  );
+  res.json(filtered.map((d) => serializeDocument(d, presetMap.get(d.id) ?? [])));
 });
 
 router.post("/library/documents", requireAuth, async (req, res) => {
@@ -200,7 +284,15 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     return;
   }
 
-  res.json(serializeDocument(doc));
+  // Auto-link new uploads to the active preset so freshly uploaded material
+  // is immediately part of the user's current mission scope.
+  const { preset } = await ensureActivePreset(userId);
+  await db
+    .insert(presetDocumentsTable)
+    .values({ presetId: preset.id, documentId: doc.id })
+    .onConflictDoNothing();
+
+  res.json(serializeDocument(doc, [preset.id]));
 });
 
 router.get("/library/documents/:id", requireAuth, async (req, res) => {
@@ -225,8 +317,10 @@ router.get("/library/documents/:id", requireAuth, async (req, res) => {
     .orderBy(asc(docChunksTable.chunkIndex))
     .limit(20);
 
+  const presetMap = await loadDocPresetMap(req.user!.id, [doc.id]);
+
   res.json({
-    ...serializeDocument(doc),
+    ...serializeDocument(doc, presetMap.get(doc.id) ?? []),
     chunks: chunks.map((c) => ({
       id: c.id,
       chunkIndex: c.chunkIndex,
@@ -235,6 +329,67 @@ router.get("/library/documents/:id", requireAuth, async (req, res) => {
     })),
   });
 });
+
+router.put(
+  "/library/documents/:id/presets",
+  requireAuth,
+  async (req, res) => {
+    const parsed = SetDocumentPresetTagsBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid preset tag update" });
+      return;
+    }
+    const userId = req.user!.id;
+    const docId = String(req.params.id);
+
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        and(
+          eq(documentsTable.id, docId),
+          eq(documentsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+
+    // Restrict assignment to presets the user actually owns.
+    const ownedPresets =
+      parsed.data.presetIds.length === 0
+        ? []
+        : await db
+            .select({ id: presetsTable.id })
+            .from(presetsTable)
+            .where(
+              and(
+                eq(presetsTable.userId, userId),
+                inArray(presetsTable.id, parsed.data.presetIds),
+              ),
+            );
+    const ownedPresetIds = ownedPresets.map((p) => p.id);
+
+    await db
+      .delete(presetDocumentsTable)
+      .where(eq(presetDocumentsTable.documentId, docId));
+
+    if (ownedPresetIds.length > 0) {
+      await db
+        .insert(presetDocumentsTable)
+        .values(
+          ownedPresetIds.map((pid) => ({
+            presetId: pid,
+            documentId: docId,
+          })),
+        );
+    }
+
+    res.json(serializeDocument(doc, ownedPresetIds));
+  },
+);
 
 router.delete("/library/documents/:id", requireAuth, async (req, res) => {
   const result = await db

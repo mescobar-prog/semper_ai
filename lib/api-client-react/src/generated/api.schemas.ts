@@ -126,6 +126,8 @@ export interface UserProfile {
   isAdmin: boolean;
   completenessPct: number;
   contextBlock: ContextBlockState;
+  /** @nullable */
+  activePresetId: string | null;
   updatedAt: string;
 }
 
@@ -405,6 +407,8 @@ export interface DocumentSummary {
   uploadedAt: string;
   /** @nullable */
   processedAt: string | null;
+  /** IDs of every mission preset this document is currently linked to. */
+  presetIds: string[];
 }
 
 export interface ChunkPreview {
@@ -573,6 +577,70 @@ export interface DashboardSummary {
   topTools: ToolSummary[];
 }
 
+export interface PresetProfileSnapshot {
+  /** @nullable */
+  branch: string | null;
+  /** @nullable */
+  rank: string | null;
+  /** @nullable */
+  mosCode: string | null;
+  /** @nullable */
+  dutyTitle: string | null;
+  /** @nullable */
+  unit: string | null;
+  /** @nullable */
+  baseLocation: string | null;
+  /** @nullable */
+  securityClearance: string | null;
+  /** @nullable */
+  deploymentStatus: string | null;
+  /** @nullable */
+  primaryMission: string | null;
+  aiUseCases: string[];
+  /** @nullable */
+  freeFormContext: string | null;
+}
+
+export interface MissionPreset {
+  id: string;
+  name: string;
+  /** @nullable */
+  description: string | null;
+  profileSnapshot: PresetProfileSnapshot;
+  documentIds: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MissionPresetCreate {
+  /** @minLength 1 */
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  profileSnapshot?: PresetProfileSnapshot | null;
+  documentIds?: string[];
+  activate?: boolean;
+}
+
+export interface MissionPresetUpdate {
+  /** @minLength 1 */
+  name?: string;
+  /** @nullable */
+  description?: string | null;
+  profileSnapshot?: PresetProfileSnapshot | null;
+  documentIds?: string[];
+}
+
+export interface PresetDeleteResponse {
+  success: boolean;
+  activePresetId: string;
+}
+
+export interface DocumentPresetTagsUpdate {
+  presetIds: string[];
+}
+
 /**
  * Opaque session token — `Bearer <sid>`.
  */
@@ -594,6 +662,14 @@ export type ListToolsParams = {
   ato_status?: string;
   impact_level?: string;
   favorites_only?: boolean;
+};
+
+export type ListDocumentsParams = {
+  /**
+ * When set, only return documents currently linked to that mission preset.
+
+ */
+  presetId?: string;
 };
 
 export type GetAutoIngestStatusParams = {
