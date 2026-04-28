@@ -13,6 +13,7 @@ import {
   useAdminHideReview,
   useAdminUnhideReview,
   useAdminListGithubRepos,
+  useAdminListContextBlockConfirmations,
   useDraftToolText,
   useSyncToolFromGithub,
   useRequestInstallerUploadUrl,
@@ -29,6 +30,7 @@ import type {
   ToolDetail,
   SubmissionDetail,
   AdminToolReview,
+  AdminContextBlockConfirmation,
   GithubRepoMetadata,
   GithubRepoSummary,
 } from "@workspace/api-client-react";
@@ -116,7 +118,7 @@ export function Admin() {
   return <AdminInner />;
 }
 
-type AdminTab = "catalog" | "review" | "reviews";
+type AdminTab = "catalog" | "review" | "reviews" | "confirmations";
 
 function AdminInner() {
   const [tab, setTab] = useState<AdminTab>("review");
@@ -130,11 +132,11 @@ function AdminInner() {
           Marketplace administration
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Review vendor submissions, manage the published catalog, and
-          moderate user reviews.
+          Review vendor submissions, manage the published catalog, moderate
+          user reviews, and audit Context Block confirmations.
         </p>
       </div>
-      <div className="border-b border-border mb-6 flex gap-6">
+      <div className="border-b border-border mb-6 flex gap-6 flex-wrap">
         <TabBtn active={tab === "review"} onClick={() => setTab("review")}>
           Submission queue
         </TabBtn>
@@ -144,13 +146,21 @@ function AdminInner() {
         <TabBtn active={tab === "reviews"} onClick={() => setTab("reviews")}>
           Review moderation
         </TabBtn>
+        <TabBtn
+          active={tab === "confirmations"}
+          onClick={() => setTab("confirmations")}
+        >
+          Context Block audit
+        </TabBtn>
       </div>
       {tab === "review" ? (
         <ReviewQueue />
       ) : tab === "catalog" ? (
         <CatalogManagement />
-      ) : (
+      ) : tab === "reviews" ? (
         <ReviewModerationSection />
+      ) : (
+        <ContextBlockAudit />
       )}
     </PageContainer>
   );
@@ -1975,5 +1985,237 @@ function ReviewModerationSection() {
         </div>
       )}
     </section>
+  );
+}
+
+function ContextBlockAudit() {
+  const { data, isLoading, error } = useAdminListContextBlockConfirmations();
+  const [showOnly, setShowOnly] = useState<
+    "all" | "confirmed" | "unconfirmed" | "opsec" | "nogo"
+  >("all");
+
+  const all = data?.users ?? [];
+  const totals = data?.totals;
+
+  const filtered = all.filter((u) => {
+    if (showOnly === "confirmed") return u.hasConfirmed;
+    if (showOnly === "unconfirmed") return !u.hasConfirmed;
+    if (showOnly === "opsec") return u.opsecFlag;
+    if (showOnly === "nogo") return u.status === "NO-GO";
+    return true;
+  });
+
+  return (
+    <section>
+      <div className="flex items-end justify-between gap-4 mb-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold mb-2">
+            Admin · Compliance
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            Context Block confirmations
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            One row per user. Confirmed users sort newest first; users who
+            have never confirmed appear at the bottom. OPSEC-flagged
+            confirmations are highlighted for follow-up.
+          </p>
+        </div>
+        <select
+          value={showOnly}
+          onChange={(e) =>
+            setShowOnly(e.target.value as typeof showOnly)
+          }
+          className="px-3 py-1.5 rounded-md bg-background border border-border text-sm"
+          aria-label="Filter Context Block confirmations"
+        >
+          <option value="all">All users</option>
+          <option value="confirmed">Confirmed only</option>
+          <option value="unconfirmed">Never confirmed</option>
+          <option value="opsec">OPSEC-flagged</option>
+          <option value="nogo">NO-GO status</option>
+        </select>
+      </div>
+
+      {totals && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <StatCard label="Total users" value={totals.totalUsers} />
+          <StatCard
+            label="Confirmed"
+            value={totals.confirmedUsers}
+            tone="good"
+          />
+          <StatCard
+            label="Never confirmed"
+            value={totals.unconfirmedUsers}
+            tone={totals.unconfirmedUsers > 0 ? "warn" : "neutral"}
+          />
+          <StatCard
+            label="OPSEC-flagged"
+            value={totals.opsecFlaggedUsers}
+            tone={
+              totals.opsecFlaggedUsers > 0 ? "destructive" : "neutral"
+            }
+          />
+          <StatCard
+            label="NO-GO status"
+            value={totals.noGoUsers}
+            tone={totals.noGoUsers > 0 ? "warn" : "neutral"}
+          />
+        </div>
+      )}
+
+      {error && <ErrorBox>{(error as Error).message}</ErrorBox>}
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="bg-card border border-border rounded-md h-16 animate-pulse"
+            />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No users match this filter"
+          description="Adjust the filter to see other users."
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-card">
+              <tr className="text-left text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Branch / Rank</th>
+                <th className="px-4 py-3">Last confirmed</th>
+                <th className="px-4 py-3">Score</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Submission</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((u) => (
+                <ConfirmationRow key={u.userId} u={u} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ConfirmationRow({ u }: { u: AdminContextBlockConfirmation }) {
+  const rowClass = u.opsecFlag
+    ? "border-t border-rose-500/30 bg-rose-500/5"
+    : "border-t border-border";
+  return (
+    <tr className={rowClass}>
+      <td className="px-4 py-3 align-top">
+        <div className="font-medium flex items-center gap-2">
+          {u.displayName}
+          {u.isAdmin && (
+            <Pill tone="info">admin</Pill>
+          )}
+        </div>
+        {u.email && (
+          <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+            {u.email}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-3 align-top text-xs font-mono text-muted-foreground uppercase tracking-wider">
+        {[u.rank, u.branch].filter(Boolean).join(" · ") || "—"}
+      </td>
+      <td className="px-4 py-3 align-top">
+        {u.confirmedAt ? (
+          <div>
+            <div>{relativeTime(u.confirmedAt)}</div>
+            <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+              {new Date(u.confirmedAt).toLocaleString()}
+            </div>
+          </div>
+        ) : (
+          <Pill tone="warn">never confirmed</Pill>
+        )}
+      </td>
+      <td className="px-4 py-3 align-top">
+        {u.scoreTotal != null ? (
+          <span className="font-mono text-sm">
+            <span
+              className={
+                u.scoreTotal >= 10
+                  ? "text-emerald-400"
+                  : u.scoreTotal === 0
+                    ? "text-rose-400"
+                    : "text-amber-300"
+              }
+            >
+              {u.scoreTotal}
+            </span>
+            <span className="text-muted-foreground"> / 12</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 align-top">
+        <div className="flex flex-col gap-1.5 items-start">
+          {u.status ? (
+            <Pill
+              tone={
+                u.status === "GO"
+                  ? "good"
+                  : u.status === "NO-GO"
+                    ? "destructive"
+                    : "neutral"
+              }
+            >
+              {u.status}
+            </Pill>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+          {u.opsecFlag && <Pill tone="destructive">OPSEC</Pill>}
+        </div>
+      </td>
+      <td className="px-4 py-3 align-top">
+        {u.submissionId ? (
+          <span className="text-[11px] font-mono text-muted-foreground break-all">
+            {u.submissionId}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "good" | "warn" | "destructive";
+}) {
+  const toneCls =
+    tone === "good"
+      ? "text-emerald-400"
+      : tone === "warn"
+        ? "text-amber-300"
+        : tone === "destructive"
+          ? "text-rose-400"
+          : "text-foreground";
+  return (
+    <div className="rounded-md border border-border bg-card px-4 py-3">
+      <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
+        {label}
+      </div>
+      <div className={`text-2xl font-semibold mt-1 ${toneCls}`}>{value}</div>
+    </div>
   );
 }

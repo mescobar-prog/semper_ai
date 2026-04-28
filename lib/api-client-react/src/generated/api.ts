@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AdminContextBlockConfirmationsResponse,
   AdminGetGithubRepoMetadataParams,
   AdminHideReviewRequest,
   AdminListGithubReposParams,
@@ -5351,6 +5352,93 @@ export const useWithdrawMySubmission = <
 > => {
   return useMutation(getWithdrawMySubmissionMutationOptions(options));
 };
+
+/**
+ * Returns one row per user (admin or operator) with the timestamp,
+evaluator score, status, and OPSEC flag of their most recent Context
+Block confirmation. Users who have never confirmed appear with
+hasConfirmed=false. Used by the admin compliance view.
+
+ * @summary Audit feed of every user's most recent Context Block confirmation
+ */
+export const getAdminListContextBlockConfirmationsUrl = () => {
+  return `/api/admin/context-block-confirmations`;
+};
+
+export const adminListContextBlockConfirmations = async (
+  options?: RequestInit,
+): Promise<AdminContextBlockConfirmationsResponse> => {
+  return customFetch<AdminContextBlockConfirmationsResponse>(
+    getAdminListContextBlockConfirmationsUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminListContextBlockConfirmationsQueryKey = () => {
+  return [`/api/admin/context-block-confirmations`] as const;
+};
+
+export const getAdminListContextBlockConfirmationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListContextBlockConfirmations>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListContextBlockConfirmations>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListContextBlockConfirmationsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListContextBlockConfirmations>>
+  > = ({ signal }) =>
+    adminListContextBlockConfirmations({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListContextBlockConfirmations>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListContextBlockConfirmationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListContextBlockConfirmations>>
+>;
+export type AdminListContextBlockConfirmationsQueryError =
+  ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Audit feed of every user's most recent Context Block confirmation
+ */
+
+export function useAdminListContextBlockConfirmations<
+  TData = Awaited<ReturnType<typeof adminListContextBlockConfirmations>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListContextBlockConfirmations>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions =
+    getAdminListContextBlockConfirmationsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Admin review queue (pending and changes-requested submissions)

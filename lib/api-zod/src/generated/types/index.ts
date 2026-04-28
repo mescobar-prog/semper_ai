@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./adminContextBlockConfirmation";
+export * from "./adminContextBlockConfirmationsResponse";
+export * from "./adminContextBlockConfirmationsResponseTotals";
 export * from "./adminGetGithubRepoMetadataParams";
 export * from "./adminHideReviewRequest";
 export * from "./adminListGithubReposParams";

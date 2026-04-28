@@ -1118,6 +1118,55 @@ export interface AdminHideReviewRequest {
   reason?: string | null;
 }
 
+export interface AdminContextBlockConfirmation {
+  userId: string;
+  displayName: string;
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  branch: string | null;
+  /** @nullable */
+  rank: string | null;
+  isAdmin: boolean;
+  /** True if the user has ever confirmed a Context Block. */
+  hasConfirmed: boolean;
+  /**
+   * Timestamp of the user's most recent Context Block confirmation.
+   * @nullable
+   */
+  confirmedAt: string | null;
+  /**
+   * Evaluator score of the most recent confirmation, /12.
+   * @nullable
+   */
+  scoreTotal: number | null;
+  /**
+   * "GO" or "NO-GO" from the most recent evaluation.
+   * @nullable
+   */
+  status: string | null;
+  /** True if the most recent confirmation tripped the OPSEC fail-safe. */
+  opsecFlag: boolean;
+  /**
+   * Submission ID of the most recent confirmation.
+   * @nullable
+   */
+  submissionId: string | null;
+}
+
+export type AdminContextBlockConfirmationsResponseTotals = {
+  totalUsers: number;
+  confirmedUsers: number;
+  unconfirmedUsers: number;
+  opsecFlaggedUsers: number;
+  noGoUsers: number;
+};
+
+export interface AdminContextBlockConfirmationsResponse {
+  users: AdminContextBlockConfirmation[];
+  totals: AdminContextBlockConfirmationsResponseTotals;
+}
+
 /**
  * Opaque session token — `Bearer <sid>`.
  */

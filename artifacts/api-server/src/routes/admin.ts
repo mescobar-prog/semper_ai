@@ -7,6 +7,8 @@ import {
   favoritesTable,
   launchesTable,
   toolReviewsTable,
+  usersTable,
+  profilesTable,
   type Tool,
 } from "@workspace/db";
 import {
@@ -429,6 +431,91 @@ router.post(
       req.log.error({ err, toolId }, "Failed to sync from GitHub");
       res.status(500).json({ error: "Failed to sync from GitHub" });
     }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Context Block confirmation audit
+// ---------------------------------------------------------------------------
+
+function displayName(u: {
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+}): string {
+  const parts = [u.firstName, u.lastName].filter(Boolean).join(" ");
+  return parts || u.email || "Unknown user";
+}
+
+router.get(
+  "/admin/context-block-confirmations",
+  requireAdmin,
+  async (_req, res) => {
+    const rows = await db
+      .select({
+        userId: usersTable.id,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        email: usersTable.email,
+        branch: profilesTable.branch,
+        rank: profilesTable.rank,
+        isAdmin: profilesTable.isAdmin,
+        cbConfirmedAt: profilesTable.cbConfirmedAt,
+        cbScoreTotal: profilesTable.cbScoreTotal,
+        cbStatus: profilesTable.cbStatus,
+        cbOpsecFlag: profilesTable.cbOpsecFlag,
+        cbSubmissionId: profilesTable.cbSubmissionId,
+      })
+      .from(usersTable)
+      .leftJoin(profilesTable, eq(profilesTable.userId, usersTable.id))
+      // Confirmed users first (most recent first), then never-confirmed users
+      // alphabetically by email so the "missing" list is stable.
+      .orderBy(
+        sql`${profilesTable.cbConfirmedAt} DESC NULLS LAST`,
+        asc(usersTable.email),
+      );
+
+    const users = rows.map((r) => {
+      const hasConfirmed = r.cbConfirmedAt != null;
+      return {
+        userId: r.userId,
+        displayName: displayName({
+          firstName: r.firstName,
+          lastName: r.lastName,
+          email: r.email,
+        }),
+        email: r.email,
+        branch: r.branch,
+        rank: r.rank,
+        isAdmin: r.isAdmin === "true",
+        hasConfirmed,
+        confirmedAt: r.cbConfirmedAt ? r.cbConfirmedAt.toISOString() : null,
+        scoreTotal: r.cbScoreTotal,
+        status: r.cbStatus,
+        opsecFlag: r.cbOpsecFlag === "true",
+        submissionId: r.cbSubmissionId,
+      };
+    });
+
+    const totals = users.reduce(
+      (acc, u) => {
+        acc.totalUsers += 1;
+        if (u.hasConfirmed) acc.confirmedUsers += 1;
+        else acc.unconfirmedUsers += 1;
+        if (u.opsecFlag) acc.opsecFlaggedUsers += 1;
+        if (u.status === "NO-GO") acc.noGoUsers += 1;
+        return acc;
+      },
+      {
+        totalUsers: 0,
+        confirmedUsers: 0,
+        unconfirmedUsers: 0,
+        opsecFlaggedUsers: 0,
+        noGoUsers: 0,
+      },
+    );
+
+    res.json({ users, totals });
   },
 );
 

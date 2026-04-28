@@ -1531,6 +1531,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/context-block-confirmations:
+    get:
+      tags: [Admin]
+      operationId: adminListContextBlockConfirmations
+      summary: Audit feed of every user's most recent Context Block confirmation
+      description: |
+        Returns one row per user (admin or operator) with the timestamp,
+        evaluator score, status, and OPSEC flag of their most recent Context
+        Block confirmation. Users who have never confirmed appear with
+        hasConfirmed=false. Used by the admin compliance view.
+      responses:
+        '200':
+          description: Confirmations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminContextBlockConfirmationsResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /admin/submissions:
     get:
       tags: [Submissions]
@@ -2864,3 +2887,54 @@ components:
           type: string
           nullable: true
           maxLength: 500
+
+    AdminContextBlockConfirmation:
+      type: object
+      required:
+        [userId, displayName, email, branch, rank, isAdmin, hasConfirmed,
+         confirmedAt, scoreTotal, status, opsecFlag, submissionId]
+      properties:
+        userId: { type: string }
+        displayName: { type: string }
+        email: { type: [string, 'null'] }
+        branch: { type: [string, 'null'] }
+        rank: { type: [string, 'null'] }
+        isAdmin: { type: boolean }
+        hasConfirmed:
+          type: boolean
+          description: True if the user has ever confirmed a Context Block.
+        confirmedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Timestamp of the user's most recent Context Block confirmation.
+        scoreTotal:
+          type: [integer, 'null']
+          description: Evaluator score of the most recent confirmation, /12.
+        status:
+          type: [string, 'null']
+          description: '"GO" or "NO-GO" from the most recent evaluation.'
+        opsecFlag:
+          type: boolean
+          description: True if the most recent confirmation tripped the OPSEC fail-safe.
+        submissionId:
+          type: [string, 'null']
+          description: Submission ID of the most recent confirmation.
+
+    AdminContextBlockConfirmationsResponse:
+      type: object
+      required: [users, totals]
+      properties:
+        users:
+          type: array
+          items: { $ref: '#/components/schemas/AdminContextBlockConfirmation' }
+        totals:
+          type: object
+          required:
+            [totalUsers, confirmedUsers, unconfirmedUsers, opsecFlaggedUsers,
+             noGoUsers]
+          properties:
+            totalUsers: { type: integer }
+            confirmedUsers: { type: integer }
+            unconfirmedUsers: { type: integer }
+            opsecFlaggedUsers: { type: integer }
+            noGoUsers: { type: integer }

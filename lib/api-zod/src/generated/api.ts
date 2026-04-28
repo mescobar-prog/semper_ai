@@ -2558,6 +2558,60 @@ export const WithdrawMySubmissionResponse = zod
   );
 
 /**
+ * Returns one row per user (admin or operator) with the timestamp,
+evaluator score, status, and OPSEC flag of their most recent Context
+Block confirmation. Users who have never confirmed appear with
+hasConfirmed=false. Used by the admin compliance view.
+
+ * @summary Audit feed of every user's most recent Context Block confirmation
+ */
+export const AdminListContextBlockConfirmationsResponse = zod.object({
+  users: zod.array(
+    zod.object({
+      userId: zod.string(),
+      displayName: zod.string(),
+      email: zod.string().nullable(),
+      branch: zod.string().nullable(),
+      rank: zod.string().nullable(),
+      isAdmin: zod.boolean(),
+      hasConfirmed: zod
+        .boolean()
+        .describe("True if the user has ever confirmed a Context Block."),
+      confirmedAt: zod.coerce
+        .date()
+        .nullable()
+        .describe(
+          "Timestamp of the user's most recent Context Block confirmation.",
+        ),
+      scoreTotal: zod
+        .number()
+        .nullable()
+        .describe("Evaluator score of the most recent confirmation, \/12."),
+      status: zod
+        .string()
+        .nullable()
+        .describe('\"GO\" or \"NO-GO\" from the most recent evaluation.'),
+      opsecFlag: zod
+        .boolean()
+        .describe(
+          "True if the most recent confirmation tripped the OPSEC fail-safe.",
+        ),
+      submissionId: zod
+        .string()
+        .nullable()
+        .describe("Submission ID of the most recent confirmation."),
+    }),
+  ),
+  totals: zod.object({
+    totalUsers: zod.number(),
+    confirmedUsers: zod.number(),
+    unconfirmedUsers: zod.number(),
+    opsecFlaggedUsers: zod.number(),
+    noGoUsers: zod.number(),
+  }),
+});
+
+/**
  * @summary Admin review queue (pending and changes-requested submissions)
  */
 export const AdminListSubmissionsResponseItem = zod
