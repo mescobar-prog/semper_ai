@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { db, contextBlocksTable } from "@workspace/db";
@@ -79,7 +79,11 @@ describe("POST /api/profile/context-block/confirm — bypass behavior", () => {
   const createdUserIds: string[] = [];
   let user: Awaited<ReturnType<typeof createTestUser>>;
 
-  beforeAll(async () => {
+  // Fresh user per test — a leaked bypass flag from one test must not
+  // poison the next. The previous shared-user setup made e.g. the GO
+  // test pass only because it ran after the bypass test on the same
+  // row; we now re-create users so each test stands alone.
+  beforeEach(async () => {
     user = await createTestUser();
     createdUserIds.push(user.userId);
   });
@@ -131,6 +135,18 @@ describe("POST /api/profile/context-block/confirm — bypass behavior", () => {
   });
 
   it("rejects OPSEC violations even with bypass:true (hard reject)", async () => {
+    // Establish a prior bypassed row for THIS user so the after-OPSEC
+    // assertion can verify we left it alone instead of clobbering it.
+    const seed = await request(app)
+      .post("/api/profile/context-block/confirm")
+      .set(user.authHeader)
+      .send({
+        doctrine: "SUB_THRESHOLD operational guidance.",
+        ...FILLED,
+        bypass: true,
+      });
+    expect(seed.status).toBe(200);
+
     const res = await request(app)
       .post("/api/profile/context-block/confirm")
       .set(user.authHeader)
@@ -143,7 +159,8 @@ describe("POST /api/profile/context-block/confirm — bypass behavior", () => {
     expect(res.body.error).toMatch(/OPSEC/);
     expect(res.body.evaluation.opsecFlag).toBe(true);
 
-    // Bypassed row from the previous test must remain unchanged
+    // The prior bypassed row must remain unchanged after the rejected
+    // OPSEC attempt.
     const [row] = await db
       .select()
       .from(contextBlocksTable)
@@ -156,6 +173,16 @@ describe("POST /api/profile/context-block/confirm — bypass behavior", () => {
     // Strict guard: bypass is only valid for sub-threshold scores. A
     // NO-GO with totalScore >= 10 (e.g. a future non-score-based hold)
     // must NOT be bypassable through this path.
+    const seed = await request(app)
+      .post("/api/profile/context-block/confirm")
+      .set(user.authHeader)
+      .send({
+        doctrine: "SUB_THRESHOLD operational guidance.",
+        ...FILLED,
+        bypass: true,
+      });
+    expect(seed.status).toBe(200);
+
     const res = await request(app)
       .post("/api/profile/context-block/confirm")
       .set(user.authHeader)
@@ -168,7 +195,8 @@ describe("POST /api/profile/context-block/confirm — bypass behavior", () => {
     expect(res.body.evaluation.totalScore).toBe(11);
     expect(res.body.evaluation.status).toBe("NO-GO");
 
-    // Row from earlier sub-threshold bypass must remain unchanged.
+    // The prior bypassed row must remain unchanged after the rejected
+    // above-threshold attempt.
     const [row] = await db
       .select()
       .from(contextBlocksTable)
@@ -178,6 +206,18 @@ describe("POST /api/profile/context-block/confirm — bypass behavior", () => {
   });
 
   it("clears the bypassed flag on a subsequent in-threshold (GO) confirm", async () => {
+    // Seed a bypassed row first so we can prove the GO confirm clears it.
+    const seed = await request(app)
+      .post("/api/profile/context-block/confirm")
+      .set(user.authHeader)
+      .send({
+        doctrine: "SUB_THRESHOLD operational guidance.",
+        ...FILLED,
+        bypass: true,
+      });
+    expect(seed.status).toBe(200);
+    expect(seed.body.contextBlock.bypassed).toBe(true);
+
     const res = await request(app)
       .post("/api/profile/context-block/confirm")
       .set(user.authHeader)

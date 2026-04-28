@@ -178,9 +178,15 @@ function ToolCard({
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
 
+  const favPending = addFav.isPending || removeFav.isPending;
+
   const toggleFav = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // Skip when a fav mutation is already in flight; the disabled
+    // attribute below blocks pointer clicks but keyboard activations
+    // can still slip through, hence the in-handler guard too.
+    if (favPending) return;
     if (tool.isFavorite) {
       await removeFav.mutateAsync({ toolId: tool.id });
     } else {
@@ -219,10 +225,11 @@ function ToolCard({
         </div>
         <button
           onClick={toggleFav}
+          disabled={favPending}
           aria-label={
             tool.isFavorite ? "Remove from favorites" : "Add to favorites"
           }
-          className={`shrink-0 w-8 h-8 rounded-md border border-border flex items-center justify-center text-xs hover:border-primary/50 transition-colors ${
+          className={`shrink-0 w-8 h-8 rounded-md border border-border flex items-center justify-center text-xs hover:border-primary/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             tool.isFavorite ? "text-amber-400" : "text-muted-foreground"
           }`}
         >

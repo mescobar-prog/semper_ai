@@ -156,22 +156,35 @@ router.put("/profile", requireAuth, async (req, res) => {
     }
   }
 
-  const [updated] = await db
-    .update(profilesTable)
-    .set(update)
-    .where(eq(profilesTable.userId, req.user!.id))
-    .returning();
-
-  // If this PUT switched the active preset, drop any cached launch
-  // affirmation (Task #45) so the gate re-prompts under the new preset.
-  if (
+  // If this PUT switches the active preset, the profile update and the
+  // affirmation invalidation must be atomic — otherwise there's a window
+  // where the new preset is in effect but a stale affirmation still
+  // satisfies the launch gate. Wrap both writes in a single transaction
+  // when we know the preset is changing; fall back to a single update in
+  // the common case (preset unchanged) to keep the simple path lean.
+  const presetChanging =
     "activePresetId" in update &&
-    update.activePresetId !== previous.activePresetId
-  ) {
-    await db
-      .delete(launchAffirmationsTable)
-      .where(eq(launchAffirmationsTable.userId, req.user!.id));
-  }
+    update.activePresetId !== previous.activePresetId;
+
+  const updated = presetChanging
+    ? await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(profilesTable)
+          .set(update)
+          .where(eq(profilesTable.userId, req.user!.id))
+          .returning();
+        await tx
+          .delete(launchAffirmationsTable)
+          .where(eq(launchAffirmationsTable.userId, req.user!.id));
+        return row;
+      })
+    : (
+        await db
+          .update(profilesTable)
+          .set(update)
+          .where(eq(profilesTable.userId, req.user!.id))
+          .returning()
+      )[0];
 
   // Auto-ingest curated doctrine when the user picks a new branch+MOS or
   // changes their unit to one we have a curated package for. We compare the

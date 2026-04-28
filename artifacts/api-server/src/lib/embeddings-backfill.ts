@@ -39,19 +39,48 @@ export async function backfillEmbeddings(): Promise<{
   let failed = 0;
 
   for (let pass = 0; pass < MAX_BATCHES_PER_RUN; pass++) {
-    const batch = await db
-      .select({
-        id: docChunksTable.id,
-        content: docChunksTable.content,
-        documentId: docChunksTable.documentId,
-        chunkIndex: docChunksTable.chunkIndex,
-        headingTrail: docChunksTable.headingTrail,
-        tokenCount: docChunksTable.tokenCount,
-      })
-      .from(docChunksTable)
-      .where(isNull(docChunksTable.embedding))
-      .orderBy(docChunksTable.documentId, docChunksTable.chunkIndex)
-      .limit(BATCH_SIZE);
+    // Atomically claim a batch of chunks before doing the network-bound
+    // embedding work. Two concurrent backfill passes (e.g. a manual
+    // trigger overlapping the boot pass) used to both SELECT the same
+    // un-embedded rows and double-spend the embedder.
+    //
+    // The claim is structured as a CTE that takes a row-level lock with
+    // SKIP LOCKED inside the subquery, so each concurrent pass only sees
+    // rows no other pass currently holds. The outer UPDATE then re-checks
+    // both `embedding IS NULL` and `embedding_started_at IS NULL` so any
+    // pass that lost the lock-acquisition race still cannot overwrite a
+    // claim another pass already committed.
+    const claimDeadline = new Date();
+    const claimResult = await db.execute(sql`
+      WITH candidate AS (
+        SELECT id FROM doc_chunks
+        WHERE embedding IS NULL AND embedding_started_at IS NULL
+        ORDER BY document_id, chunk_index
+        LIMIT ${BATCH_SIZE}
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE doc_chunks
+      SET embedding_started_at = ${claimDeadline}
+      WHERE id IN (SELECT id FROM candidate)
+        AND embedding IS NULL
+        AND embedding_started_at IS NULL
+      RETURNING id, content, document_id, chunk_index, heading_trail, token_count
+    `);
+    const batch = (claimResult.rows as Array<{
+      id: string;
+      content: string;
+      document_id: string;
+      chunk_index: number;
+      heading_trail: string | null;
+      token_count: number | null;
+    }>).map((r) => ({
+      id: r.id,
+      content: r.content,
+      documentId: r.document_id,
+      chunkIndex: r.chunk_index,
+      headingTrail: r.heading_trail,
+      tokenCount: r.token_count,
+    }));
 
     if (batch.length === 0) {
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
@@ -71,6 +100,10 @@ export async function backfillEmbeddings(): Promise<{
       vectors = await embedMany(batch.map((c) => c.content));
     } catch (err) {
       failed += batch.length;
+      // Release the claim so the next run (or next pass) can retry the
+      // same chunks instead of leaving them stranded with a populated
+      // `embedding_started_at`.
+      await releaseClaims(batch.map((c) => c.id));
       if (err instanceof EmbeddingsUnavailableError) {
         logger.warn(
           { err: err.message, attempted, embedded },
@@ -101,11 +134,16 @@ export async function backfillEmbeddings(): Promise<{
             embeddingDim: EMBEDDING_DIM,
             embeddedAt: now,
             tokenCount,
+            // Clear the claim so the row reflects "embedded" state cleanly
+            // (started_at IS NULL AND embedding IS NOT NULL).
+            embeddingStartedAt: null,
           })
           .where(eq(docChunksTable.id, row.id));
         embedded++;
       } catch (err) {
         failed++;
+        // Release the claim on this single row so a future run can retry.
+        await releaseClaims([row.id]);
         logger.warn(
           { err, chunkId: row.id },
           "failed to write backfilled embedding",
@@ -133,6 +171,24 @@ async function safeCountTokens(text: string): Promise<number> {
     return await countTokens(text);
   } catch {
     return Math.ceil(text.length / 4);
+  }
+}
+
+/**
+ * Clear `embedding_started_at` for the given chunks so they're eligible
+ * for re-claim on the next backfill pass. Safe to call with an empty
+ * list and tolerates DB errors (logs and moves on).
+ */
+async function releaseClaims(chunkIds: string[]): Promise<void> {
+  if (chunkIds.length === 0) return;
+  try {
+    await db.execute(sql`
+      UPDATE doc_chunks
+      SET embedding_started_at = NULL
+      WHERE id = ANY(${chunkIds}::varchar[])
+    `);
+  } catch (err) {
+    logger.warn({ err, count: chunkIds.length }, "failed to release backfill claims");
   }
 }
 

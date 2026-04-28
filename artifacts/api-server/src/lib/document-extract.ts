@@ -14,6 +14,23 @@ export interface ExtractResult {
   mimeType: string;
 }
 
+/**
+ * Sentinel error thrown by the PDF branch when extraction yields only
+ * whitespace, which is the signal a PDF is a scanned image (no text
+ * layer). The processor catches this by `code` and surfaces a
+ * user-facing message that we don't yet support OCR. We do NOT silently
+ * persist an empty document — the upload must visibly fail so the user
+ * knows to convert their file.
+ */
+export class OcrRequiredError extends Error {
+  readonly code = "OCR_REQUIRED" as const;
+  constructor(message = "PDF appears to be a scanned image — no extractable text.") {
+    super(message);
+    this.name = "OcrRequiredError";
+    Object.setPrototypeOf(this, OcrRequiredError.prototype);
+  }
+}
+
 function inferMimeType(filename: string, declared: string | undefined): string {
   if (declared && declared !== "application/octet-stream") return declared;
   const ext = filename.toLowerCase().split(".").pop() ?? "";
@@ -41,7 +58,15 @@ export async function extractDocumentText(
     // module directly to skip that.
     const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
     const result = await pdfParse(input.buffer);
-    return { text: result.text ?? "", mimeType: mime };
+    const text = result.text ?? "";
+    // A PDF that returns only whitespace is almost always a scanned-image
+    // PDF: pdf-parse extracts the text layer and there isn't one. We do
+    // not have OCR yet, so refuse the upload with a clear sentinel the
+    // processor maps to a user-friendly failure message.
+    if (text.trim().length === 0) {
+      throw new OcrRequiredError();
+    }
+    return { text, mimeType: mime };
   }
 
   if (

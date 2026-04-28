@@ -1,8 +1,30 @@
 import { ai } from "@workspace/integrations-gemini-ai";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type { Profile, ContextBlockScores } from "@workspace/db";
 import { findCommand } from "@workspace/mil-data";
 import { logger } from "./logger";
+
+// Zod schema describing the JSON shape the evaluator system prompt
+// promises us. We `safeParse` rather than `parse` so a malformed model
+// response degrades to a NO-GO with flags instead of crashing the route
+// and showing the user a 500. Numbers are coerced because Gemini
+// occasionally returns "2" instead of 2 even with the schema in the
+// prompt.
+const ContextBlockEvalResponseSchema = z.object({
+  submission_id: z.string().optional(),
+  scores: z
+    .object({
+      criterion_1_doctrine: z.coerce.number(),
+      criterion_2_environment: z.coerce.number(),
+      criterion_3_constraints: z.coerce.number(),
+      criterion_4_experience: z.coerce.number(),
+    })
+    .partial(),
+  total_score: z.coerce.number().optional(),
+  status: z.string().optional(),
+  flags: z.string().optional(),
+});
 
 const MODEL = "gemini-3-flash-preview";
 
@@ -154,15 +176,36 @@ Score this submission against the rubric and return the exact JSON schema descri
     throw new Error("Context Block evaluator unavailable");
   }
 
-  let parsed: Record<string, unknown>;
+  let rawJson: unknown;
   try {
-    parsed = JSON.parse(stripJsonFences(raw));
+    rawJson = JSON.parse(stripJsonFences(raw));
   } catch (err) {
     logger.error({ err, raw }, "Context Block evaluator returned invalid JSON");
     throw new Error("Context Block evaluator returned an unparseable response");
   }
 
-  const scoresRaw = (parsed.scores ?? {}) as Record<string, unknown>;
+  // Validate the shape with Zod safeParse so a partial / mistyped
+  // response can't crash the rest of the scoring pipeline. On failure
+  // we coerce to all-1s + NO-GO with a "schema_mismatch" flag, so the
+  // operator sees a clear failure instead of a 500.
+  const parseResult = ContextBlockEvalResponseSchema.safeParse(rawJson);
+  if (!parseResult.success) {
+    logger.error(
+      { issues: parseResult.error.issues, rawJson },
+      "Context Block evaluator response failed schema validation",
+    );
+    return {
+      submissionId,
+      scores: { doctrine: 1, environment: 1, constraints: 1, experience: 1 },
+      totalScore: 0,
+      status: "NO-GO",
+      opsecFlag: false,
+      flags: "Evaluator response did not match expected schema",
+    };
+  }
+  const parsed = parseResult.data;
+
+  const scoresRaw = parsed.scores ?? {};
   const scores: ContextBlockScores = {
     doctrine: clampScore(scoresRaw.criterion_1_doctrine),
     environment: clampScore(scoresRaw.criterion_2_environment),

@@ -405,9 +405,12 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     : await ensureActivePreset(userId);
 
   // Atomically delete the failed supersede target (if any) and insert the
-  // replacement row, so the user never observes a duplicate or empty gap.
-  // Embedding ingestion happens after this transaction because it issues
-  // network calls that must not run inside a DB transaction.
+  // replacement row in `processing` state, so the user never observes a
+  // duplicate or empty gap and never sees a "ready" doc with zero chunks
+  // if ingestion subsequently fails. Embedding ingestion happens after
+  // this transaction because it issues network calls that must not run
+  // inside a DB transaction; we only flip the row to `ready` once that
+  // succeeds.
   const doc = await db.transaction(async (tx) => {
     if (supersedeTarget) {
       await tx
@@ -424,8 +427,7 @@ router.post("/library/documents", requireAuth, async (req, res) => {
         sizeBytes: buffer.byteLength,
         charCount: text.length,
         chunkCount: chunks.length,
-        status: "ready",
-        processedAt: new Date(),
+        status: "processing",
         autoSource: supersedeTarget?.autoSource ?? null,
         sourceUrl: supersedeTarget?.sourceUrl ?? null,
       })
@@ -433,22 +435,38 @@ router.post("/library/documents", requireAuth, async (req, res) => {
     return newDoc;
   });
 
+  let postIngestDoc = doc;
   try {
     const result = await ingestChunks(doc.id, userId, chunks);
-    if (result.embeddingError) {
-      // Document is still searchable via FTS; embeddings will be backfilled
-      // on the next backfill pass. Surface the warning to the user.
-      await db
-        .update(documentsTable)
-        .set({
-          errorMessage:
-            "Indexed for keyword search; semantic search will activate once embeddings finish processing.",
-        })
-        .where(eq(documentsTable.id, doc.id));
-    }
+    // Ingest succeeded — promote the row to `ready`. If embeddings were
+    // unavailable, the chunks are still written and FTS still works, so
+    // we mark the doc ready but surface a non-fatal warning.
+    const errorMessage = result.embeddingError
+      ? "Indexed for keyword search; semantic search will activate once embeddings finish processing."
+      : null;
+    const [updated] = await db
+      .update(documentsTable)
+      .set({
+        status: "ready",
+        processedAt: new Date(),
+        errorMessage,
+      })
+      .where(eq(documentsTable.id, doc.id))
+      .returning();
+    if (updated) postIngestDoc = updated;
   } catch (err) {
-    logger.error({ err }, "chunk insert failed");
-    await db.delete(documentsTable).where(eq(documentsTable.id, doc.id));
+    logger.error({ err, documentId: doc.id }, "chunk insert failed");
+    // Mark the row failed instead of deleting it so the user can retry
+    // from the UI rather than re-pasting their text. Match the wording
+    // surfaced by the document-processing pipeline for consistency.
+    await db
+      .update(documentsTable)
+      .set({
+        status: "failed",
+        errorMessage: "Failed to index extracted text.",
+        processedAt: new Date(),
+      })
+      .where(eq(documentsTable.id, doc.id));
     res.status(500).json({ error: "Failed to index document" });
     return;
   }
@@ -473,7 +491,7 @@ router.post("/library/documents", requireAuth, async (req, res) => {
       .onConflictDoNothing();
   }
 
-  res.json(serializeDocument(doc, presetIdsToLink));
+  res.json(serializeDocument(postIngestDoc, presetIdsToLink));
 });
 
 router.get("/library/documents/:id", requireAuth, async (req, res) => {
@@ -553,20 +571,24 @@ router.put(
             );
     const ownedPresetIds = ownedPresets.map((p) => p.id);
 
-    await db
-      .delete(presetDocumentsTable)
-      .where(eq(presetDocumentsTable.documentId, docId));
+    // Atomic delete + insert so a crash mid-update never leaves the doc
+    // with no tags. Both writes commit or neither does.
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(presetDocumentsTable)
+        .where(eq(presetDocumentsTable.documentId, docId));
 
-    if (ownedPresetIds.length > 0) {
-      await db
-        .insert(presetDocumentsTable)
-        .values(
-          ownedPresetIds.map((pid) => ({
-            presetId: pid,
-            documentId: docId,
-          })),
-        );
-    }
+      if (ownedPresetIds.length > 0) {
+        await tx
+          .insert(presetDocumentsTable)
+          .values(
+            ownedPresetIds.map((pid) => ({
+              presetId: pid,
+              documentId: docId,
+            })),
+          );
+      }
+    });
 
     res.json(serializeDocument(doc, ownedPresetIds));
   },
@@ -723,6 +745,23 @@ router.delete("/library/documents/:id", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Document not found" });
     return;
   }
+
+  // Best-effort delete of the underlying object-storage blob so we don't
+  // accumulate orphans. Tolerate ObjectNotFoundError (already gone) and
+  // any storage-layer failure — the document row is the source of truth
+  // and is already deleted, so we surface success regardless.
+  const deleted = result[0];
+  if (deleted.storageObjectPath) {
+    try {
+      await objectStorageService.deleteObjectEntity(deleted.storageObjectPath);
+    } catch (err) {
+      logger.warn(
+        { err, documentId: deleted.id, storageObjectPath: deleted.storageObjectPath },
+        "failed to delete document blob from object storage; row already deleted",
+      );
+    }
+  }
+
   res.json({ success: true });
 });
 

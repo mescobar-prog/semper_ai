@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -58,28 +58,42 @@ export function SubmitTool() {
 
   const [data, setData] = useState<SubmissionUpsert>(EMPTY);
   const [error, setError] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
+  // Track which (id, updatedAt) pair we last hydrated from. Re-hydrate
+  // whenever the server sends a newer revision (e.g. after a save
+  // round-trip or admin edit) so the form reflects authoritative state.
+  // The previous one-shot `hydrated` flag stuck on the first server
+  // response and silently dropped subsequent updates.
+  const lastHydratedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (existing && !hydrated) {
-      setData({
-        name: existing.name,
-        vendor: existing.vendor,
-        shortDescription: existing.shortDescription,
-        longDescription: existing.longDescription,
-        categoryId: existing.categoryId,
-        atoStatus: existing.atoStatus,
-        impactLevels: existing.impactLevels,
-        dataClassification: existing.dataClassification,
-        launchUrl: existing.launchUrl,
-        homepageUrl: existing.homepageUrl,
-        documentationUrl: existing.documentationUrl,
-        logoUrl: existing.logoUrl,
-        contactEmail: existing.contactEmail ?? "",
-      });
-      setHydrated(true);
-    }
-  }, [existing, hydrated]);
+    if (!existing) return;
+    // existing.updatedAt is typed as `string` by the generated OpenAPI
+    // client (ISO 8601), but the underlying transport sometimes hands
+    // back a Date instance, so coerce defensively.
+    const updatedAtRaw: unknown = existing.updatedAt;
+    const updatedAtKey =
+      updatedAtRaw instanceof Date
+        ? updatedAtRaw.toISOString()
+        : String(updatedAtRaw);
+    const key = `${existing.id}:${updatedAtKey}`;
+    if (lastHydratedKeyRef.current === key) return;
+    setData({
+      name: existing.name,
+      vendor: existing.vendor,
+      shortDescription: existing.shortDescription,
+      longDescription: existing.longDescription,
+      categoryId: existing.categoryId,
+      atoStatus: existing.atoStatus,
+      impactLevels: existing.impactLevels,
+      dataClassification: existing.dataClassification,
+      launchUrl: existing.launchUrl,
+      homepageUrl: existing.homepageUrl,
+      documentationUrl: existing.documentationUrl,
+      logoUrl: existing.logoUrl,
+      contactEmail: existing.contactEmail ?? "",
+    });
+    lastHydratedKeyRef.current = key;
+  }, [existing]);
 
   const set = <K extends keyof SubmissionUpsert>(
     k: K,

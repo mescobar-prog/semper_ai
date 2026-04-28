@@ -1163,16 +1163,27 @@ function SourceSection({
   const syncMutation = useSyncToolFromGithub();
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  // Tiny debounce: search ~ every 350ms after typing stops
+  // Tiny debounce: search ~ every 350ms after typing stops. We track the
+  // pending timer in a useRef instead of stashing it on the function
+  // object — the function identity used to be mutated across renders,
+  // which made cancellation flaky and held a hidden timer reference even
+  // after the picker closed.
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = null;
+      }
+    };
+  }, []);
   function onSearchChange(v: string) {
     setSearch(v);
-    if ((onSearchChange as unknown as { _t?: number })._t) {
-      clearTimeout((onSearchChange as unknown as { _t?: number })._t);
-    }
-    (onSearchChange as unknown as { _t?: number })._t = window.setTimeout(
-      () => setDebouncedSearch(v.trim()),
-      350,
-    );
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      searchTimerRef.current = null;
+      setDebouncedSearch(v.trim());
+    }, 350);
   }
 
   async function importRepo(r: GithubRepoSummary) {
@@ -1606,6 +1617,10 @@ function HostingSection({
           if (ctrl.signal.aborted) throw new DOMException("aborted", "AbortError");
           const end = Math.min(bytesUploaded + chunkSize, totalSize);
           const chunk = sliceFile(file, bytesUploaded, end);
+          // Re-check immediately before the network await: if the user
+          // hit cancel between slicing and dispatch, we don't want to
+          // race a fresh chunk through the wire.
+          if (ctrl.signal.aborted) throw new DOMException("aborted", "AbortError");
           const result = await pushInstallerChunk(
             session.uploadId,
             bytesUploaded,
@@ -1625,6 +1640,9 @@ function HostingSection({
         }
       }
 
+      // Same guard before the finalize call — cancelling after the last
+      // chunk should not silently flip the upload to "completed".
+      if (ctrl.signal.aborted) throw new DOMException("aborted", "AbortError");
       const finalized = await completeMutation.mutateAsync({
         uploadId: session.uploadId,
       });

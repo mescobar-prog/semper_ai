@@ -154,16 +154,26 @@ export function Profile() {
     [flush],
   );
 
-  // On unmount, flush any pending edit so we don't lose the last keystrokes.
+  // Keep a ref to the latest `flush` so the unmount-only cleanup can
+  // call it without depending on the mutation/queryClient identities.
+  // The previous version had `[flush]` deps, which fired the cleanup on
+  // every render and reached into torn-down React-Query state on the
+  // real unmount. Empty-deps + ref pattern fixes both: the cleanup runs
+  // exactly once on unmount and uses whatever flush was current then.
+  const flushRef = useRef(flush);
+  useEffect(() => {
+    flushRef.current = flush;
+  }, [flush]);
+
   useEffect(() => {
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
-        void flush();
+        void flushRef.current();
       }
     };
-  }, [flush]);
+  }, []);
 
   const onChange = (key: keyof ProfileUpdate, value: string) => {
     if (!draft) return;

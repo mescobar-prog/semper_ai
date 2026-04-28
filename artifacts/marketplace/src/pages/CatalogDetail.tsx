@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -109,6 +109,15 @@ export function CatalogDetail() {
     | { status: "error"; message: string }
   >({ status: "idle" });
 
+  // Belt-and-braces guard against double-launch: even with the disabled
+  // button we've seen rapid double-clicks (touch events + click) slip
+  // through before `launchTrigger` flips, so we also short-circuit here
+  // via a ref that doesn't wait for a React render. Declared up here
+  // (before the early returns below) so React always sees the same hook
+  // count across renders — moving it after the loading/error guards
+  // would violate the rules of hooks and crash the page on first load.
+  const isLaunchingRef = useRef(false);
+
   if (isLoading) {
     return (
       <PageContainer>
@@ -148,6 +157,8 @@ export function CatalogDetail() {
   // otherwise we open the affirmation modal first and stash the launch
   // intent so it auto-resumes once the operator confirms.
   const launch = (opts?: { forcePreview?: boolean }) => {
+    if (isLaunchingRef.current || launchTrigger) return;
+    isLaunchingRef.current = true;
     setLaunchState({ status: "idle" });
     const fp = !!opts?.forcePreview;
     if (!hasValidAffirmation) {
@@ -443,6 +454,7 @@ export function CatalogDetail() {
         onClose={() => {
           setLaunchTrigger(null);
           setForcePreview(false);
+          isLaunchingRef.current = false;
         }}
         onLaunched={(r) => {
           if (r.hostingType === "local_install") {
@@ -469,6 +481,7 @@ export function CatalogDetail() {
         onClose={() => {
           setAffirmationPrompt(null);
           setPendingLaunch(null);
+          isLaunchingRef.current = false;
         }}
         onAffirmed={() => {
           // The cached affirmation status was invalidated inside the
@@ -479,6 +492,10 @@ export function CatalogDetail() {
           if (next) {
             setForcePreview(next.forcePreview);
             setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
+          } else {
+            // No queued launch — release the in-flight ref so the user
+            // can launch fresh after a re-affirmation.
+            isLaunchingRef.current = false;
           }
         }}
       />

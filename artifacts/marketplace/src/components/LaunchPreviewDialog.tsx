@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   previewLaunchContext,
@@ -61,6 +61,24 @@ export function LaunchPreviewDialog({
   const launchMutation = useLaunchTool();
   const updateProfile = useUpdateMyProfile();
 
+  // Stash the unstable identities from useMutation / parent props in
+  // refs so the launch effect's dep array can be narrowed to truly
+  // launch-defining inputs. Without this, the effect re-fires every
+  // time the mutation transitions through pending → success states,
+  // which can re-mint a launch token for the same trigger.
+  const launchMutationRef = useRef(launchMutation);
+  launchMutationRef.current = launchMutation;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onLaunchedRef = useRef(onLaunched);
+  onLaunchedRef.current = onLaunched;
+
+  // Guards against re-entry of the trigger effect for the same trigger
+  // identity. Even with narrowed deps, React's StrictMode (and HMR)
+  // can re-run the effect; we want to mint a token at most once per
+  // trigger object the parent hands us.
+  const handledTriggerRef = useRef<LaunchTrigger | null>(null);
+
   const [preview, setPreview] = useState<LaunchPreviewResponse | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [refreshingPreview, setRefreshingPreview] = useState(false);
@@ -79,24 +97,40 @@ export function LaunchPreviewDialog({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [savingPreference, setSavingPreference] = useState(false);
 
-  // Reset state whenever a new trigger arrives.
+  // Reset state whenever a new trigger arrives. We depend on the
+  // `trigger` object identity (not just `toolId`) so that two
+  // back-to-back launches of the *same* tool — which produce two
+  // distinct trigger objects with the same toolId — both reset the
+  // dialog. The previous `[trigger?.toolId]` dep skipped the second
+  // launch and reused stale exclusion state.
   useEffect(() => {
-    if (!trigger) return;
+    if (!trigger) {
+      // Once the dialog is closed, allow the same trigger object to
+      // run through again on a future reopen. (In practice the parent
+      // mints a fresh object, but resetting here keeps the guard from
+      // becoming a footgun.)
+      handledTriggerRef.current = null;
+      return;
+    }
     setPreview(null);
     setPreviewError(null);
     setSubmitError(null);
     setExcludedFields(new Set());
     setExcludedSnippets(new Set());
     setAdditionalDetail("");
-  }, [trigger?.toolId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trigger]);
 
   // Initial fetch of the candidate payload OR direct mint depending on
-  // showPreview. We don't include `additionalDetail` in the dep list
-  // because the detail-driven re-fetches are handled in a separate
-  // debounced effect below — this effect only fires once per
-  // (toolId, showPreview).
+  // showPreview. Deps are narrowed to (trigger, showPreview, queryClient)
+  // — all unstable callbacks (launchMutation, onClose, onLaunched) are
+  // read from refs above so churn in the mutation's pending/success
+  // state can't re-fire the launch side effect for the same trigger.
+  // The handledTriggerRef guard provides belt-and-braces protection
+  // against StrictMode / HMR double invocations.
   useEffect(() => {
     if (!trigger) return;
+    if (handledTriggerRef.current === trigger) return;
+    handledTriggerRef.current = trigger;
     let cancelled = false;
     (async () => {
       if (!showPreview) {
@@ -104,7 +138,7 @@ export function LaunchPreviewDialog({
         try {
           setSubmitting(true);
           setSubmitError(null);
-          const resp = await launchMutation.mutateAsync({
+          const resp = await launchMutationRef.current.mutateAsync({
             toolId: trigger.toolId,
             data: {},
           });
@@ -112,14 +146,14 @@ export function LaunchPreviewDialog({
           if (resp.hostingType !== "local_install") {
             window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
           }
-          onLaunched({ ...resp, toolName: trigger.toolName });
+          onLaunchedRef.current({ ...resp, toolName: trigger.toolName });
           queryClient.invalidateQueries({
             queryKey: getListRecentLaunchesQueryKey(),
           });
           queryClient.invalidateQueries({
             queryKey: getGetDashboardSummaryQueryKey(),
           });
-          onClose();
+          onCloseRef.current();
         } catch (e) {
           if (cancelled) return;
           setSubmitError(
@@ -149,7 +183,7 @@ export function LaunchPreviewDialog({
     return () => {
       cancelled = true;
     };
-  }, [trigger?.toolId, showPreview]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trigger, showPreview, queryClient]);
 
   // Debounced additionalDetail → re-fetch preview. We wait ~500ms
   // after the operator stops typing so we don't spam the LLM-backed

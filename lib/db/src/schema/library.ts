@@ -119,6 +119,14 @@ export const docChunksTable = pgTable(
     embeddingModel: varchar("embedding_model"),
     embeddingDim: integer("embedding_dim"),
     embeddedAt: timestamp("embedded_at", { withTimezone: true }),
+    // Backfill claim timestamp (Task #119 fix #7). Set when the backfill
+    // loop atomically claims a chunk via UPDATE...WHERE NULL RETURNING so
+    // a second concurrent pass cannot re-claim it before the first
+    // finishes. Cleared on success (along with `embedding`) and left
+    // populated on transient failure so a stuck claim is visible in the
+    // table — the loop's NULL guard treats already-claimed chunks as
+    // taken until they're embedded or manually cleared.
+    embeddingStartedAt: timestamp("embedding_started_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

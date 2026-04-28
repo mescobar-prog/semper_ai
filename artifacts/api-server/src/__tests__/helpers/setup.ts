@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -9,10 +9,16 @@ import {
   presetDocumentsTable,
   launchesTable,
   launchTokensTable,
+  launchAffirmationsTable,
+  contextBlocksTable,
   sessionTokensTable,
   sessionsTable,
 } from "@workspace/db";
 import { createSession } from "../../lib/auth";
+import {
+  ensureActivePreset,
+  getOrCreateContextBlock,
+} from "../../lib/profile-helpers";
 
 export interface TestUser {
   userId: string;
@@ -56,6 +62,50 @@ export async function createTestUser(opts: {
     sessionId,
     authHeader: { Authorization: `Bearer ${sessionId}` },
   };
+}
+
+/**
+ * Seed a valid launch-time affirmation for the test user against their
+ * active preset and current context-block version. The launch endpoint
+ * requires this row (Task #45) — without it, POST /api/tools/:id/launch
+ * returns 409 needs_affirmation. We also pre-confirm the context block so
+ * `loadValidAffirmation` doesn't trip on a version mismatch later.
+ */
+export async function affirmTestUser(userId: string): Promise<void> {
+  const cb = await getOrCreateContextBlock(userId);
+  const { preset } = await ensureActivePreset(userId);
+
+  // Stamp the context block as confirmed (GO) so any downstream check
+  // that gates on cb.confirmedAt / status passes for this user.
+  await db
+    .update(contextBlocksTable)
+    .set({
+      status: "GO",
+      scoreTotal: 12,
+      confirmedAt: new Date(),
+      opsecFlag: "false",
+    })
+    .where(eq(contextBlocksTable.userId, userId));
+
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  await db
+    .insert(launchAffirmationsTable)
+    .values({
+      userId,
+      presetId: preset.id,
+      contextBlockVersion: cb.version ?? 1,
+      affirmedAt: new Date(),
+      expiresAt,
+    })
+    .onConflictDoUpdate({
+      target: launchAffirmationsTable.userId,
+      set: {
+        presetId: preset.id,
+        contextBlockVersion: cb.version ?? 1,
+        affirmedAt: new Date(),
+        expiresAt,
+      },
+    });
 }
 
 export async function createTestTool(
@@ -143,13 +193,38 @@ export async function cleanupTestData(ids: {
       await db.delete(launchesTable).where(inArray(launchesTable.id, launchIds));
     }
 
+    // Drop launch_affirmations rows seeded via affirmTestUser. There's at
+    // most one per user (PK on user_id) but eq() handles the absent case.
+    await db
+      .delete(launchAffirmationsTable)
+      .where(eq(launchAffirmationsTable.userId, userId));
+    await db.delete(contextBlocksTable).where(eq(contextBlocksTable.userId, userId));
     await db.delete(profilesTable).where(eq(profilesTable.userId, userId));
     await db.delete(usersTable).where(eq(usersTable.id, userId));
   }
 
-  // Drop any sessions for these users (cookie cleanup); sessions are keyed
-  // by sid not userId, so we scan and drop the ones created here. We rely
-  // on the explicit sids passed in via TestUser.sessionId in callers if
-  // needed; for now, rely on session expiry to roll them off.
+  // Drop sessions for these users so the sessions table doesn't grow
+  // unbounded across runs. Sessions are keyed by sid (opaque), but
+  // `auth.ts::createSession` stores the user id at `sess.user.id`, so
+  // we use a JSONB filter to delete only the rows our test users own.
+  if (userIds.length > 0) {
+    try {
+      // drizzle's sql template wraps an embedded JS array as a record
+      // (composite type) which postgres can't cast to text[]; expand the
+      // ids into individual bound params via sql.join so each one is its
+      // own ::text parameter inside an IN list.
+      const idList = sql.join(
+        userIds.map((id) => sql`${id}`),
+        sql`, `,
+      );
+      await db.execute(
+        sql`DELETE FROM sessions WHERE sess->'user'->>'id' IN (${idList})`,
+      );
+    } catch (err) {
+      // Best-effort: don't fail tests if the sessions schema has drifted.
+      // eslint-disable-next-line no-console
+      console.warn("test cleanup: failed to delete sessions", err);
+    }
+  }
   void sessionsTable;
 }

@@ -203,6 +203,27 @@ export async function runProfileSplitMigration(): Promise<void> {
       ADD COLUMN IF NOT EXISTS storage_object_path varchar
   `);
 
+  // --- 3e.1. Single-use launch tokens (Task #119 fix #6). Adds the
+  // `used_at` column the launch-exchange route claims atomically so a
+  // second exchange of the same token returns 401 even within the TTL.
+  // Idempotent IF NOT EXISTS — older deployments boot, then this column
+  // appears as NULL on existing tokens (which is the intended initial
+  // state: unused).
+  await db.execute(sql`
+    ALTER TABLE launch_tokens
+      ADD COLUMN IF NOT EXISTS used_at timestamp with time zone
+  `);
+
+  // --- 3e.2. Embeddings backfill claim column (Task #119 fix #7). Lets
+  // the backfill loop atomically claim a chunk before it does the
+  // network-bound embedding call, so two concurrent backfill passes
+  // can't double-process the same row. Cleared on success/failure by
+  // the loop itself; never bumped by ingestion.
+  await db.execute(sql`
+    ALTER TABLE doc_chunks
+      ADD COLUMN IF NOT EXISTS embedding_started_at timestamp with time zone
+  `);
+
   // --- 3f. Ensure new tools columns (upstream hosting + git-sync) -------
   // The toolsTable schema in lib/db/src/schema/catalog.ts grew columns for
   // self-hosted installer metadata, local launch URL templating, and

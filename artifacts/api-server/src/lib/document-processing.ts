@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db, documentsTable, docChunksTable } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
-import { extractDocumentText } from "./document-extract";
+import { extractDocumentText, OcrRequiredError } from "./document-extract";
 import { chunkText } from "./rag";
 import { ingestChunks } from "./chunk-ingest";
 import { logger } from "./logger";
@@ -79,10 +79,17 @@ export async function processStoredDocument(documentId: string): Promise<void> {
     });
   } catch (err) {
     logger.warn({ err, documentId }, "extraction failed");
-    const msg =
-      err instanceof Error
-        ? `Could not extract text: ${err.message}`
-        : "Could not extract text from this file.";
+    let msg: string;
+    if (err instanceof OcrRequiredError) {
+      // OCR isn't supported yet; tell the user exactly why their PDF
+      // didn't ingest instead of the generic "could not extract" line.
+      msg =
+        "This PDF appears to be a scanned image with no text layer. OCR is not yet supported — please upload a text-based PDF, DOCX, TXT, or Markdown file.";
+    } else if (err instanceof Error) {
+      msg = `Could not extract text: ${err.message}`;
+    } else {
+      msg = "Could not extract text from this file.";
+    }
     await markFailed(documentId, msg);
     return;
   }

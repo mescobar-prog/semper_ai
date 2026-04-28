@@ -12,6 +12,7 @@ import {
   ReviewSubmissionBody,
 } from "@workspace/api-zod";
 import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -162,34 +163,70 @@ router.post("/submissions", requireAuth, async (req, res) => {
     return;
   }
   const data = parsed.data;
-  const slug = await uniqueSubmissionSlug(data.name);
   const now = new Date();
 
-  const [created] = await db
-    .insert(toolsTable)
-    .values({
-      slug,
-      name: data.name,
-      vendor: data.vendor,
-      shortDescription: data.shortDescription,
-      longDescription: data.longDescription,
-      categoryId: data.categoryId ?? null,
-      atoStatus: data.atoStatus,
-      impactLevels: data.impactLevels,
-      dataClassification: data.dataClassification,
-      badges: [],
-      homepageUrl: data.homepageUrl ?? null,
-      launchUrl: data.launchUrl,
-      documentationUrl: data.documentationUrl ?? null,
-      logoUrl: data.logoUrl ?? null,
-      contactEmail: data.contactEmail,
-      isActive: "false",
-      submissionStatus: "pending",
-      submitterId: req.user!.id,
-      submittedAt: now,
-      createdBy: req.user!.id,
-    })
-    .returning();
+  // Slug uniqueness is enforced both by `uniqueSubmissionSlug`'s pre-check
+  // and the `tools.slug` UNIQUE constraint. Two concurrent submissions for
+  // the same tool name can pass the pre-check, then race on insert and
+  // collide on the constraint. Retry with a fresh slug suffix a few times
+  // before giving up — surface a clean 409 if the burst is sustained.
+  const MAX_SLUG_ATTEMPTS = 5;
+  let created: typeof toolsTable.$inferSelect | undefined;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
+    const slug = await uniqueSubmissionSlug(data.name);
+    try {
+      const rows = await db
+        .insert(toolsTable)
+        .values({
+          slug,
+          name: data.name,
+          vendor: data.vendor,
+          shortDescription: data.shortDescription,
+          longDescription: data.longDescription,
+          categoryId: data.categoryId ?? null,
+          atoStatus: data.atoStatus,
+          impactLevels: data.impactLevels,
+          dataClassification: data.dataClassification,
+          badges: [],
+          homepageUrl: data.homepageUrl ?? null,
+          launchUrl: data.launchUrl,
+          documentationUrl: data.documentationUrl ?? null,
+          logoUrl: data.logoUrl ?? null,
+          contactEmail: data.contactEmail,
+          isActive: "false",
+          submissionStatus: "pending",
+          submitterId: req.user!.id,
+          submittedAt: now,
+          createdBy: req.user!.id,
+        })
+        .returning();
+      created = rows[0];
+      break;
+    } catch (err) {
+      lastErr = err;
+      // Detect Postgres unique-violation on the slug column. drizzle wraps
+      // the underlying pg error; check both the SQLSTATE code and the
+      // message for the constraint name.
+      const code = (err as { code?: string } | null)?.code;
+      const message =
+        err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      const isSlugDup =
+        code === "23505" &&
+        (message.includes("slug") || message.includes("tools_slug"));
+      if (!isSlugDup) throw err;
+      // Loop and try a fresh slug — uniqueSubmissionSlug will pick a new
+      // suffix now that the racing row is committed.
+    }
+  }
+
+  if (!created) {
+    logger.warn({ err: lastErr, name: data.name }, "submission slug retry exhausted");
+    res
+      .status(409)
+      .json({ error: "Could not allocate a unique slug — please try again." });
+    return;
+  }
 
   const loaded = await loadSubmissionWithRelations(created.id);
   if (!loaded) {
