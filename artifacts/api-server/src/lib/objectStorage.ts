@@ -148,6 +148,36 @@ export class ObjectStorageService {
     return objectFile;
   }
 
+  /**
+   * Independently verify the actual byte size of an uploaded object via a
+   * HEAD-style metadata fetch from object storage. Used as a defensive check
+   * after the browser PUTs the file directly to GCS — the client could lie in
+   * the upload-URL request, so we recheck once they reference the object.
+   *
+   * Throws ObjectNotFoundError if the object does not exist or the path is
+   * malformed.
+   */
+  async getObjectEntitySize(objectPath: string): Promise<number> {
+    const file = await this.getObjectEntityFile(objectPath);
+    const [metadata] = await file.getMetadata();
+    return Number(metadata.size ?? 0);
+  }
+
+  /**
+   * Best-effort delete of an uploaded object referenced by its `/objects/...`
+   * entity path. Used to clean up oversized installer uploads that we reject.
+   * Swallows ObjectNotFoundError so callers can call this freely.
+   */
+  async deleteObjectEntity(objectPath: string): Promise<void> {
+    try {
+      const file = await this.getObjectEntityFile(objectPath);
+      await file.delete({ ignoreNotFound: true });
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) return;
+      throw err;
+    }
+  }
+
   normalizeObjectEntityPath(rawPath: string): string {
     if (!rawPath.startsWith("https://storage.googleapis.com/")) {
       return rawPath;

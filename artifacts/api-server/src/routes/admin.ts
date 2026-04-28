@@ -18,7 +18,7 @@ import {
   RequestInstallerUploadUrlBody,
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/requireAuth";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import {
   GithubNotConnectedError,
   GithubNotFoundError,
@@ -194,6 +194,84 @@ function buildToolWriteValues(
   };
 }
 
+type InstallerVerifyOk = { ok: true; sizeBytes: number | null };
+type InstallerVerifyErr = { ok: false; status: number; error: string };
+
+// Independently verify the installer object's actual byte size in object
+// storage (HEAD-style metadata fetch) before we let the tool record reference
+// it. The earlier check in the upload-URL endpoint trusts the client-declared
+// size, but the actual PUT happens directly from the browser to GCS — a
+// misbehaving client could declare 1 MB and upload 5 GB. Re-checking here and
+// deleting oversized blobs closes that hole.
+//
+// Returns:
+//   - `sizeBytes: <number>` when a new key was verified — caller should
+//     persist this (storage-derived) size.
+//   - `sizeBytes: null` when no installer key is being set, OR when the key
+//     is unchanged from what's already saved. In the unchanged case the
+//     caller should keep the previously-stored size and ignore any
+//     client-supplied value (otherwise the request payload could spoof
+//     `installerSizeBytes` without actually changing the blob).
+async function verifyInstallerObjectKey(
+  objectKey: string | null | undefined,
+  previousKey: string | null,
+  log: { error: (obj: object, msg: string) => void },
+): Promise<InstallerVerifyOk | InstallerVerifyErr> {
+  if (!objectKey) return { ok: true, sizeBytes: null };
+  // Skip re-verification when the key is unchanged from what's already saved
+  // — that object was verified when first persisted and revalidating on every
+  // tool edit would be wasteful.
+  if (objectKey === previousKey) return { ok: true, sizeBytes: null };
+
+  let sizeBytes: number;
+  try {
+    sizeBytes = await objectStorageService.getObjectEntitySize(objectKey);
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Uploaded installer object was not found in storage.",
+      };
+    }
+    throw err;
+  }
+
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    await objectStorageService
+      .deleteObjectEntity(objectKey)
+      .catch((err) =>
+        log.error({ err, objectKey }, "Failed to delete empty installer blob"),
+      );
+    return {
+      ok: false,
+      status: 400,
+      error: "Uploaded installer is empty.",
+    };
+  }
+
+  if (sizeBytes > MAX_INSTALLER_UPLOAD_SIZE_BYTES) {
+    // Best-effort delete so the orphaned oversized blob doesn't linger.
+    await objectStorageService
+      .deleteObjectEntity(objectKey)
+      .catch((err) =>
+        log.error(
+          { err, objectKey, sizeBytes },
+          "Failed to delete oversized installer blob",
+        ),
+      );
+    return {
+      ok: false,
+      status: 413,
+      error: `Installer too large. Maximum size is ${Math.floor(
+        MAX_INSTALLER_UPLOAD_SIZE_BYTES / (1024 * 1024),
+      )} MB.`,
+    };
+  }
+
+  return { ok: true, sizeBytes };
+}
+
 async function loadToolDetailRow(toolId: string): Promise<ToolDetailRow | null> {
   const [row] = await db
     .select({
@@ -263,6 +341,20 @@ router.post("/admin/tools", requireAdmin, async (req, res) => {
     return;
   }
   const data = parsed.data;
+
+  const installerCheck = await verifyInstallerObjectKey(
+    data.installerObjectKey,
+    null,
+    req.log,
+  );
+  if (!installerCheck.ok) {
+    res.status(installerCheck.status).json({ error: installerCheck.error });
+    return;
+  }
+  // Always derive installerSizeBytes from object storage — never trust the
+  // client payload. On create with no installer key, force null.
+  data.installerSizeBytes = installerCheck.sizeBytes;
+
   const [created] = await db
     .insert(toolsTable)
     .values({
@@ -287,6 +379,51 @@ router.put("/admin/tools/:id", requireAdmin, async (req, res) => {
     return;
   }
   const data = parsed.data;
+
+  // Look up the previously-stored installer key + size so we can skip
+  // re-verifying an unchanged reference and so we never let the client's
+  // payload spoof installerSizeBytes (only storage-derived sizes are
+  // trusted).
+  const [existing] = await db
+    .select({
+      installerObjectKey: toolsTable.installerObjectKey,
+      installerSizeBytes: toolsTable.installerSizeBytes,
+    })
+    .from(toolsTable)
+    .where(
+      and(
+        eq(toolsTable.id, String(req.params.id)),
+        eq(toolsTable.submissionStatus, "approved"),
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Tool not found" });
+    return;
+  }
+
+  const installerCheck = await verifyInstallerObjectKey(
+    data.installerObjectKey,
+    existing.installerObjectKey ?? null,
+    req.log,
+  );
+  if (!installerCheck.ok) {
+    res.status(installerCheck.status).json({ error: installerCheck.error });
+    return;
+  }
+  // Pick installerSizeBytes from authoritative sources only:
+  //   - newly-uploaded blob: storage-derived size from the HEAD check
+  //   - unchanged key: previously-stored DB value
+  //   - cleared key: null
+  // The request payload's installerSizeBytes is intentionally ignored.
+  if (installerCheck.sizeBytes !== null) {
+    data.installerSizeBytes = installerCheck.sizeBytes;
+  } else if (data.installerObjectKey && data.installerObjectKey === existing.installerObjectKey) {
+    data.installerSizeBytes = existing.installerSizeBytes ?? null;
+  } else {
+    data.installerSizeBytes = null;
+  }
+
   const [updated] = await db
     .update(toolsTable)
     .set(buildToolWriteValues(data))
