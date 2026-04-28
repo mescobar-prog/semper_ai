@@ -1,5 +1,10 @@
 import { eq } from "drizzle-orm";
-import { db, profilesTable, type Profile } from "@workspace/db";
+import {
+  db,
+  profilesTable,
+  type Profile,
+  type ContextBlockScores,
+} from "@workspace/db";
 
 const BRANCH_LABEL: Record<string, string> = {
   army: "U.S. Army",
@@ -36,6 +41,14 @@ const TRACKED_FIELDS: Array<keyof Profile> = [
   "primaryMission",
   "aiUseCases",
   "freeFormContext",
+  // The 6-element Context Block also counts toward profile completeness:
+  // operators are not "done" until they have a confirmed block.
+  "cbDoctrine",
+  "cbIntent",
+  "cbEnvironment",
+  "cbConstraints",
+  "cbRisk",
+  "cbExperience",
 ];
 
 export function completenessPct(profile: Profile | null): number {
@@ -65,6 +78,65 @@ export async function getOrCreateProfile(userId: string): Promise<Profile> {
     .values({ userId, aiUseCases: [] })
     .returning();
   return created;
+}
+
+export interface SerializedContextBlockState {
+  doctrine: string | null;
+  intent: string | null;
+  environment: string | null;
+  constraints: string | null;
+  risk: string | null;
+  experience: string | null;
+  confirmedAt: string | null;
+  lastEvaluation: SerializedContextBlockEvaluation | null;
+}
+
+export interface SerializedContextBlockEvaluation {
+  submissionId: string;
+  scores: ContextBlockScores;
+  totalScore: number;
+  status: string;
+  opsecFlag: boolean;
+  flags: string;
+}
+
+export function serializeContextBlock(
+  profile: Profile,
+): SerializedContextBlockState {
+  const lastEvaluation: SerializedContextBlockEvaluation | null =
+    profile.cbScoreTotal != null && profile.cbScores && profile.cbStatus
+      ? {
+          submissionId: profile.cbSubmissionId ?? "",
+          scores: profile.cbScores,
+          totalScore: profile.cbScoreTotal,
+          status: profile.cbStatus,
+          opsecFlag: profile.cbOpsecFlag === "true",
+          flags: profile.cbFlags ?? "None",
+        }
+      : null;
+  return {
+    doctrine: profile.cbDoctrine,
+    intent: profile.cbIntent,
+    environment: profile.cbEnvironment,
+    constraints: profile.cbConstraints,
+    risk: profile.cbRisk,
+    experience: profile.cbExperience,
+    confirmedAt: profile.cbConfirmedAt ? profile.cbConfirmedAt.toISOString() : null,
+    lastEvaluation,
+  };
+}
+
+export function hasConfirmedContextBlock(profile: Profile | null): boolean {
+  if (!profile || !profile.cbConfirmedAt) return false;
+  // All 6 elements must have been filled at confirm time.
+  return [
+    profile.cbDoctrine,
+    profile.cbIntent,
+    profile.cbEnvironment,
+    profile.cbConstraints,
+    profile.cbRisk,
+    profile.cbExperience,
+  ].every((v) => typeof v === "string" && v.trim().length > 0);
 }
 
 /**
@@ -143,10 +215,47 @@ export function buildContextBlock(
     appendedSection = true;
   }
 
+  // 6-element Context Block (verification gate). Only render when the
+  // operator has actually confirmed one. Otherwise drop a one-line note so
+  // tool builders know the gate has not been cleared yet.
+  if (hasConfirmedContextBlock(profile)) {
+    const score = profile!.cbScoreTotal;
+    const status = profile!.cbStatus;
+    const confirmedAt = profile!.cbConfirmedAt!.toISOString();
+    lines.push("## Context Block");
+    lines.push(
+      `_Confirmed ${confirmedAt} · evaluator score ${score ?? "?"} /12 · status ${status ?? "?"}_`,
+    );
+    lines.push("");
+    lines.push("### 1. Doctrine & Orders");
+    lines.push(profile!.cbDoctrine!.trim());
+    lines.push("");
+    lines.push("### 2. Commander's Intent");
+    lines.push(profile!.cbIntent!.trim());
+    lines.push("");
+    lines.push("### 3. Environment");
+    lines.push(profile!.cbEnvironment!.trim());
+    lines.push("");
+    lines.push("### 4. Constraints & Limitations");
+    lines.push(profile!.cbConstraints!.trim());
+    lines.push("");
+    lines.push("### 5. Risk");
+    lines.push(profile!.cbRisk!.trim());
+    lines.push("");
+    lines.push("### 6. Experience & Judgment");
+    lines.push(profile!.cbExperience!.trim());
+    lines.push("");
+    appendedSection = true;
+  } else {
+    lines.push("## Context Block");
+    lines.push(
+      "_The operator has not yet confirmed a 6-element Context Block. Treat any operational specifics with extra caution and ask clarifying questions before producing high-stakes output._",
+    );
+    lines.push("");
+    appendedSection = true;
+  }
+
   if (!appendedSection) {
-    // No profile sections were appended at all — the operator hasn't filled
-    // in any structured fields. Make that explicit to the tool, regardless of
-    // whether we have an email line.
     lines.push(
       "_The operator has not yet completed their structured profile. Ask them about their role, mission, and unit before producing personalized output._",
     );
@@ -171,6 +280,7 @@ export function serializeProfile(profile: Profile) {
     freeFormContext: profile.freeFormContext,
     isAdmin: profile.isAdmin === "true",
     completenessPct: completenessPct(profile),
+    contextBlock: serializeContextBlock(profile),
     updatedAt: profile.updatedAt.toISOString(),
   };
 }

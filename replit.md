@@ -31,7 +31,7 @@ See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and pa
 A TradeWinds-style marketplace where service members sign in once, build a structured operator profile + personal RAG library, then launch authorized AI tools that automatically receive their context and mission-relevant document snippets via a one-time launch token.
 
 ### Artifacts
-- `artifacts/marketplace` — main storefront (React + Vite). Pages: Landing, Dashboard, Catalog, CatalogDetail, Profile, Library, Launches, Admin.
+- `artifacts/marketplace` — main storefront (React + Vite). Pages: Landing, Dashboard, Catalog (Context Block verification gate), CatalogBrowse (`/catalog/browse`, tool list), CatalogDetail, Profile, Library, Launches, Admin.
 - `artifacts/api-server` — Express + Drizzle. Routes for auth, profile, catalog, library, launches, admin, dashboard.
 - `artifacts/context-echo` — demonstration tool that exchanges a launch token and renders the user/profile/RAG primer payload it received.
 - `artifacts/mockup-sandbox` — design canvas (unchanged template).

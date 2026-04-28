@@ -111,6 +111,52 @@ export const GetMyProfileResponse = zod.object({
   freeFormContext: zod.string().nullable(),
   isAdmin: zod.boolean(),
   completenessPct: zod.number(),
+  contextBlock: zod.object({
+    doctrine: zod.string().nullable(),
+    intent: zod.string().nullable(),
+    environment: zod.string().nullable(),
+    constraints: zod.string().nullable(),
+    risk: zod.string().nullable(),
+    experience: zod.string().nullable(),
+    confirmedAt: zod.coerce
+      .date()
+      .nullable()
+      .describe("When the operator last accepted this Context Block."),
+    lastEvaluation: zod.union([
+      zod.object({
+        submissionId: zod.string(),
+        scores: zod.object({
+          doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+          environment: zod
+            .number()
+            .describe("Criterion 2 — environment & commander's intent (1-3)."),
+          constraints: zod
+            .number()
+            .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+          experience: zod.number().describe("Criterion 4 score (1-3)."),
+        }),
+        totalScore: zod
+          .number()
+          .describe(
+            "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+          ),
+        status: zod
+          .string()
+          .describe(
+            '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+          ),
+        opsecFlag: zod
+          .boolean()
+          .describe("True if the submission tripped the OPSEC fail-safe."),
+        flags: zod
+          .string()
+          .describe(
+            'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+          ),
+      }),
+      zod.null(),
+    ]),
+  }),
   updatedAt: zod.coerce.date(),
 });
 
@@ -146,6 +192,52 @@ export const UpdateMyProfileResponse = zod.object({
   freeFormContext: zod.string().nullable(),
   isAdmin: zod.boolean(),
   completenessPct: zod.number(),
+  contextBlock: zod.object({
+    doctrine: zod.string().nullable(),
+    intent: zod.string().nullable(),
+    environment: zod.string().nullable(),
+    constraints: zod.string().nullable(),
+    risk: zod.string().nullable(),
+    experience: zod.string().nullable(),
+    confirmedAt: zod.coerce
+      .date()
+      .nullable()
+      .describe("When the operator last accepted this Context Block."),
+    lastEvaluation: zod.union([
+      zod.object({
+        submissionId: zod.string(),
+        scores: zod.object({
+          doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+          environment: zod
+            .number()
+            .describe("Criterion 2 — environment & commander's intent (1-3)."),
+          constraints: zod
+            .number()
+            .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+          experience: zod.number().describe("Criterion 4 score (1-3)."),
+        }),
+        totalScore: zod
+          .number()
+          .describe(
+            "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+          ),
+        status: zod
+          .string()
+          .describe(
+            '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+          ),
+        opsecFlag: zod
+          .boolean()
+          .describe("True if the submission tripped the OPSEC fail-safe."),
+        flags: zod
+          .string()
+          .describe(
+            'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+          ),
+      }),
+      zod.null(),
+    ]),
+  }),
   updatedAt: zod.coerce.date(),
 });
 
@@ -195,6 +287,175 @@ export const SendProfileChatResponse = zod.object({
  */
 export const ResetProfileChatResponse = zod.object({
   success: zod.boolean(),
+});
+
+/**
+ * Runs the Semantic NLP Evaluator against the supplied 6 elements and returns the per-criterion scores, total /12, GO/NO-GO status, and any OPSEC flag. Does not modify the operator's stored block.
+
+ * @summary Score a candidate 6-element Context Block without persisting it
+ */
+export const EvaluateContextBlockBody = zod.object({
+  doctrine: zod
+    .string()
+    .describe("Element 1 — Doctrine & Orders cited (e.g. MCDP-4, unit SOPs)."),
+  intent: zod
+    .string()
+    .describe("Element 2 — Commander's intent for this task."),
+  environment: zod.string().describe("Element 3 — Operational environment."),
+  constraints: zod.string().describe("Element 4 — Constraints & limitations."),
+  risk: zod.string().describe("Element 5 — Risk if the LLM hallucinates."),
+  experience: zod
+    .string()
+    .describe("Element 6 — Human experience & judgment AI cannot infer."),
+});
+
+export const EvaluateContextBlockResponse = zod.object({
+  submissionId: zod.string(),
+  scores: zod.object({
+    doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+    environment: zod
+      .number()
+      .describe("Criterion 2 — environment & commander's intent (1-3)."),
+    constraints: zod
+      .number()
+      .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+    experience: zod.number().describe("Criterion 4 score (1-3)."),
+  }),
+  totalScore: zod
+    .number()
+    .describe(
+      "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+    ),
+  status: zod
+    .string()
+    .describe('\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".'),
+  opsecFlag: zod
+    .boolean()
+    .describe("True if the submission tripped the OPSEC fail-safe."),
+  flags: zod
+    .string()
+    .describe(
+      'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+    ),
+});
+
+/**
+ * Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and OPSEC-flagged submissions, and persists the 6 fields plus the latest score and confirmed-at timestamp on the operator's profile.
+
+ * @summary Save a 6-element Context Block (server re-evaluates and rejects NO-GO)
+ */
+export const ConfirmContextBlockBody = zod.object({
+  doctrine: zod
+    .string()
+    .describe("Element 1 — Doctrine & Orders cited (e.g. MCDP-4, unit SOPs)."),
+  intent: zod
+    .string()
+    .describe("Element 2 — Commander's intent for this task."),
+  environment: zod.string().describe("Element 3 — Operational environment."),
+  constraints: zod.string().describe("Element 4 — Constraints & limitations."),
+  risk: zod.string().describe("Element 5 — Risk if the LLM hallucinates."),
+  experience: zod
+    .string()
+    .describe("Element 6 — Human experience & judgment AI cannot infer."),
+});
+
+export const ConfirmContextBlockResponse = zod.object({
+  profile: zod.object({
+    userId: zod.string(),
+    branch: zod.string().nullable(),
+    rank: zod.string().nullable(),
+    mosCode: zod.string().nullable(),
+    dutyTitle: zod.string().nullable(),
+    unit: zod.string().nullable(),
+    baseLocation: zod.string().nullable(),
+    securityClearance: zod.string().nullable(),
+    deploymentStatus: zod.string().nullable(),
+    primaryMission: zod.string().nullable(),
+    aiUseCases: zod.array(zod.string()),
+    freeFormContext: zod.string().nullable(),
+    isAdmin: zod.boolean(),
+    completenessPct: zod.number(),
+    contextBlock: zod.object({
+      doctrine: zod.string().nullable(),
+      intent: zod.string().nullable(),
+      environment: zod.string().nullable(),
+      constraints: zod.string().nullable(),
+      risk: zod.string().nullable(),
+      experience: zod.string().nullable(),
+      confirmedAt: zod.coerce
+        .date()
+        .nullable()
+        .describe("When the operator last accepted this Context Block."),
+      lastEvaluation: zod.union([
+        zod.object({
+          submissionId: zod.string(),
+          scores: zod.object({
+            doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+            environment: zod
+              .number()
+              .describe(
+                "Criterion 2 — environment & commander's intent (1-3).",
+              ),
+            constraints: zod
+              .number()
+              .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+            experience: zod.number().describe("Criterion 4 score (1-3)."),
+          }),
+          totalScore: zod
+            .number()
+            .describe(
+              "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+            ),
+          status: zod
+            .string()
+            .describe(
+              '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+            ),
+          opsecFlag: zod
+            .boolean()
+            .describe("True if the submission tripped the OPSEC fail-safe."),
+          flags: zod
+            .string()
+            .describe(
+              'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+            ),
+        }),
+        zod.null(),
+      ]),
+    }),
+    updatedAt: zod.coerce.date(),
+  }),
+  evaluation: zod.object({
+    submissionId: zod.string(),
+    scores: zod.object({
+      doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+      environment: zod
+        .number()
+        .describe("Criterion 2 — environment & commander's intent (1-3)."),
+      constraints: zod
+        .number()
+        .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+      experience: zod.number().describe("Criterion 4 score (1-3)."),
+    }),
+    totalScore: zod
+      .number()
+      .describe(
+        "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+      ),
+    status: zod
+      .string()
+      .describe(
+        '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+      ),
+    opsecFlag: zod
+      .boolean()
+      .describe("True if the submission tripped the OPSEC fail-safe."),
+    flags: zod
+      .string()
+      .describe(
+        'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+      ),
+  }),
 });
 
 /**
@@ -580,12 +841,117 @@ export const ExchangeContextTokenResponse = zod.object({
     freeFormContext: zod.string().nullable(),
     isAdmin: zod.boolean(),
     completenessPct: zod.number(),
+    contextBlock: zod.object({
+      doctrine: zod.string().nullable(),
+      intent: zod.string().nullable(),
+      environment: zod.string().nullable(),
+      constraints: zod.string().nullable(),
+      risk: zod.string().nullable(),
+      experience: zod.string().nullable(),
+      confirmedAt: zod.coerce
+        .date()
+        .nullable()
+        .describe("When the operator last accepted this Context Block."),
+      lastEvaluation: zod.union([
+        zod.object({
+          submissionId: zod.string(),
+          scores: zod.object({
+            doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+            environment: zod
+              .number()
+              .describe(
+                "Criterion 2 — environment & commander's intent (1-3).",
+              ),
+            constraints: zod
+              .number()
+              .describe("Criterion 3 — constraints, limitations & risk (1-3)."),
+            experience: zod.number().describe("Criterion 4 score (1-3)."),
+          }),
+          totalScore: zod
+            .number()
+            .describe(
+              "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+            ),
+          status: zod
+            .string()
+            .describe(
+              '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+            ),
+          opsecFlag: zod
+            .boolean()
+            .describe("True if the submission tripped the OPSEC fail-safe."),
+          flags: zod
+            .string()
+            .describe(
+              'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+            ),
+        }),
+        zod.null(),
+      ]),
+    }),
     updatedAt: zod.coerce.date(),
   }),
   contextBlock: zod
     .string()
     .describe(
-      "Pre-formatted Markdown block summarizing the user's identity, mission, and assignment. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.\n",
+      "Pre-formatted Markdown block summarizing the user's identity, mission, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.\n",
+    ),
+  structuredContextBlock: zod
+    .union([
+      zod.object({
+        doctrine: zod.string().nullable(),
+        intent: zod.string().nullable(),
+        environment: zod.string().nullable(),
+        constraints: zod.string().nullable(),
+        risk: zod.string().nullable(),
+        experience: zod.string().nullable(),
+        confirmedAt: zod.coerce
+          .date()
+          .nullable()
+          .describe("When the operator last accepted this Context Block."),
+        lastEvaluation: zod.union([
+          zod.object({
+            submissionId: zod.string(),
+            scores: zod.object({
+              doctrine: zod.number().describe("Criterion 1 score (1-3)."),
+              environment: zod
+                .number()
+                .describe(
+                  "Criterion 2 — environment & commander's intent (1-3).",
+                ),
+              constraints: zod
+                .number()
+                .describe(
+                  "Criterion 3 — constraints, limitations & risk (1-3).",
+                ),
+              experience: zod.number().describe("Criterion 4 score (1-3)."),
+            }),
+            totalScore: zod
+              .number()
+              .describe(
+                "Sum of the four criteria, \/12. Forced to 0 on OPSEC violations.",
+              ),
+            status: zod
+              .string()
+              .describe(
+                '\"GO\" when totalScore >= 10 and OPSEC clean, else \"NO-GO\".',
+              ),
+            opsecFlag: zod
+              .boolean()
+              .describe("True if the submission tripped the OPSEC fail-safe."),
+            flags: zod
+              .string()
+              .describe(
+                'Brief description of OPSEC violation or ambiguity, \"None\" otherwise.',
+              ),
+          }),
+          zod.null(),
+        ]),
+      }),
+      zod.null(),
+    ])
+    .describe(
+      "Structured 6-element Context Block as last confirmed by the operator, or null when they have not yet confirmed one.\n",
     ),
   primer: zod.object({
     queries: zod.array(zod.string()),

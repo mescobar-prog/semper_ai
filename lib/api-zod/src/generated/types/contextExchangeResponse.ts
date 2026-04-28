@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ContextBlockState } from "./contextBlockState";
 import type { ContextExchangeResponseTool } from "./contextExchangeResponseTool";
 import type { ContextExchangeResponseUser } from "./contextExchangeResponseUser";
 import type { RagPrimer } from "./ragPrimer";
@@ -16,8 +17,11 @@ export interface ContextExchangeResponse {
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;
-  /** Pre-formatted Markdown block summarizing the user's identity, mission, and assignment. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
+  /** Pre-formatted Markdown block summarizing the user's identity, mission, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
    */
   contextBlock: string;
+  /** Structured 6-element Context Block as last confirmed by the operator, or null when they have not yet confirmed one.
+   */
+  structuredContextBlock: ContextBlockState | null;
   primer: RagPrimer;
 }

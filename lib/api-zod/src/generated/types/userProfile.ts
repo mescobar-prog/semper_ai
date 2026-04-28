@@ -5,6 +5,7 @@
  * DoD AI Tool Marketplace API
  * OpenAPI spec version: 0.1.0
  */
+import type { ContextBlockState } from "./contextBlockState";
 
 export interface UserProfile {
   userId: string;
@@ -31,5 +32,6 @@ export interface UserProfile {
   freeFormContext: string | null;
   isAdmin: boolean;
   completenessPct: number;
+  contextBlock: ContextBlockState;
   updatedAt: Date;
 }

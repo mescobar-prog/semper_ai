@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  integer,
   jsonb,
   pgTable,
   text,
@@ -7,6 +8,13 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./auth";
+
+export type ContextBlockScores = {
+  doctrine: number;
+  environment: number;
+  constraints: number;
+  experience: number;
+};
 
 export const profilesTable = pgTable("profiles", {
   userId: varchar("user_id")
@@ -24,6 +32,21 @@ export const profilesTable = pgTable("profiles", {
   aiUseCases: jsonb("ai_use_cases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   freeFormContext: text("free_form_context"),
   isAdmin: varchar("is_admin").notNull().default("false"),
+  // ----- 6-element Context Block (verification gate before catalog) -----
+  cbDoctrine: text("cb_doctrine"),
+  cbIntent: text("cb_intent"),
+  cbEnvironment: text("cb_environment"),
+  cbConstraints: text("cb_constraints"),
+  cbRisk: text("cb_risk"),
+  cbExperience: text("cb_experience"),
+  cbConfirmedAt: timestamp("cb_confirmed_at", { withTimezone: true }),
+  cbScoreTotal: integer("cb_score_total"),
+  cbScores: jsonb("cb_scores").$type<ContextBlockScores>(),
+  cbStatus: varchar("cb_status"),
+  cbFlags: text("cb_flags"),
+  cbSubmissionId: varchar("cb_submission_id"),
+  cbOpsecFlag: varchar("cb_opsec_flag").notNull().default("false"),
+  // ----------------------------------------------------------------------
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow()

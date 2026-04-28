@@ -24,6 +24,10 @@ import type {
   BeginBrowserLoginParams,
   Category,
   ChatMessage,
+  ConfirmContextBlockRejection,
+  ContextBlockConfirmation,
+  ContextBlockEvaluation,
+  ContextBlockFields,
   ContextExchangeRequest,
   ContextExchangeResponse,
   DashboardSummary,
@@ -1068,6 +1072,184 @@ export const useResetProfileChat = <
   TContext
 > => {
   return useMutation(getResetProfileChatMutationOptions(options));
+};
+
+/**
+ * Runs the Semantic NLP Evaluator against the supplied 6 elements and returns the per-criterion scores, total /12, GO/NO-GO status, and any OPSEC flag. Does not modify the operator's stored block.
+
+ * @summary Score a candidate 6-element Context Block without persisting it
+ */
+export const getEvaluateContextBlockUrl = () => {
+  return `/api/profile/context-block/evaluate`;
+};
+
+export const evaluateContextBlock = async (
+  contextBlockFields: ContextBlockFields,
+  options?: RequestInit,
+): Promise<ContextBlockEvaluation> => {
+  return customFetch<ContextBlockEvaluation>(getEvaluateContextBlockUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(contextBlockFields),
+  });
+};
+
+export const getEvaluateContextBlockMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof evaluateContextBlock>>,
+    TError,
+    { data: BodyType<ContextBlockFields> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof evaluateContextBlock>>,
+  TError,
+  { data: BodyType<ContextBlockFields> },
+  TContext
+> => {
+  const mutationKey = ["evaluateContextBlock"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof evaluateContextBlock>>,
+    { data: BodyType<ContextBlockFields> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return evaluateContextBlock(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type EvaluateContextBlockMutationResult = NonNullable<
+  Awaited<ReturnType<typeof evaluateContextBlock>>
+>;
+export type EvaluateContextBlockMutationBody = BodyType<ContextBlockFields>;
+export type EvaluateContextBlockMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Score a candidate 6-element Context Block without persisting it
+ */
+export const useEvaluateContextBlock = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof evaluateContextBlock>>,
+    TError,
+    { data: BodyType<ContextBlockFields> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof evaluateContextBlock>>,
+  TError,
+  { data: BodyType<ContextBlockFields> },
+  TContext
+> => {
+  return useMutation(getEvaluateContextBlockMutationOptions(options));
+};
+
+/**
+ * Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and OPSEC-flagged submissions, and persists the 6 fields plus the latest score and confirmed-at timestamp on the operator's profile.
+
+ * @summary Save a 6-element Context Block (server re-evaluates and rejects NO-GO)
+ */
+export const getConfirmContextBlockUrl = () => {
+  return `/api/profile/context-block/confirm`;
+};
+
+export const confirmContextBlock = async (
+  contextBlockFields: ContextBlockFields,
+  options?: RequestInit,
+): Promise<ContextBlockConfirmation> => {
+  return customFetch<ContextBlockConfirmation>(getConfirmContextBlockUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(contextBlockFields),
+  });
+};
+
+export const getConfirmContextBlockMutationOptions = <
+  TError = ErrorType<ErrorEnvelope | ConfirmContextBlockRejection>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmContextBlock>>,
+    TError,
+    { data: BodyType<ContextBlockFields> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmContextBlock>>,
+  TError,
+  { data: BodyType<ContextBlockFields> },
+  TContext
+> => {
+  const mutationKey = ["confirmContextBlock"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmContextBlock>>,
+    { data: BodyType<ContextBlockFields> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return confirmContextBlock(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmContextBlockMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmContextBlock>>
+>;
+export type ConfirmContextBlockMutationBody = BodyType<ContextBlockFields>;
+export type ConfirmContextBlockMutationError = ErrorType<
+  ErrorEnvelope | ConfirmContextBlockRejection
+>;
+
+/**
+ * @summary Save a 6-element Context Block (server re-evaluates and rejects NO-GO)
+ */
+export const useConfirmContextBlock = <
+  TError = ErrorType<ErrorEnvelope | ConfirmContextBlockRejection>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmContextBlock>>,
+    TError,
+    { data: BodyType<ContextBlockFields> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmContextBlock>>,
+  TError,
+  { data: BodyType<ContextBlockFields> },
+  TContext
+> => {
+  return useMutation(getConfirmContextBlockMutationOptions(options));
 };
 
 /**

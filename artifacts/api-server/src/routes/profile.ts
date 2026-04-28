@@ -8,13 +8,18 @@ import {
 import {
   UpdateMyProfileBody,
   SendProfileChatBody,
+  EvaluateContextBlockBody,
+  ConfirmContextBlockBody,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
   getOrCreateProfile,
   serializeProfile,
 } from "../lib/profile-helpers";
-import { runProfileChat } from "../lib/gemini-helpers";
+import {
+  evaluateContextBlock,
+  runProfileChat,
+} from "../lib/gemini-helpers";
 import {
   ingestMosPackage,
   ingestUnitPackage,
@@ -197,6 +202,83 @@ router.post("/profile/chat/reset", requireAuth, async (req, res) => {
     .delete(profileChatMessagesTable)
     .where(eq(profileChatMessagesTable.userId, req.user!.id));
   res.json({ success: true });
+});
+
+// ----- 6-element Context Block verification gate ---------------------------
+
+router.post("/profile/context-block/evaluate", requireAuth, async (req, res) => {
+  const parsed = EvaluateContextBlockBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid Context Block submission" });
+    return;
+  }
+  try {
+    const evaluation = await evaluateContextBlock(parsed.data);
+    res.json(evaluation);
+  } catch (err) {
+    logger.error({ err }, "Context Block evaluator failed");
+    res.status(500).json({ error: "Context Block evaluator unavailable" });
+  }
+});
+
+router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
+  const parsed = ConfirmContextBlockBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid Context Block submission" });
+    return;
+  }
+  const userId = req.user!.id;
+  // Make sure a profile row exists (the upsert path doesn't insert one).
+  await getOrCreateProfile(userId);
+
+  let evaluation;
+  try {
+    evaluation = await evaluateContextBlock(parsed.data);
+  } catch (err) {
+    logger.error({ err }, "Context Block evaluator failed during confirm");
+    res.status(500).json({ error: "Context Block evaluator unavailable" });
+    return;
+  }
+
+  // Server-side enforcement: NO-GO submissions are rejected outright. The
+  // operator must edit and re-submit. We still return the evaluation so the
+  // UI can render the failing scores / OPSEC flag.
+  if (evaluation.status !== "GO") {
+    res.status(422).json({
+      error:
+        evaluation.opsecFlag
+          ? "Context Block tripped the OPSEC fail-safe. Edit the block and re-evaluate before confirming."
+          : `Context Block scored ${evaluation.totalScore}/12 — the GO threshold is 10/12. Edit the block and re-evaluate before confirming.`,
+      evaluation,
+    });
+    return;
+  }
+
+  const now = new Date();
+  const [updated] = await db
+    .update(profilesTable)
+    .set({
+      cbDoctrine: parsed.data.doctrine,
+      cbIntent: parsed.data.intent,
+      cbEnvironment: parsed.data.environment,
+      cbConstraints: parsed.data.constraints,
+      cbRisk: parsed.data.risk,
+      cbExperience: parsed.data.experience,
+      cbConfirmedAt: now,
+      cbScoreTotal: evaluation.totalScore,
+      cbScores: evaluation.scores,
+      cbStatus: evaluation.status,
+      cbFlags: evaluation.flags,
+      cbSubmissionId: evaluation.submissionId,
+      cbOpsecFlag: evaluation.opsecFlag ? "true" : "false",
+    })
+    .where(eq(profilesTable.userId, userId))
+    .returning();
+
+  res.json({
+    profile: serializeProfile(updated),
+    evaluation,
+  });
 });
 
 export default router;

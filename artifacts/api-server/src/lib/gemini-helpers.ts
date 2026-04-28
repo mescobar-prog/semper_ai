@@ -1,8 +1,214 @@
 import { ai } from "@workspace/integrations-gemini-ai";
-import type { Profile } from "@workspace/db";
+import { randomUUID } from "node:crypto";
+import type { Profile, ContextBlockScores } from "@workspace/db";
 import { logger } from "./logger";
 
 const MODEL = "gemini-3-flash-preview";
+
+// System prompt is the verbatim Semantic NLP Evaluator from
+// attached_assets/Pasted-Role-Purpose-You-are-an-automated-Semantic-NLP-Evaluato_1777387512277.txt.
+// Do NOT edit this — it is the contract the evaluator runs against.
+const CONTEXT_BLOCK_EVALUATOR_SYSTEM_PROMPT = `Role & Purpose
+You are an automated Semantic NLP Evaluator for a logistics middleware system.
+Your sole function is to evaluate a user's operational prompt submission against
+the 6-part Context Block framework and open-source logistical doctrine (MCDP-4).
+Your intent is to score whether the user provided sufficient context to prevent
+LLM hallucination and ensure OPSEC compliance.
+Scoring Standards & Constraints:
+• Score ONLY against the rubric criteria provided. Do not infer what the user
+meant.
+• Do not penalize poor grammar, spelling, or brevity if the operational content is
+specific and relevant.
+• Do not give credit for vague, generic, or copy-paste responses.
+• If a response is ambiguous, score conservatively (lower) and flag for human
+review.
+• Do not provide coaching, suggestions, or conversational filler in the output.
+Output the exact schema only.
+RUBRIC (Max Score 12. Go/No-Go Threshold: 10/12)
+Criterion 1: Doctrine & Orders (Context Element 1)
+• Proficient (3): Cites specific, relevant open-source doctrine (e.g., MCDP-4) or
+SOPs appropriate to the task.
+• Developing (2): References general rules without specific citations.
+• Novice (1): No doctrine cited or irrelevant references.
+Criterion 2: Environment & Commander's Intent (Context Elements 2 & 3)
+• Proficient (3): Accurately describes the operational environment AND clearly
+articulates the Commander's intent.
+• Developing (2): Describes environment or intent but not both, or lacks
+operational specificity.
+• Novice (1): Cannot articulate environment or intent.
+Criterion 3: Constraints & Limitations, Risk (Context Elements 4 & 5)
+• Proficient (3): Identifies specific logistical constraints AND explains the risk (who
+acts on this output and the consequence if the LLM hallucinates).
+• Developing (2): Identifies some constraints or general risk but lacks connection
+to specific consequences.
+• Novice (1): Cannot identify constraints or risk relevant to the task.
+Criterion 4: Experience & Judgment (Context Element 6)
+• Proficient (3): Articulates specific human experiential knowledge or tacit unit
+history that AI could not provide on its own.
+• Developing (2): Mentions human experience generally without specific local
+examples.
+• Novice (1): Cannot distinguish what a Marine provides versus what a generic AI
+could generate.
+OPSEC FAIL-SAFE (Pass/Fail):
+If the prompt contains Controlled Unclassified Information (CUI), PII, or classified
+troop movements/grid coordinates, the Total Score is automatically overridden to
+0, Status becomes NO-GO, and the flag is triggered.
+REQUIRED OUTPUT JSON SCHEMA:
+{
+"submission_id": "string",
+"scores": {
+"criterion_1_doctrine": "number (1-3)",
+"criterion_2_environment": "number (1-3)",
+"criterion_3_constraints": "number (1-3)",
+"criterion_4_experience": "number (1-3)"
+},
+"total_score": "number",
+"status": "string (GO/NO-GO)",
+"flags": "string (None, or brief description of OPSEC violation/ambiguity)"
+}`;
+
+export interface ContextBlockSubmission {
+  doctrine: string;
+  intent: string;
+  environment: string;
+  constraints: string;
+  risk: string;
+  experience: string;
+}
+
+export interface ContextBlockEvaluation {
+  submissionId: string;
+  scores: ContextBlockScores;
+  totalScore: number;
+  status: "GO" | "NO-GO";
+  opsecFlag: boolean;
+  flags: string;
+}
+
+/** Coerce a raw model number into the 1..3 rubric range. */
+function clampScore(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(3, Math.round(n)));
+}
+
+function stripJsonFences(raw: string): string {
+  return raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+}
+
+/**
+ * Run the Semantic NLP Evaluator over a candidate 6-element Context Block.
+ * Server enforces:
+ *  - per-criterion scores clamped to 1..3
+ *  - total_score recomputed from clamped scores (model output not trusted)
+ *  - GO requires total_score >= 10 AND no OPSEC flag
+ *  - any OPSEC flag forces total_score = 0 and status = NO-GO
+ */
+export async function evaluateContextBlock(
+  submission: ContextBlockSubmission,
+): Promise<ContextBlockEvaluation> {
+  const submissionId = randomUUID();
+
+  const userMessage = `submission_id: ${submissionId}
+
+6-Part Context Block submission:
+
+Element 1 — Doctrine & Orders:
+${submission.doctrine.trim() || "(empty)"}
+
+Element 2 — Commander's Intent:
+${submission.intent.trim() || "(empty)"}
+
+Element 3 — Environment:
+${submission.environment.trim() || "(empty)"}
+
+Element 4 — Constraints & Limitations:
+${submission.constraints.trim() || "(empty)"}
+
+Element 5 — Risk:
+${submission.risk.trim() || "(empty)"}
+
+Element 6 — Experience & Judgment:
+${submission.experience.trim() || "(empty)"}
+
+Score this submission against the rubric and return the exact JSON schema described in your instructions. Use the supplied submission_id verbatim.`;
+
+  let raw = "";
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: [{ role: "user", parts: [{ text: userMessage }] }],
+      config: {
+        systemInstruction: CONTEXT_BLOCK_EVALUATOR_SYSTEM_PROMPT,
+        maxOutputTokens: 8192,
+      },
+    });
+    raw = response.text ?? "";
+  } catch (err) {
+    logger.error({ err }, "Context Block evaluator call failed");
+    throw new Error("Context Block evaluator unavailable");
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(stripJsonFences(raw));
+  } catch (err) {
+    logger.error({ err, raw }, "Context Block evaluator returned invalid JSON");
+    throw new Error("Context Block evaluator returned an unparseable response");
+  }
+
+  const scoresRaw = (parsed.scores ?? {}) as Record<string, unknown>;
+  const scores: ContextBlockScores = {
+    doctrine: clampScore(scoresRaw.criterion_1_doctrine),
+    environment: clampScore(scoresRaw.criterion_2_environment),
+    constraints: clampScore(scoresRaw.criterion_3_constraints),
+    experience: clampScore(scoresRaw.criterion_4_experience),
+  };
+
+  const flagsRaw = typeof parsed.flags === "string" ? parsed.flags.trim() : "";
+  const flagsLower = flagsRaw.toLowerCase();
+  const statusRaw =
+    typeof parsed.status === "string" ? parsed.status.trim().toUpperCase() : "";
+
+  // OPSEC fail-safe: trigger if the model flagged it OR called status NO-GO
+  // for OPSEC-related reasons. We are conservative — anything mentioning
+  // OPSEC/CUI/PII/classified counts as an OPSEC flag.
+  const opsecFlag =
+    flagsLower.includes("opsec") ||
+    flagsLower.includes("cui") ||
+    flagsLower.includes("pii") ||
+    flagsLower.includes("classified") ||
+    flagsLower.includes("grid coordinate") ||
+    flagsLower.includes("troop movement");
+
+  let totalScore =
+    scores.doctrine + scores.environment + scores.constraints + scores.experience;
+  let status: "GO" | "NO-GO";
+  let finalFlags = flagsRaw || "None";
+
+  if (opsecFlag) {
+    totalScore = 0;
+    status = "NO-GO";
+    if (!flagsRaw) finalFlags = "OPSEC violation suspected";
+  } else if (totalScore >= 10 && statusRaw !== "NO-GO") {
+    status = "GO";
+  } else {
+    status = "NO-GO";
+  }
+
+  return {
+    submissionId,
+    scores,
+    totalScore,
+    status,
+    opsecFlag,
+    flags: finalFlags,
+  };
+}
 
 function profileSummary(profile: Profile | null): string {
   if (!profile) return "No structured profile data available yet.";

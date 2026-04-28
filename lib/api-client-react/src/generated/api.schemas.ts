@@ -55,6 +55,51 @@ export const LogoutSuccessValue = {
 } as const;
 export type LogoutSuccess = typeof LogoutSuccessValue;
 
+export interface ContextBlockScores {
+  /** Criterion 1 score (1-3). */
+  doctrine: number;
+  /** Criterion 2 — environment & commander's intent (1-3). */
+  environment: number;
+  /** Criterion 3 — constraints, limitations & risk (1-3). */
+  constraints: number;
+  /** Criterion 4 score (1-3). */
+  experience: number;
+}
+
+export interface ContextBlockEvaluation {
+  submissionId: string;
+  scores: ContextBlockScores;
+  /** Sum of the four criteria, /12. Forced to 0 on OPSEC violations. */
+  totalScore: number;
+  /** "GO" when totalScore >= 10 and OPSEC clean, else "NO-GO". */
+  status: string;
+  /** True if the submission tripped the OPSEC fail-safe. */
+  opsecFlag: boolean;
+  /** Brief description of OPSEC violation or ambiguity, "None" otherwise. */
+  flags: string;
+}
+
+export interface ContextBlockState {
+  /** @nullable */
+  doctrine: string | null;
+  /** @nullable */
+  intent: string | null;
+  /** @nullable */
+  environment: string | null;
+  /** @nullable */
+  constraints: string | null;
+  /** @nullable */
+  risk: string | null;
+  /** @nullable */
+  experience: string | null;
+  /**
+   * When the operator last accepted this Context Block.
+   * @nullable
+   */
+  confirmedAt: string | null;
+  lastEvaluation: ContextBlockEvaluation | null;
+}
+
 export interface UserProfile {
   userId: string;
   /** @nullable */
@@ -80,7 +125,33 @@ export interface UserProfile {
   freeFormContext: string | null;
   isAdmin: boolean;
   completenessPct: number;
+  contextBlock: ContextBlockState;
   updatedAt: string;
+}
+
+export interface ContextBlockFields {
+  /** Element 1 — Doctrine & Orders cited (e.g. MCDP-4, unit SOPs). */
+  doctrine: string;
+  /** Element 2 — Commander's intent for this task. */
+  intent: string;
+  /** Element 3 — Operational environment. */
+  environment: string;
+  /** Element 4 — Constraints & limitations. */
+  constraints: string;
+  /** Element 5 — Risk if the LLM hallucinates. */
+  risk: string;
+  /** Element 6 — Human experience & judgment AI cannot infer. */
+  experience: string;
+}
+
+export interface ContextBlockConfirmation {
+  profile: UserProfile;
+  evaluation: ContextBlockEvaluation;
+}
+
+export interface ConfirmContextBlockRejection {
+  error: string;
+  evaluation: ContextBlockEvaluation;
 }
 
 export interface ProfileUpdate {
@@ -419,9 +490,12 @@ export interface ContextExchangeResponse {
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;
-  /** Pre-formatted Markdown block summarizing the user's identity, mission, and assignment. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
+  /** Pre-formatted Markdown block summarizing the user's identity, mission, assignment, and (when confirmed) the 6-element Context Block. Tool builders can drop this directly into their model prompt without re-parsing the structured profile.
    */
   contextBlock: string;
+  /** Structured 6-element Context Block as last confirmed by the operator, or null when they have not yet confirmed one.
+   */
+  structuredContextBlock: ContextBlockState | null;
   primer: RagPrimer;
 }
 

@@ -236,6 +236,81 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/context-block/evaluate:
+    post:
+      tags: [Profile]
+      operationId: evaluateContextBlock
+      summary: Score a candidate 6-element Context Block without persisting it
+      description: >
+        Runs the Semantic NLP Evaluator against the supplied 6 elements
+        and returns the per-criterion scores, total /12, GO/NO-GO status,
+        and any OPSEC flag. Does not modify the operator's stored block.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContextBlockFields' }
+      responses:
+        '200':
+          description: Evaluation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContextBlockEvaluation' }
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '500':
+          description: Evaluator unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /profile/context-block/confirm:
+    post:
+      tags: [Profile]
+      operationId: confirmContextBlock
+      summary: Save a 6-element Context Block (server re-evaluates and rejects NO-GO)
+      description: >
+        Re-runs the Semantic NLP Evaluator server-side, rejects NO-GO and
+        OPSEC-flagged submissions, and persists the 6 fields plus the
+        latest score and confirmed-at timestamp on the operator's profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContextBlockFields' }
+      responses:
+        '200':
+          description: Confirmed Context Block state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContextBlockConfirmation' }
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: NO-GO — context block did not meet the 10/12 threshold or tripped OPSEC
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmContextBlockRejection' }
+        '500':
+          description: Evaluator unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   # ---------- Catalog ----------
   /catalog/categories:
@@ -987,7 +1062,8 @@ components:
       required:
         [userId, branch, rank, mosCode, dutyTitle, unit, baseLocation,
          securityClearance, deploymentStatus, primaryMission,
-         aiUseCases, freeFormContext, isAdmin, completenessPct, updatedAt]
+         aiUseCases, freeFormContext, isAdmin, completenessPct,
+         contextBlock, updatedAt]
       properties:
         userId: { type: string }
         branch: { type: [string, 'null'] }
@@ -1005,7 +1081,98 @@ components:
         freeFormContext: { type: [string, 'null'] }
         isAdmin: { type: boolean }
         completenessPct: { type: integer }
+        contextBlock: { $ref: '#/components/schemas/ContextBlockState' }
         updatedAt: { type: string, format: date-time }
+
+    ContextBlockFields:
+      type: object
+      required: [doctrine, intent, environment, constraints, risk, experience]
+      properties:
+        doctrine:
+          type: string
+          description: Element 1 — Doctrine & Orders cited (e.g. MCDP-4, unit SOPs).
+        intent:
+          type: string
+          description: Element 2 — Commander's intent for this task.
+        environment:
+          type: string
+          description: Element 3 — Operational environment.
+        constraints:
+          type: string
+          description: Element 4 — Constraints & limitations.
+        risk:
+          type: string
+          description: Element 5 — Risk if the LLM hallucinates.
+        experience:
+          type: string
+          description: Element 6 — Human experience & judgment AI cannot infer.
+
+    ContextBlockScores:
+      type: object
+      required: [doctrine, environment, constraints, experience]
+      properties:
+        doctrine: { type: integer, description: Criterion 1 score (1-3). }
+        environment:
+          type: integer
+          description: Criterion 2 — environment & commander's intent (1-3).
+        constraints:
+          type: integer
+          description: Criterion 3 — constraints, limitations & risk (1-3).
+        experience: { type: integer, description: Criterion 4 score (1-3). }
+
+    ContextBlockEvaluation:
+      type: object
+      required: [submissionId, scores, totalScore, status, opsecFlag, flags]
+      properties:
+        submissionId: { type: string }
+        scores: { $ref: '#/components/schemas/ContextBlockScores' }
+        totalScore:
+          type: integer
+          description: Sum of the four criteria, /12. Forced to 0 on OPSEC violations.
+        status:
+          type: string
+          description: '"GO" when totalScore >= 10 and OPSEC clean, else "NO-GO".'
+        opsecFlag:
+          type: boolean
+          description: True if the submission tripped the OPSEC fail-safe.
+        flags:
+          type: string
+          description: Brief description of OPSEC violation or ambiguity, "None" otherwise.
+
+    ContextBlockState:
+      type: object
+      required:
+        [doctrine, intent, environment, constraints, risk, experience,
+         confirmedAt, lastEvaluation]
+      properties:
+        doctrine: { type: [string, 'null'] }
+        intent: { type: [string, 'null'] }
+        environment: { type: [string, 'null'] }
+        constraints: { type: [string, 'null'] }
+        risk: { type: [string, 'null'] }
+        experience: { type: [string, 'null'] }
+        confirmedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the operator last accepted this Context Block.
+        lastEvaluation:
+          oneOf:
+            - $ref: '#/components/schemas/ContextBlockEvaluation'
+            - type: 'null'
+
+    ContextBlockConfirmation:
+      type: object
+      required: [profile, evaluation]
+      properties:
+        profile: { $ref: '#/components/schemas/UserProfile' }
+        evaluation: { $ref: '#/components/schemas/ContextBlockEvaluation' }
+
+    ConfirmContextBlockRejection:
+      type: object
+      required: [error, evaluation]
+      properties:
+        error: { type: string }
+        evaluation: { $ref: '#/components/schemas/ContextBlockEvaluation' }
 
     ProfileUpdate:
       type: object
@@ -1341,7 +1508,7 @@ components:
       type: object
       required:
         [sessionToken, sessionExpiresAt, tool, user, profile, contextBlock,
-         primer]
+         structuredContextBlock, primer]
       properties:
         sessionToken: { type: string }
         sessionExpiresAt: { type: string, format: date-time }
@@ -1366,9 +1533,16 @@ components:
           type: string
           description: >
             Pre-formatted Markdown block summarizing the user's identity,
-            mission, and assignment. Tool builders can drop this directly
-            into their model prompt without re-parsing the structured
-            profile.
+            mission, assignment, and (when confirmed) the 6-element
+            Context Block. Tool builders can drop this directly into
+            their model prompt without re-parsing the structured profile.
+        structuredContextBlock:
+          oneOf:
+            - $ref: '#/components/schemas/ContextBlockState'
+            - type: 'null'
+          description: >
+            Structured 6-element Context Block as last confirmed by the
+            operator, or null when they have not yet confirmed one.
         primer: { $ref: '#/components/schemas/RagPrimer' }
 
     RagPrimer:

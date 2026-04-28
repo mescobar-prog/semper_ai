@@ -21,6 +21,8 @@ import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
   buildContextBlock,
   getOrCreateProfile,
+  hasConfirmedContextBlock,
+  serializeContextBlock,
   serializeProfile,
 } from "../lib/profile-helpers";
 import { logger } from "../lib/logger";
@@ -202,6 +204,12 @@ router.post("/tools/context-exchange", async (req, res) => {
     user: userPayload,
     profile: serializeProfile(profile),
     contextBlock: buildContextBlock(userPayload, profile),
+    // Per spec: structuredContextBlock is null when the operator has not
+    // confirmed a Context Block yet; otherwise it carries the full state
+    // including the most recent evaluation.
+    structuredContextBlock: hasConfirmedContextBlock(profile)
+      ? serializeContextBlock(profile)
+      : null,
     primer: { queries, snippets },
   });
 });

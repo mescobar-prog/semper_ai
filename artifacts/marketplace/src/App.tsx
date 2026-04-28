@@ -10,6 +10,7 @@ import { Landing } from "@/pages/Landing";
 import { AuthCallback } from "@/pages/AuthCallback";
 import { Dashboard } from "@/pages/Dashboard";
 import { Catalog } from "@/pages/Catalog";
+import { CatalogBrowse } from "@/pages/CatalogBrowse";
 import { CatalogDetail } from "@/pages/CatalogDetail";
 import { Profile } from "@/pages/Profile";
 import { Library } from "@/pages/Library";
@@ -59,6 +60,9 @@ function Router() {
         </Route>
         <Route path="/catalog">
           <ProtectedRoute component={Catalog} />
+        </Route>
+        <Route path="/catalog/browse">
+          <ProtectedRoute component={CatalogBrowse} />
         </Route>
         <Route path="/catalog/:slug">
           <ProtectedRoute component={CatalogDetail} />
