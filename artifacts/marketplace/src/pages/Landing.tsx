@@ -50,7 +50,7 @@ export function Landing() {
       </header>
 
       <div className="relative max-w-5xl mx-auto px-8 pt-24 pb-32">
-        <div className="text-[10px] uppercase tracking-[0.4em] text-primary font-mono mb-6">
+        <div className="text-[16px] uppercase tracking-[0.4em] text-primary font-mono mb-6">
           / BOYD IN THE AGE OF AI
         </div>
         <h1 className="text-5xl md:text-7xl font-semibold tracking-tight leading-[0.95] mb-8">

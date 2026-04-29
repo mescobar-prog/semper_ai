@@ -1,0 +1,49 @@
+SEMPER AI: Core Use Case
+Orienting AI Tools with Marine Tacit Knowledge to Reduce Hallucination Risk
+
+The Problem
+Commercial AI models hallucinate when asked to solve tactical logistics problems because they lack Orientation, the center of gravity in Col. John Boyd's OODA Loop. They don't understand Commander's Intent or local environmental friction. Ask a generic AI for a logistics plan and it might route unarmored trucks through a combat zone, or worse, leak classified troop locations in its output.
+
+Our Solution (The MVP)
+We are building a Cognitive Firewall. It is a lightweight interface that guides any Marine, from a junior rifleman at the tactical edge to a Logistics Officer in the Battalion S-4, through encoding local constraints (saltwater corrosion rates, terrain, threat posture) and Commander's Intent into a structured data format we call the Context Block.
+
+The Result
+The Context Block is built through a dual-lane process on our platform, SemperAI.mil.
+In the first lane, each user populates a baseline profile: Rank, MOS, Unit, Duty Station, and Billet. This establishes the Marine's work persona. Users can also upload MOS-specific and Unit-specific doctrine into a RAG database, giving the platform a durable understanding of how that Marine fights.
+
+In the second lane, when a Marine selects one of the AI tools hosted on our platform, the interface prompts them to add problem-specific context: Commander's Intent, Environment variables, Constraints and Limitations, Risk, and User Experience and Judgement. They can attach mission-specific documentation, including the OPORD, directly to the workflow.
+All of this, the baseline profile and the problem-specific variables, compiles into a single Context Block. Our proprietary scoring system then validates that the context is complete and verifies zero OPSEC risk before anything moves forward. Once the Context Block clears scoring, the platform auto-injects a kernel carrying the full context into whichever hosted AI tool the user selected.
+
+The hosted tool now has a complete picture: who the user is, what problem they are solving, and every relevant condition shaping their decision. It is forced to identify the Schwerpunkt (The Main Effort) based on Commander's Intent rather than defaulting to generic corporate optimization. That is what prevents lethal hallucinations and allows an AI powered logistics planning tool to produce a predictive packing list accurate enough to keep 12 Marines alive through a 14-day radio blackout on a contested island. (edited) 
+
+ 
+
+Julie Chase  [8:44 AM]
+
+Boyd in the Age of AI: Orienting AI Tools with Marine Tacit Knowledge to Reduce Hallucination Risk
+
+ 
+
+[8:44 AM]
+
+The Problem
+Commercial AI models hallucinate when asked to solve tactical logistics problems because they lack Orientation (the center of gravity in Col. John Boyd's OODA Loop). They do not understand Commander's Intent or local environmental friction. If an isolated unit asks a commercial AI for a logistics plan, it might route unarmored trucks through a combat zone or leak classified troop locations in its output.
+Our Solution (The MVP)
+We built a Cognitive Firewall via our platform, SemperAI.mil. It is a lightweight interface that guides any Marine—from a junior rifleman at the tactical edge to a Logistics Officer in the Battalion S-4—to encode local constraints and Commander's Intent into a structured data format called the Context Block.
+The Architecture
+The Context Block is built through a dual-lane process:
+1. Static Lane (User Profile & RAG): Each user populates a baseline profile (Rank, MOS, Unit, Billet). Users can upload MOS-specific doctrine into a RAG database, giving the platform a durable understanding of how that Marine fights.
+2. Dynamic Lane (The Context Block): The interface prompts the Marine to add problem-specific context across 6 elements: Doctrine, Environment, Constraints, Commander's Intent, Risk, and Experience & Judgment.
+The Result
+Our proprietary scoring system validates that the context is complete and verifies zero OPSEC risk. Once cleared, the platform auto-injects a JSON kernel carrying the full context into whichever hosted AI tool the user selected. The LLM is forced to identify the Schwerpunkt (Main Effort) based on Commander's Intent, rather than defaulting to generic optimization.
+This prevents lethal hallucinations and allows an AI-powered logistics tool to produce predictive packing lists accurate enough to keep 12 Marines alive through a 14-day radio blackout on a contested island.
+
+[8:45 AM]
+
+https://gamma.app/docs/Boyd-in-the-Age-of-AI-MDM-Hackathon-wda8jai9scru3vd
+
+ 
+
+[8:45 AM]
+
+public in the portal link to the presentation
