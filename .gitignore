@@ -36,6 +36,7 @@ npm-debug.log
 yarn-error.log
 testem.log
 /typings
+*.log
 
 # System Files
 .DS_Store
@@ -47,3 +48,18 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Environment files
+.env
+.env.local
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+
+# Stack data dirs (from upstream semper_ai initial commit)
+pgdata/
+caddy_data/
+caddy_config/
