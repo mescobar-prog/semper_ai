@@ -102,7 +102,7 @@ const TOOLS: SeedTool[] = [
     shortDescription:
       "Drafts a SITREP, OPORD paragraph, or training brief in your voice from a one-line topic.",
     longDescription:
-      "Mission Brief Drafter is the second reference tool for the marketplace. On launch it exchanges your launch token for the same context bundle Context Echo shows, then asks Claude to draft a SITREP, OPORD paragraph, or training brief in your service's voice — anchored to your profile (rank, billet, unit, mission) and the most relevant snippets from your personal library. The output is editable in-place so you can polish it and copy it straight into your staff product.",
+      "Mission Brief Drafter is the second reference tool for the marketplace. On launch it exchanges your launch token for the same context bundle Context Echo shows, then drafts a SITREP, OPORD paragraph, or training brief in your service's voice — anchored to your profile (rank, billet, unit, mission) and the most relevant snippets from your personal library. The output is editable in-place so you can polish it and copy it straight into your staff product.",
     purpose:
       "Draft staff-ready briefs (SITREP, OPORD paragraph, or training brief) anchored in the operator's library of OPORDs, FRAGOs, and unit SOPs, in their service's voice.",
     ragQueryTemplates: [

@@ -42,7 +42,10 @@ const BRIEF_OPTIONS: { value: BriefType; label: string; help: string }[] = [
   },
 ];
 
-function badge(label: string, tone: "neutral" | "good" | "warn" | "info" = "neutral") {
+function badge(
+  label: string,
+  tone: "neutral" | "good" | "warn" | "info" = "neutral",
+) {
   const tones: Record<string, string> = {
     neutral: "bg-slate-700/60 text-slate-100 border border-slate-600",
     good: "bg-emerald-500/15 text-emerald-300 border border-emerald-400/40",
@@ -88,7 +91,9 @@ function SnippetView({ s }: { s: RagSnippet }) {
   return (
     <div className="rounded-lg border border-slate-700/70 bg-slate-900/60 p-4">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-medium text-slate-200">{s.documentTitle}</div>
+        <div className="text-sm font-medium text-slate-200">
+          {s.documentTitle}
+        </div>
         <div className="text-[11px] uppercase tracking-wider text-slate-500">
           chunk #{s.chunkIndex} · score {s.score.toFixed(3)}
         </div>
@@ -107,7 +112,9 @@ function BriefDrafterPage() {
   const [audience, setAudience] = useState("");
   const [draftState, setDraftState] = useState<DraftState>({ status: "idle" });
   const [editedDraft, setEditedDraft] = useState("");
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -122,7 +129,7 @@ function BriefDrafterPage() {
         // Task #88: pre-fill the topic with the operator's launch intent
         // so they don't have to retype what they already told the marketplace.
         if (data.launchIntent) {
-          setTopic((prev) => (prev.trim() ? prev : data.launchIntent ?? ""));
+          setTopic((prev) => (prev.trim() ? prev : (data.launchIntent ?? "")));
         }
       })
       .catch((err: unknown) => {
@@ -357,7 +364,8 @@ function BriefDrafterPage() {
                 htmlFor="audience"
                 className="block text-[11px] uppercase tracking-wider text-slate-500 mb-2"
               >
-                Audience override <span className="text-slate-600 normal-case">(optional)</span>
+                Audience override{" "}
+                <span className="text-slate-600 normal-case">(optional)</span>
               </label>
               <input
                 id="audience"
@@ -385,7 +393,7 @@ function BriefDrafterPage() {
               </button>
               {draftState.status === "drafting" && (
                 <span className="text-xs text-slate-500">
-                  Pulling library snippets and calling Claude…
+                  Pulling library snippets and calling agents…
                 </span>
               )}
               {draftState.status === "error" && (
@@ -403,11 +411,15 @@ function BriefDrafterPage() {
               <div>
                 <h2 className="text-lg font-semibold">
                   Draft —{" "}
-                  {BRIEF_OPTIONS.find((o) => o.value === draftState.data.briefType)
-                    ?.label ?? draftState.data.briefType}
+                  {BRIEF_OPTIONS.find(
+                    (o) => o.value === draftState.data.briefType,
+                  )?.label ?? draftState.data.briefType}
                 </h2>
                 <p className="text-sm text-slate-400 mt-1">
-                  Topic: <span className="text-slate-300">{draftState.data.topic}</span>
+                  Topic:{" "}
+                  <span className="text-slate-300">
+                    {draftState.data.topic}
+                  </span>
                 </p>
               </div>
               <button
@@ -438,7 +450,9 @@ function BriefDrafterPage() {
         {draftState.status === "ready" && (
           <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
             <div className="mb-4">
-              <h2 className="text-lg font-semibold">Sources used for this draft</h2>
+              <h2 className="text-lg font-semibold">
+                Sources used for this draft
+              </h2>
               <p className="text-sm text-slate-400 mt-1">
                 Snippets from your library that the model was anchored to. If a
                 section doesn't show up, the draft falls back to your profile
@@ -469,8 +483,8 @@ function BriefDrafterPage() {
             <div className="space-y-3 mt-4">
               {draftState.data.snippets.length === 0 ? (
                 <div className="text-sm text-slate-500">
-                  No matching snippets from your library — draft was anchored
-                  to your profile only.
+                  No matching snippets from your library — draft was anchored to
+                  your profile only.
                 </div>
               ) : (
                 draftState.data.snippets.map((s) => (

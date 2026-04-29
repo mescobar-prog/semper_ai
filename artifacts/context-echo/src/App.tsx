@@ -15,10 +15,12 @@ type ExchangeState =
   | { status: "error"; message: string }
   | { status: "ready"; data: ContextExchangeResponse };
 
-function badge(label: string, tone: "neutral" | "good" | "warn" | "info" = "neutral") {
+function badge(
+  label: string,
+  tone: "neutral" | "good" | "warn" | "info" = "neutral",
+) {
   const tones: Record<string, string> = {
-    neutral:
-      "bg-slate-700/60 text-slate-100 border border-slate-600",
+    neutral: "bg-slate-700/60 text-slate-100 border border-slate-600",
     good: "bg-emerald-500/15 text-emerald-300 border border-emerald-400/40",
     warn: "bg-amber-500/15 text-amber-200 border border-amber-400/40",
     info: "bg-sky-500/15 text-sky-200 border border-sky-400/40",
@@ -130,9 +132,7 @@ function ContextEchoPage() {
       });
       setFollowUps((prev) =>
         prev.map((f) =>
-          f.id === id
-            ? { ...f, snippets: result.snippets, loading: false }
-            : f,
+          f.id === id ? { ...f, snippets: result.snippets, loading: false } : f,
         ),
       );
     } catch (err) {
@@ -163,9 +163,9 @@ function ContextEchoPage() {
           <p className="text-slate-400 leading-relaxed">
             This is the demo tool used by the marketplace launch protocol. To
             see it in action, launch it from the marketplace catalog — the
-            marketplace will mint a one-time launch token, and Context Echo
-            will exchange that token for the context bundle the marketplace
-            forwarded on your behalf.
+            marketplace will mint a one-time launch token, and Context Echo will
+            exchange that token for the context bundle the marketplace forwarded
+            on your behalf.
           </p>
           <a
             href="/"
@@ -225,10 +225,7 @@ function ContextEchoPage() {
               {badge(atoLabel(tool.atoStatus), atoTone(tool.atoStatus))}
             </div>
           </div>
-          <a
-            href="/"
-            className="text-sm text-slate-400 hover:text-slate-100"
-          >
+          <a href="/" className="text-sm text-slate-400 hover:text-slate-100">
             ← Back to marketplace
           </a>
         </div>
@@ -240,8 +237,8 @@ function ContextEchoPage() {
             Launch payload received
           </h2>
           <p className="text-sm text-slate-400 mb-6">
-            This is exactly what the marketplace forwarded to {tool.name}{" "}
-            on your behalf. Session token expires{" "}
+            This is exactly what the marketplace forwarded to {tool.name} on
+            your behalf. Session token expires{" "}
             {new Date(sessionExpiresAt).toLocaleTimeString()}.
           </p>
           {launchIntent && (
@@ -260,10 +257,17 @@ function ContextEchoPage() {
           <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4">
             <Field label="Authenticated as" value={user.displayName} />
             <Field label="Email" value={user.email} />
-            <Field label="User ID" value={<code className="text-xs">{user.id}</code>} />
+            <Field
+              label="User ID"
+              value={<code className="text-xs">{user.id}</code>}
+            />
             <Field
               label="Session token"
-              value={<code className="text-xs break-all">{state.data.sessionToken.slice(0, 24)}…</code>}
+              value={
+                <code className="text-xs break-all">
+                  {state.data.sessionToken.slice(0, 24)}…
+                </code>
+              }
             />
           </div>
         </section>
@@ -316,11 +320,13 @@ function ContextEchoPage() {
 
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold">RAG primer from your library</h2>
+            <h2 className="text-lg font-semibold">
+              RAG primer from your library
+            </h2>
             <p className="text-sm text-slate-400 mt-1">
-              The marketplace asked Claude to generate search queries from your
-              profile and {tool.name}'s description, then ran them against your
-              uploaded documents.
+              The marketplace generated search queries from your context and{" "}
+              {tool.name}'s description, then ran them against your uploaded
+              documents.
             </p>
           </div>
           <div className="mb-4">
@@ -347,8 +353,8 @@ function ContextEchoPage() {
           <div className="space-y-3 mt-6">
             {primer.snippets.length === 0 ? (
               <div className="text-sm text-slate-500">
-                No matching snippets — upload documents to your library to
-                give tools richer primer context.
+                No matching snippets — upload documents to your library to give
+                tools richer primer context.
               </div>
             ) : (
               primer.snippets.map((s) => <Snippet key={s.chunkId} s={s} />)
@@ -357,9 +363,7 @@ function ContextEchoPage() {
         </section>
 
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
-          <h2 className="text-lg font-semibold mb-1">
-            Live library lookup
-          </h2>
+          <h2 className="text-lg font-semibold mb-1">Live library lookup</h2>
           <p className="text-sm text-slate-400 mb-4">
             Tools can also issue ad-hoc queries during the session — for
             example, when the user asks a follow-up question.
