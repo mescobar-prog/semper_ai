@@ -30,11 +30,13 @@ import {
   buildMosAutoSource,
   buildUnitAutoSource,
   findMosEntry,
+  findUnitEntry,
   hasUnitDoctrinePackage,
   listMosForBranch,
   listUnitsForBranch,
 } from "@workspace/mil-data";
 import { PageContainer, ErrorBox, formatDate } from "@/lib/format";
+import { useVoiceTool } from "@/lib/voiceBridge";
 import {
   ExportMenu,
   ImportControl,
@@ -46,6 +48,43 @@ import {
 const BRANCHES = MIL_BRANCHES.map((b) => b.label);
 const CLEARANCES = ["None", "Public Trust", "Secret", "Top Secret", "TS/SCI"];
 const DEPLOYMENT_STATUS = ["Garrison", "Train-up", "Deployed", "Reset", "TDY"];
+
+function normaliseSpoken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/** Loose match: returns the canonical option whose normalisation contains, or
+ *  is contained in, the spoken value. Used to map dictation to enum fields. */
+export function matchEnum(spoken: string, options: readonly string[]): string | null {
+  const want = normaliseSpoken(spoken);
+  if (!want) return null;
+  // Exact normalised match wins outright.
+  for (const o of options) {
+    if (normaliseSpoken(o) === want) return o;
+  }
+  // Otherwise the longest substring match.
+  let best: { opt: string; len: number } | null = null;
+  for (const o of options) {
+    const norm = normaliseSpoken(o);
+    if (norm.includes(want) || want.includes(norm)) {
+      if (!best || norm.length > best.len) best = { opt: o, len: norm.length };
+    }
+  }
+  return best?.opt ?? null;
+}
+
+/** Branch matcher tolerates spoken aliases (e.g. "marines" → "Marine Corps"). */
+export function matchBranch(spoken: string): string | null {
+  const want = normaliseSpoken(spoken);
+  if (!want) return null;
+  for (const b of MIL_BRANCHES) {
+    const labelNorm = normaliseSpoken(b.label);
+    const codeNorm = normaliseSpoken(b.code);
+    if (labelNorm === want || codeNorm === want) return b.label;
+    if (labelNorm.includes(want) || want.includes(codeNorm)) return b.label;
+  }
+  return null;
+}
 
 // Branch / MOS / Unit are handled separately so we can wire up the typeahead
 // pickers and the auto-ingest status panel. The remaining fields are still
@@ -192,6 +231,169 @@ export function Profile() {
     if (!draft) return;
     queueSave({ ...draft, billets: next });
   };
+
+  // ---------- Voice agent: profile-page tool handlers ----------
+  // Both handlers read the most-recent uncommitted draft via the same ref
+  // pattern the debounced save uses, so the agent always sees the latest
+  // operator input even between save flushes.
+  useVoiceTool("getProfileState", () => {
+    const current = pendingDraftRef.current ?? draft;
+    if (!current) return { ready: false };
+    const filled: Record<string, string | string[]> = {};
+    const empty: string[] = [];
+    const fieldOrder: Array<keyof ProfileUpdate> = [
+      "rank",
+      "dutyTitle",
+      "branch",
+      "mosCode",
+      "unit",
+      "baseLocation",
+      "securityClearance",
+      "deploymentStatus",
+      "command",
+      "billets",
+      "freeFormContext",
+    ];
+    for (const f of fieldOrder) {
+      const v = (current as Record<string, unknown>)[f];
+      if (f === "billets") {
+        const arr = Array.isArray(v) ? (v as string[]) : [];
+        if (arr.length) filled.billets = arr;
+        else empty.push("billets");
+      } else if (typeof v === "string" && v.trim().length) {
+        filled[f] = v;
+      } else {
+        empty.push(f);
+      }
+    }
+    return {
+      ready: true,
+      filled,
+      empty,
+      completenessPct: profile?.completenessPct ?? null,
+    };
+  });
+
+  useVoiceTool("setProfileField", (args) => {
+    const field = String(args.field ?? "").trim();
+    const rawValue = String(args.value ?? "").trim();
+    const base = pendingDraftRef.current ?? draft;
+    if (!base) return "Error: profile is not loaded yet.";
+    const allowed: Array<keyof ProfileUpdate> = [
+      "rank",
+      "dutyTitle",
+      "branch",
+      "mosCode",
+      "unit",
+      "baseLocation",
+      "securityClearance",
+      "deploymentStatus",
+      "command",
+      "billets",
+      "freeFormContext",
+    ];
+    if (!allowed.includes(field as keyof ProfileUpdate)) {
+      return `Error: unknown field "${field}". Allowed: ${allowed.join(", ")}.`;
+    }
+
+    // ---- Per-field normalisation ----
+    if (field === "branch") {
+      const matched = matchBranch(rawValue);
+      if (!matched) {
+        return `Error: "${rawValue}" did not match any branch. Allowed: ${BRANCHES.join(", ")}.`;
+      }
+      onChangeBranch(matched);
+      return `Set branch to ${matched}`;
+    }
+    if (field === "securityClearance") {
+      const matched = matchEnum(rawValue, CLEARANCES);
+      if (!matched) {
+        return `Error: "${rawValue}" did not match a clearance. Allowed: ${CLEARANCES.join(", ")}.`;
+      }
+      queueSave({ ...base, securityClearance: matched });
+      return `Set clearance to ${matched}`;
+    }
+    if (field === "deploymentStatus") {
+      const matched = matchEnum(rawValue, DEPLOYMENT_STATUS);
+      if (!matched) {
+        return `Error: "${rawValue}" did not match a deployment status. Allowed: ${DEPLOYMENT_STATUS.join(", ")}.`;
+      }
+      queueSave({ ...base, deploymentStatus: matched });
+      return `Set deployment status to ${matched}`;
+    }
+    if (field === "command") {
+      const want = normaliseSpoken(rawValue);
+      let matched: string | null = null;
+      if (want) {
+        for (const cmd of COMBATANT_COMMANDS) {
+          if (
+            normaliseSpoken(cmd.code) === want ||
+            normaliseSpoken(cmd.name) === want ||
+            normaliseSpoken(cmd.code).includes(want) ||
+            normaliseSpoken(cmd.name).includes(want)
+          ) {
+            matched = cmd.code;
+            break;
+          }
+        }
+      }
+      const final = matched ?? rawValue;
+      queueSave({ ...base, command: final });
+      return `Set command to ${final}`;
+    }
+    if (field === "billets") {
+      const list = rawValue
+        .split(/[,;]| and /i)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!list.length) return "Error: at least one billet is required.";
+      setBillets(list);
+      return `Set billets: ${list.join(", ")}`;
+    }
+    if (field === "mosCode") {
+      const code = base.branch ? branchCode(base.branch) : null;
+      if (code) {
+        const entry = findMosEntry(code, rawValue);
+        if (entry) {
+          queueSave({ ...base, mosCode: entry.code });
+          return `Set MOS to ${entry.code} — ${entry.title}`;
+        }
+      }
+      queueSave({ ...base, mosCode: rawValue });
+      return `Set MOS to ${rawValue}`;
+    }
+    if (field === "unit") {
+      // Try to snap to a curated unit entry for the active branch first
+      // (parallels the MOS path). Falls through to free text on no match.
+      const code = base.branch ? branchCode(base.branch) : null;
+      if (code && rawValue) {
+        const direct = findUnitEntry(code, rawValue);
+        if (direct) {
+          queueSave({ ...base, unit: direct.identifier });
+          return `Set unit to ${direct.identifier}`;
+        }
+        // Loose fuzzy: match against identifier or name by substring
+        // (case-insensitive). Useful for spoken values like
+        // "101st airborne" → "101st Airborne Division".
+        const want = rawValue.toLowerCase();
+        const fuzzy = listUnitsForBranch(code).find((u) => {
+          const id = u.identifier.toLowerCase();
+          const nm = u.name.toLowerCase();
+          return id.includes(want) || want.includes(id) || nm.includes(want);
+        });
+        if (fuzzy) {
+          queueSave({ ...base, unit: fuzzy.identifier });
+          return `Set unit to ${fuzzy.identifier}`;
+        }
+      }
+      // No match — accept as free text (the typeahead supports this too).
+      queueSave({ ...base, unit: rawValue || null });
+      return `Set unit to "${rawValue}"`;
+    }
+    // Plain text fields: rank, dutyTitle, baseLocation, freeFormContext
+    queueSave({ ...base, [field]: rawValue || null });
+    return `Set ${field} to "${rawValue}"`;
+  });
 
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(
     null,

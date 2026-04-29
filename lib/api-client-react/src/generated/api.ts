@@ -99,6 +99,8 @@ import type {
   ToolUpsert,
   UploadUrlRequest,
   UploadUrlResponse,
+  VoiceAgentSession,
+  VoiceAgentUpstreamError,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -6171,3 +6173,88 @@ export function useGetDashboardSummary<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Returns the configured agentId plus a short-lived signed URL the browser uses to open a WebSocket conversation with the Marines voice agent. The raw ElevenLabs API key never leaves the server. On the very first call after deployment the server will lazily create the agent if `ELEVENLABS_AGENT_ID` is unset.
+
+ * @summary Mint a short-lived ElevenLabs Conversational AI session
+ */
+export const getCreateVoiceAgentSessionUrl = () => {
+  return `/api/voice-agent/session`;
+};
+
+export const createVoiceAgentSession = async (
+  options?: RequestInit,
+): Promise<VoiceAgentSession> => {
+  return customFetch<VoiceAgentSession>(getCreateVoiceAgentSessionUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCreateVoiceAgentSessionMutationOptions = <
+  TError = ErrorType<ErrorEnvelope | VoiceAgentUpstreamError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createVoiceAgentSession>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createVoiceAgentSession>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["createVoiceAgentSession"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createVoiceAgentSession>>,
+    void
+  > = () => {
+    return createVoiceAgentSession(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateVoiceAgentSessionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createVoiceAgentSession>>
+>;
+
+export type CreateVoiceAgentSessionMutationError = ErrorType<
+  ErrorEnvelope | VoiceAgentUpstreamError
+>;
+
+/**
+ * @summary Mint a short-lived ElevenLabs Conversational AI session
+ */
+export const useCreateVoiceAgentSession = <
+  TError = ErrorType<ErrorEnvelope | VoiceAgentUpstreamError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createVoiceAgentSession>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createVoiceAgentSession>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getCreateVoiceAgentSessionMutationOptions(options));
+};

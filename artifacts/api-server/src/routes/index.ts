@@ -11,6 +11,7 @@ import submissionsRouter from "./submissions";
 import dashboardRouter from "./dashboard";
 import storageRouter from "./storage";
 import reviewsRouter from "./reviews";
+import voiceAgentRouter from "./voice-agent";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(submissionsRouter);
 router.use(dashboardRouter);
 router.use(storageRouter);
 router.use(reviewsRouter);
+router.use(voiceAgentRouter);
 
 export default router;

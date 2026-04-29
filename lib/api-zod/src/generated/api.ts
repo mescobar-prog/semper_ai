@@ -3079,3 +3079,25 @@ export const GetDashboardSummaryResponse = zod.object({
     }),
   ),
 });
+
+/**
+ * Returns the configured agentId plus a short-lived signed URL the browser uses to open a WebSocket conversation with the Marines voice agent. The raw ElevenLabs API key never leaves the server. On the very first call after deployment the server will lazily create the agent if `ELEVENLABS_AGENT_ID` is unset.
+
+ * @summary Mint a short-lived ElevenLabs Conversational AI session
+ */
+export const CreateVoiceAgentSessionResponse = zod
+  .object({
+    agentId: zod
+      .string()
+      .describe("ElevenLabs agent identifier the browser SDK reports back."),
+    signedUrl: zod
+      .string()
+      .describe("One-shot signed WebSocket URL valid for ~15 minutes."),
+    voiceId: zod
+      .string()
+      .nullish()
+      .describe("TTS voice id the agent is currently configured with."),
+  })
+  .describe(
+    "Short-lived ElevenLabs Conversational AI session token. The browser passes `signedUrl` to `Conversation.startSession({ signedUrl })`.\n",
+  );

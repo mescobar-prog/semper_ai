@@ -35,6 +35,7 @@ import {
   LaunchPreviewDialog,
   type LaunchTrigger,
 } from "@/components/LaunchPreviewDialog";
+import { useVoiceTool, waitForCondition } from "@/lib/voiceBridge";
 
 export function CatalogDetail() {
   const params = useParams<{ slug: string }>();
@@ -109,6 +110,51 @@ export function CatalogDetail() {
   // would violate the rules of hooks and crash the page on first load.
   const isLaunchingRef = useRef(false);
 
+  // ---------- Voice agent: detail-page tool handlers ----------
+  // ALL voice-tool hooks must live ABOVE the loading/error early returns
+  // below — otherwise React sees a different hook count between the
+  // first (data still loading) render and subsequent renders, throwing
+  // "Rendered more hooks than during the previous render".
+  //
+  // The launch handler depends on `tool`, `cbConfirmed`, `launchTrigger`,
+  // and `launch`, which are only safe to use *after* the early returns.
+  // We bridge that gap with a ref (`launchHandlerRef`) that gets a stub
+  // here and is reassigned in the render body further down once those
+  // locals exist. Refs are explicitly allowed to be mutated during
+  // rendering so long as the write is idempotent for the same inputs.
+  const slugRef = useRef(params.slug);
+  slugRef.current = params.slug;
+  const loadedSlugRef = useRef<string | null>(null);
+  loadedSlugRef.current = tool?.slug ?? null;
+  const launchHandlerRef = useRef<() => string>(
+    () => "Error: this tool is still loading.",
+  );
+
+  // openTool here is shorthand for "navigate to /catalog/<slug>" — useful
+  // when the agent already has the slug in hand and bypasses the browse
+  // page entirely. Same component instance handles both the source and
+  // destination slugs (wouter re-renders rather than remounts), so we
+  // can't rely on handler-identity swap. We instead wait until both the
+  // route param AND the loaded tool data have moved to the new slug.
+  useVoiceTool("openTool", async (args) => {
+    const next = String(args.slug ?? "").trim();
+    if (!next) return "Error: slug is required.";
+    if (next === slugRef.current && loadedSlugRef.current === next) {
+      return `Already on tool ${next}`;
+    }
+    setLocation(`/catalog/${next}`);
+    try {
+      await waitForCondition(
+        () => slugRef.current === next && loadedSlugRef.current === next,
+        4000,
+      );
+    } catch {
+      return `Error: opened ${next} but the page did not finish loading.`;
+    }
+    return `Opened tool ${next}`;
+  });
+  useVoiceTool("clickLaunchWithMyContext", () => launchHandlerRef.current());
+
   if (isLoading) {
     return (
       <PageContainer>
@@ -182,6 +228,19 @@ export function CatalogDetail() {
     !hasValidAffirmation;
   const isLocal = tool.hostingType === "local_install";
   const cbConfirmed = !!contextBlock?.confirmedAt;
+
+  // Populate the launch handler the voice tool above will invoke. Tool
+  // data, cbConfirmed, launchTrigger, and `launch` are all in scope here
+  // (after the loading/error early returns), so the handler can read
+  // them safely. Render-body ref mutation is allowed because the write
+  // is idempotent given the current render's inputs.
+  launchHandlerRef.current = () => {
+    if (!tool.isActive) return "Error: this tool is inactive.";
+    if (!cbConfirmed) return "Error: confirm the Context Block before launching.";
+    if (launchTrigger) return "Error: a launch is already in flight.";
+    launch();
+    return "Launch initiated.";
+  };
 
   return (
     <PageContainer>

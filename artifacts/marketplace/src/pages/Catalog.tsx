@@ -21,6 +21,7 @@ import type {
 } from "@workspace/api-client-react";
 import { parseAutoSource } from "@workspace/mil-data";
 import { PageContainer, ErrorBox, Pill, formatBytes } from "@/lib/format";
+import { useVoiceTool } from "@/lib/voiceBridge";
 import {
   Dialog,
   DialogContent,
@@ -227,17 +228,19 @@ export function Catalog() {
     );
   }, [fields, evaluation, evaluatedSnapshot]);
 
-  const onEvaluate = async () => {
+  const onEvaluate = async (): Promise<ContextBlockEvaluation | null> => {
     setError(null);
     const snapshot = { ...fields };
     try {
       const result = await evaluateMutation.mutateAsync({ data: snapshot });
       setEvaluation(result);
       setEvaluatedSnapshot(snapshot);
+      return result;
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Evaluator failed. Try again.",
       );
+      return null;
     }
   };
 
@@ -306,6 +309,105 @@ export function Catalog() {
     const ok = await submitConfirm({ bypass: true });
     if (ok) setBypassDialogOpen(false);
   };
+
+  // ---------- Voice agent: catalog-page tool handlers ----------
+  // Hold the current `fields` and `evaluation` in refs so the handlers
+  // (registered once per element name) always read the latest values.
+  const fieldsRef = useRef(fields);
+  useEffect(() => {
+    fieldsRef.current = fields;
+  }, [fields]);
+  const evaluationRef = useRef(evaluation);
+  useEffect(() => {
+    evaluationRef.current = evaluation;
+  }, [evaluation]);
+
+  useVoiceTool("getContextBlockState", () => {
+    const cur = fieldsRef.current;
+    const filled: Record<string, string> = {};
+    const empty: string[] = [];
+    for (const el of ELEMENTS) {
+      const v = (cur[el.key] ?? "").trim();
+      if (v) filled[el.key] = v;
+      else empty.push(el.key);
+    }
+    return {
+      filled,
+      empty,
+      lastEvaluation: evaluationRef.current,
+      confirmedAt: cb?.confirmedAt ?? null,
+    };
+  });
+
+  useVoiceTool("setContextBlockElement", (args) => {
+    const element = String(args.element ?? "").trim() as keyof ContextBlockFields;
+    const value = String(args.value ?? "");
+    const valid = ELEMENTS.map((e) => e.key);
+    if (!valid.includes(element)) {
+      return `Error: unknown element "${element}". Allowed: ${valid.join(", ")}.`;
+    }
+    setFields((prev) => ({ ...prev, [element]: value }));
+    return `Set ${element}`;
+  });
+
+  useVoiceTool("clickEvaluate", async () => {
+    // Make sure every field has at least some content before calling the
+    // server — the evaluator will reject an empty block with a generic
+    // error otherwise.
+    const cur = fieldsRef.current;
+    const missing = ELEMENTS.filter(
+      (e) => !(cur[e.key] ?? "").trim().length,
+    ).map((e) => e.key);
+    if (missing.length) {
+      return `Error: cannot evaluate — these elements are still empty: ${missing.join(", ")}.`;
+    }
+    // Use the value `onEvaluate` returns directly. Reading
+    // `evaluationRef.current` here is racy: the ref is updated by a
+    // useEffect after the React `setEvaluation` commit, which is not
+    // guaranteed to have run by the time the awaited mutation settles.
+    const ev = await onEvaluate();
+    if (!ev) return "Evaluator did not return a result.";
+    return {
+      totalScore: ev.totalScore,
+      status: ev.status,
+      opsecFlag: ev.opsecFlag,
+      flags: ev.flags ?? [],
+    };
+  });
+
+  useVoiceTool("clickConfirmContextBlock", async (args) => {
+    const bypassRequested = args.bypass === true;
+    const ev = evaluationRef.current;
+    if (!ev) {
+      return "Error: evaluate the block first before confirming.";
+    }
+    if (ev.opsecFlag) {
+      return "Error: OPSEC flag set — confirm is blocked. Edit the offending element and re-evaluate.";
+    }
+    if (ev.status === "GO") {
+      if (bypassRequested) {
+        return "Error: do not pass bypass=true on a clean GO score.";
+      }
+      const ok = await submitConfirm();
+      return ok ? "Context block confirmed." : "Error: confirm failed.";
+    }
+    // Sub-threshold (NO-GO without OPSEC). The agent must have already
+    // asked the operator "Are you satisfied with this evaluation score?"
+    // and received an explicit yes — that intent is signalled by passing
+    // bypass=true. Refuse implicit bypass to match the manual UI's
+    // sub-threshold dialog gating.
+    if (!bypassRequested) {
+      return (
+        "Error: score is sub-threshold. Confirm the operator wants to " +
+        "proceed anyway, then call clickConfirmContextBlock again with " +
+        "bypass=true."
+      );
+    }
+    const ok = await submitConfirm({ bypass: true });
+    return ok
+      ? "Context block confirmed (sub-threshold bypass)."
+      : "Error: confirm failed.";
+  });
 
   const evaluating = evaluateMutation.isPending;
   const confirming = confirmMutation.isPending;

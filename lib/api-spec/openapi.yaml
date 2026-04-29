@@ -30,6 +30,8 @@ tags:
     description: Object storage upload and serving endpoints.
   - name: Reviews
     description: Tool ratings and reviews.
+  - name: Voice
+    description: ElevenLabs Conversational AI voice agent session tokens.
 
 paths:
   /healthz:
@@ -1869,6 +1871,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  # ---------- Voice agent ----------
+  /voice-agent/session:
+    post:
+      tags: [Voice]
+      operationId: createVoiceAgentSession
+      summary: Mint a short-lived ElevenLabs Conversational AI session
+      description: >
+        Returns the configured agentId plus a short-lived signed URL the
+        browser uses to open a WebSocket conversation with the Marines
+        voice agent. The raw ElevenLabs API key never leaves the server.
+        On the very first call after deployment the server will lazily
+        create the agent if `ELEVENLABS_AGENT_ID` is unset.
+      responses:
+        '200':
+          description: Session token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VoiceAgentSession' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '502':
+          description: ElevenLabs upstream call failed (network error, bad agent id, signed-URL refusal, etc.)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VoiceAgentUpstreamError' }
+        '503':
+          description: Voice agent is not configured (no ElevenLabs API key on the server)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
 components:
   parameters:
     AuthorizationSessionHeader:
@@ -3168,6 +3204,37 @@ components:
         topTools:
           type: array
           items: { $ref: '#/components/schemas/ToolSummary' }
+
+    VoiceAgentSession:
+      type: object
+      description: >
+        Short-lived ElevenLabs Conversational AI session token. The browser
+        passes `signedUrl` to `Conversation.startSession({ signedUrl })`.
+      required: [agentId, signedUrl]
+      properties:
+        agentId:
+          type: string
+          description: ElevenLabs agent identifier the browser SDK reports back.
+        signedUrl:
+          type: string
+          description: One-shot signed WebSocket URL valid for ~15 minutes.
+        voiceId:
+          type: [string, 'null']
+          description: TTS voice id the agent is currently configured with.
+
+    VoiceAgentUpstreamError:
+      type: object
+      description: >
+        Returned when the server reached ElevenLabs but the upstream call
+        failed. `upstreamStatus` echoes the HTTP status the server saw from
+        ElevenLabs (or `null` for transport-level failures); `error` is a
+        human-readable summary safe to surface in the dock.
+      required: [error]
+      properties:
+        error: { type: string }
+        upstreamStatus:
+          type: [integer, 'null']
+          description: HTTP status returned by ElevenLabs, or null if the request never completed.
 
     PresetProfileSnapshot:
       type: object

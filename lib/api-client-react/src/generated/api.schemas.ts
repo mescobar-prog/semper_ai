@@ -1186,6 +1186,35 @@ export interface DashboardSummary {
   topTools: ToolSummary[];
 }
 
+/**
+ * Short-lived ElevenLabs Conversational AI session token. The browser passes `signedUrl` to `Conversation.startSession({ signedUrl })`.
+
+ */
+export interface VoiceAgentSession {
+  /** ElevenLabs agent identifier the browser SDK reports back. */
+  agentId: string;
+  /** One-shot signed WebSocket URL valid for ~15 minutes. */
+  signedUrl: string;
+  /**
+   * TTS voice id the agent is currently configured with.
+   * @nullable
+   */
+  voiceId?: string | null;
+}
+
+/**
+ * Returned when the server reached ElevenLabs but the upstream call failed. `upstreamStatus` echoes the HTTP status the server saw from ElevenLabs (or `null` for transport-level failures); `error` is a human-readable summary safe to surface in the dock.
+
+ */
+export interface VoiceAgentUpstreamError {
+  error: string;
+  /**
+   * HTTP status returned by ElevenLabs, or null if the request never completed.
+   * @nullable
+   */
+  upstreamStatus?: number | null;
+}
+
 export interface MissionPresetCreate {
   /** @minLength 1 */
   name: string;

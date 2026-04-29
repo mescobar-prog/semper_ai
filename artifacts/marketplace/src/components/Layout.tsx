@@ -14,6 +14,7 @@ import {
   getGetLaunchAffirmationQueryKey,
 } from "@workspace/api-client-react";
 import type { MissionPreset } from "@workspace/api-client-react";
+import { VoiceAgentDock } from "./VoiceAgentDock";
 
 function displayName(user: {
   firstName: string | null;
@@ -39,6 +40,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // The auth callback route renders without the chrome (and the
   // classification banner) even if a stale user is briefly present
   // during redirect handoff. Treat it as an unauthenticated screen.
+  // The voice-agent mic also requires an authenticated session token,
+  // so it's only mounted on the chrome'd branch below.
   if (!user || location === "/auth/callback") {
     return <>{children}</>;
   }
@@ -134,6 +137,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="flex-1 overflow-auto">{children}</div>
       </main>
       </div>
+      <VoiceAgentDock />
     </div>
   );
 }

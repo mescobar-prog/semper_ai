@@ -85,6 +85,14 @@ The project is structured as a pnpm workspace monorepo utilizing TypeScript (v5.
 - Frontend: `LaunchAffirmationDialog` renders the active preset + 6-element CB; `AffirmationIndicator` on each tool detail shows a green "Preset confirmed for this session" pill with a "Re-confirm" link.
 - `launches` audit row stores `presetId`, `contextBlockVersion`, `affirmedAt` for every launch.
 
+### Marines Voice Agent (Task #126)
+- A floating microphone button is mounted globally in the marketplace `<Layout>` (`artifacts/marketplace/src/components/VoiceAgentDock.tsx`) for every authenticated page.
+- The browser fetches a short-lived signed WebSocket URL from `POST /api/voice-agent/session` (`artifacts/api-server/src/routes/voice-agent.ts`). The raw `ELEVENLABS_API_KEY` never leaves the server.
+- On first call after a deploy the server lazily creates the agent (system prompt + 12 client-tool schemas + drill-instructor voice "Bill") and persists the resulting `agent_id` to `.local/elevenlabs-agent-id`. Override with `ELEVENLABS_AGENT_ID` / `ELEVENLABS_VOICE_ID`.
+- The agent drives marketplace UI through a small bridge (`artifacts/marketplace/src/lib/voiceBridge.ts`). Pages register tool implementations with `useVoiceTool(name, fn)`; the dock forwards every agent invocation to `runVoiceTool`. Built-in tools (`getCurrentRoute`, `navigate`, `goToCatalogBrowse`) are owned by the bridge itself.
+- Tools per page: Profile (`getProfileState`, `setProfileField`), Catalog (`getContextBlockState`, `setContextBlockElement`, `clickEvaluate`, `clickConfirmContextBlock`), CatalogBrowse (`findTool`, `openTool`), CatalogDetail (`clickLaunchWithMyContext`, `openTool`).
+- The existing text-based profile chat (`useSendProfileChat`) is unchanged.
+
 ### Tests
 - API-level tests live in `artifacts/api-server/src/__tests__/` and run with `vitest run` (script: `pnpm --filter @workspace/api-server test`, or `pnpm test` from the repo root which fans out via `pnpm -r --if-present run test`).
 - They exercise the real Postgres DB pointed to by `DATABASE_URL` (no schema mocking — they create per-test users/tools with random IDs and clean them up in `afterAll`).

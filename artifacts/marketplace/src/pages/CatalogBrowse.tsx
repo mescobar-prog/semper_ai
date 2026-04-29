@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,6 +20,7 @@ import {
   EmptyState,
   RatingBadge,
 } from "@/lib/format";
+import { useVoiceTool, runVoiceTool, waitForHandler } from "@/lib/voiceBridge";
 
 const ATO_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -52,6 +53,52 @@ export function CatalogBrowse() {
   const { data: tools, isLoading, error } = useListTools(params);
   const { data: profileEnvelope } = useGetMyProfile();
   const cb = profileEnvelope?.contextBlock;
+
+  // Voice agent uses an unfiltered catalog snapshot so the operator's
+  // sidebar filters don't accidentally hide a tool the agent is being
+  // asked to launch. Cache the unfiltered list separately.
+  const { data: allTools } = useListTools({});
+  const allToolsRef = useRef<ToolSummary[]>([]);
+  useEffect(() => {
+    if (allTools) allToolsRef.current = allTools;
+  }, [allTools]);
+
+  useVoiceTool("findTool", (args) => {
+    const spoken = String(args.spokenName ?? "").trim();
+    const matches = fuzzyMatchTools(spoken, allToolsRef.current);
+    return {
+      query: spoken,
+      matches: matches.slice(0, 5).map((t) => ({
+        slug: t.slug,
+        name: t.name,
+        vendor: t.vendor,
+        category: t.categoryName,
+      })),
+    };
+  });
+
+  // openTool is also registered here so the agent can call it while it's
+  // talking on /catalog/browse. CatalogDetail re-registers `openTool` on
+  // its own mount, but since both navigate to the same destination either
+  // owner produces the same observable behaviour.
+  //
+  // The handler awaits the *destination page's* `clickLaunchWithMyContext`
+  // handler to register before resolving. Without this await the agent
+  // could call `clickLaunchWithMyContext` before /catalog/<slug> mounts
+  // and get a spurious "tool not available" back.
+  useVoiceTool("openTool", async (args) => {
+    const slug = String(args.slug ?? "").trim();
+    if (!slug) return "Error: slug is required.";
+    const found = allToolsRef.current.find((t) => t.slug === slug);
+    if (!found) return `Error: no tool with slug "${slug}".`;
+    await runVoiceTool("navigate", { to: `/catalog/${slug}` });
+    try {
+      await waitForHandler("clickLaunchWithMyContext", 4000);
+    } catch {
+      return `Error: opened ${found.name} but the launch button never came online.`;
+    }
+    return `Opened ${found.name}`;
+  });
 
   return (
     <PageContainer>
@@ -260,4 +307,41 @@ function ToolCard({
       </div>
     </Link>
   );
+}
+
+/* --------------------------------------------------------------------- */
+/*  Voice-agent helpers                                                  */
+/* --------------------------------------------------------------------- */
+
+function normaliseSpoken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Score-and-sort tools for the agent's findTool call. Heuristic, not
+ * a search engine — token overlap on name/vendor/category, with a
+ * small bonus for substring containment of the full spoken query.
+ */
+export function fuzzyMatchTools(
+  spoken: string,
+  pool: ReadonlyArray<ToolSummary>,
+): ToolSummary[] {
+  const query = normaliseSpoken(spoken);
+  if (!query || !pool.length) return [];
+  const tokens = query.split(/\s+/).filter((t) => t.length >= 2);
+  const scored: Array<{ tool: ToolSummary; score: number }> = [];
+  for (const tool of pool) {
+    const haystack = normaliseSpoken(
+      [tool.name, tool.vendor, tool.categoryName ?? "", tool.slug].join(" "),
+    );
+    let score = 0;
+    if (haystack.includes(query)) score += 10;
+    for (const tok of tokens) {
+      if (haystack.includes(tok)) score += 2;
+    }
+    if (normaliseSpoken(tool.name) === query) score += 20;
+    if (score > 0) scored.push({ tool, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.tool);
 }

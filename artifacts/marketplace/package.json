@@ -75,5 +75,8 @@
     "vite": "catalog:",
     "wouter": "^3.3.5",
     "zod": "catalog:"
+  },
+  "dependencies": {
+    "@elevenlabs/react": "^1.2.1"
   }
 }

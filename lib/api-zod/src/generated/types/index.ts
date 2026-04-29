@@ -121,3 +121,5 @@ export * from "./uploadUrlResponse";
 export * from "./userProfile";
 export * from "./userProfileLaunchPreference";
 export * from "./userProfileViewMode";
+export * from "./voiceAgentSession";
+export * from "./voiceAgentUpstreamError";
