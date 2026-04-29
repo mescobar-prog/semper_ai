@@ -51,17 +51,17 @@ export function Landing() {
 
       <div className="relative max-w-5xl mx-auto px-8 pt-24 pb-32">
         <div className="text-[10px] uppercase tracking-[0.4em] text-primary font-mono mb-6">
-          / Authorized Tooling Storefront
+          / BOYD IN THE AGE OF AI
         </div>
         <h1 className="text-5xl md:text-7xl font-semibold tracking-tight leading-[0.95] mb-8">
-          The AI workbench
+          Orienting AI Tools
           <br />
-          <span className="text-primary">for service members.</span>
+          <span className="text-primary">with Marine Tacit Knowledge.</span>
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl leading-relaxed mb-10">
-          Discover authorized AI tools with full ATO transparency. Build a
-          structured profile and a personal knowledge base once — every tool
-          you launch receives mission-relevant context the moment you open it.
+          Build a structured profile and a personal knowledge base once — every
+          tool you launch receives mission-relevant context the moment you open
+          it.
         </p>
         <div className="flex items-center gap-4">
           <a
@@ -85,7 +85,7 @@ export function Landing() {
             {
               n: "01",
               t: "Build your operator profile",
-              d: "Branch, rank, MOS, mission, deployment status, security clearance, AI use cases. A built-in copilot helps you fill it in conversationally.",
+              d: "Branch, rank, MOS, mission, deployment status, security clearance, AI use cases. Fill it in once and every tool launch reuses it.",
             },
             {
               n: "02",

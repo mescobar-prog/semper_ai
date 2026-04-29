@@ -294,6 +294,21 @@ export async function runProfileSplitMigration(): Promise<void> {
   logger.info("profile-split migration complete");
 
   await runGitSelectedBranchBackfill();
+  await runProfileChatTableDrop();
+}
+
+/**
+ * Idempotent drop for the retired `profile_chat_messages` table.
+ *
+ * The conversational fill-in assistant on the user profile page (the
+ * "Profile Assistant" chat panel) was removed in Task #141. Its server
+ * routes, helpers, schema and OpenAPI surface were removed at the same
+ * time, but environments that booted earlier still have the table on
+ * disk. This drop guarantees those environments converge on the new
+ * schema on next boot. It is a no-op once the table is gone.
+ */
+export async function runProfileChatTableDrop(): Promise<void> {
+  await db.execute(sql`DROP TABLE IF EXISTS profile_chat_messages`);
 }
 
 /**

@@ -279,31 +279,6 @@ export interface ProfileUpdate {
   viewMode?: ProfileUpdateViewMode;
 }
 
-export type ChatMessageRole =
-  (typeof ChatMessageRole)[keyof typeof ChatMessageRole];
-
-export const ChatMessageRole = {
-  user: "user",
-  assistant: "assistant",
-} as const;
-
-export interface ChatMessage {
-  id: string;
-  role: ChatMessageRole;
-  content: string;
-  createdAt: string;
-}
-
-export interface ProfileChatRequest {
-  /** @minLength 1 */
-  message: string;
-}
-
-export interface ProfileChatResponse {
-  reply: string;
-  suggestedProfile: ProfileUpdate | null;
-}
-
 export interface Category {
   id: string;
   slug: string;

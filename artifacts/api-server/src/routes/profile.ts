@@ -1,15 +1,13 @@
 import { Router, type IRouter } from "express";
-import { eq, asc, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   db,
   profilesTable,
   contextBlocksTable,
-  profileChatMessagesTable,
   launchAffirmationsTable,
 } from "@workspace/db";
 import {
   UpdateMyProfileBody,
-  SendProfileChatBody,
   EvaluateContextBlockBody,
   ConfirmContextBlockBody,
 } from "@workspace/api-zod";
@@ -21,10 +19,7 @@ import {
   serializeProfile,
   serializeContextBlock,
 } from "../lib/profile-helpers";
-import {
-  evaluateContextBlock,
-  runProfileChat,
-} from "../lib/gemini-helpers";
+import { evaluateContextBlock } from "../lib/gemini-helpers";
 import {
   ingestMosPackage,
   ingestUnitPackage,
@@ -234,76 +229,6 @@ router.put("/profile", requireAuth, async (req, res) => {
     profile: serializeProfile(updated, contextBlock, updated.activePresetId),
     contextBlock: serializeContextBlock(contextBlock),
   });
-});
-
-router.get("/profile/chat", requireAuth, async (req, res) => {
-  const messages = await db
-    .select()
-    .from(profileChatMessagesTable)
-    .where(eq(profileChatMessagesTable.userId, req.user!.id))
-    .orderBy(asc(profileChatMessagesTable.createdAt));
-
-  res.json(
-    messages.map((m) => ({
-      id: m.id,
-      role: m.role as "user" | "assistant",
-      content: m.content,
-      createdAt: m.createdAt.toISOString(),
-    })),
-  );
-});
-
-router.post("/profile/chat", requireAuth, async (req, res) => {
-  const parsed = SendProfileChatBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid message" });
-    return;
-  }
-  const { message } = parsed.data;
-  const userId = req.user!.id;
-
-  await db
-    .insert(profileChatMessagesTable)
-    .values({ userId, role: "user", content: message });
-
-  const profile = await getOrCreateProfile(userId);
-  const history = await db
-    .select()
-    .from(profileChatMessagesTable)
-    .where(eq(profileChatMessagesTable.userId, userId))
-    .orderBy(asc(profileChatMessagesTable.createdAt))
-    .limit(40);
-
-  let result;
-  try {
-    result = await runProfileChat(
-      history.map((h) => ({
-        role: h.role as "user" | "assistant",
-        content: h.content,
-      })),
-      profile,
-    );
-  } catch (err) {
-    logger.error({ err }, "profile chat failed");
-    res.status(500).json({ error: "Assistant temporarily unavailable" });
-    return;
-  }
-
-  await db
-    .insert(profileChatMessagesTable)
-    .values({ userId, role: "assistant", content: result.reply });
-
-  res.json({
-    reply: result.reply,
-    suggestedProfile: result.suggestedProfile,
-  });
-});
-
-router.post("/profile/chat/reset", requireAuth, async (req, res) => {
-  await db
-    .delete(profileChatMessagesTable)
-    .where(eq(profileChatMessagesTable.userId, req.user!.id));
-  res.json({ success: true });
 });
 
 // ----- 6-element Context Block verification gate ---------------------------

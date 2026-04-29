@@ -186,60 +186,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-  /profile/chat:
-    get:
-      tags: [Profile]
-      operationId: getProfileChatHistory
-      summary: Get profile-builder chat history
-      responses:
-        '200':
-          description: Chat history
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/ChatMessage' }
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-    post:
-      tags: [Profile]
-      operationId: sendProfileChat
-      summary: Send a message to the profile-builder assistant
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ProfileChatRequest' }
-      responses:
-        '200':
-          description: Assistant reply (with optional structured profile suggestion)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ProfileChatResponse' }
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-  /profile/chat/reset:
-    post:
-      tags: [Profile]
-      operationId: resetProfileChat
-      summary: Clear profile-builder chat history
-      responses:
-        '200':
-          description: Reset
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SimpleSuccess' }
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /profile/context-block/evaluate:
     post:
       tags: [Profile]
@@ -2221,31 +2167,6 @@ components:
           description: >
             Persist the admin's chosen presentation mode. Server silently
             ignores this field for non-admins.
-
-    ChatMessage:
-      type: object
-      required: [id, role, content, createdAt]
-      properties:
-        id: { type: string }
-        role: { type: string, enum: [user, assistant] }
-        content: { type: string }
-        createdAt: { type: string, format: date-time }
-
-    ProfileChatRequest:
-      type: object
-      required: [message]
-      properties:
-        message: { type: string, minLength: 1 }
-
-    ProfileChatResponse:
-      type: object
-      required: [reply, suggestedProfile]
-      properties:
-        reply: { type: string }
-        suggestedProfile:
-          oneOf:
-            - $ref: '#/components/schemas/ProfileUpdate'
-            - type: 'null'
 
     Category:
       type: object

@@ -3,9 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetMyProfile,
   useUpdateMyProfile,
-  useGetProfileChatHistory,
-  useSendProfileChat,
-  useResetProfileChat,
   useGetAutoIngestStatus,
   useListMyPresets,
   useCreateMyPreset,
@@ -15,7 +12,6 @@ import {
   useActivateMyPreset,
   useListDocuments,
   getGetMyProfileQueryKey,
-  getGetProfileChatHistoryQueryKey,
   getGetAutoIngestStatusQueryKey,
   getListDocumentsQueryKey,
   getListMyPresetsQueryKey,
@@ -24,7 +20,6 @@ import {
 import type {
   ProfileUpdate,
   UserProfile,
-  ChatMessage,
   MissionPreset,
   DocumentSummary,
 } from "@workspace/api-client-react";
@@ -198,11 +193,6 @@ export function Profile() {
     queueSave({ ...draft, billets: next });
   };
 
-  const applySuggestion = (suggestion: ProfileUpdate) => {
-    if (!draft) return;
-    queueSave({ ...draft, ...suggestion });
-  };
-
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(
     null,
   );
@@ -323,8 +313,8 @@ export function Profile() {
             User Profile
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Every tool you launch receives this context. Edit fields directly,
-            or chat with the assistant to fill it in conversationally.
+            Every tool you launch receives this context. Edit fields directly
+            below — your changes save automatically.
           </p>
         </div>
         {profile && (
@@ -356,8 +346,8 @@ export function Profile() {
         onDismiss={() => setImportMessage(null)}
       />
 
-      <div className="grid lg:grid-cols-5 gap-6">
-        <section className="lg:col-span-3 bg-card border border-border rounded-md p-5">
+      <div className="grid grid-cols-1 gap-6">
+        <section className="bg-card border border-border rounded-md p-5">
           {isLoading || !draft ? (
             <div className="text-muted-foreground text-sm">
               Loading profile…
@@ -514,8 +504,6 @@ export function Profile() {
             </div>
           )}
         </section>
-
-        <ChatPanel onApply={applySuggestion} />
       </div>
 
       <PresetsSection />
@@ -1521,157 +1509,3 @@ function profileToDraft(p: UserProfile): ProfileUpdate {
   };
 }
 
-function ChatPanel({ onApply }: { onApply: (s: ProfileUpdate) => void }) {
-  const queryClient = useQueryClient();
-  const { data: history } = useGetProfileChatHistory();
-  const sendMutation = useSendProfileChat();
-  const resetMutation = useResetProfileChat();
-  const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [latestSuggestion, setLatestSuggestion] = useState<{
-    messageId: string;
-    suggestion: ProfileUpdate;
-  } | null>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [history]);
-
-  const onSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text) return;
-    setInput("");
-    try {
-      const resp = await sendMutation.mutateAsync({ data: { message: text } });
-      queryClient.invalidateQueries({
-        queryKey: getGetProfileChatHistoryQueryKey(),
-      });
-      if (resp.suggestedProfile) {
-        setLatestSuggestion({
-          messageId: crypto.randomUUID(),
-          suggestion: resp.suggestedProfile,
-        });
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const onReset = async () => {
-    await resetMutation.mutateAsync();
-    queryClient.invalidateQueries({
-      queryKey: getGetProfileChatHistoryQueryKey(),
-    });
-    setLatestSuggestion(null);
-  };
-
-  const messages: ChatMessage[] = history ?? [];
-
-  return (
-    <section className="lg:col-span-2 bg-card border border-border rounded-md flex flex-col h-[640px]">
-      <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-            Profile assistant
-          </div>
-          <div className="text-sm font-semibold mt-0.5">
-            Conversational fill-in
-          </div>
-        </div>
-        {messages.length > 0 && (
-          <button
-            onClick={onReset}
-            className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            Reset
-          </button>
-        )}
-      </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-3">
-        {messages.length === 0 && (
-          <div className="text-sm text-muted-foreground py-8 text-center">
-            Tell me about your role and mission. I'll suggest profile fields you
-            can apply with one click.
-          </div>
-        )}
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-md px-3 py-2 text-sm leading-relaxed ${
-                m.role === "user"
-                  ? "bg-primary/15 text-foreground border border-primary/30"
-                  : "bg-background border border-border"
-              }`}
-            >
-              <div className="whitespace-pre-wrap">{m.content}</div>
-              <div className="text-[10px] text-muted-foreground font-mono mt-1.5">
-                {formatDate(m.createdAt)}
-              </div>
-            </div>
-          </div>
-        ))}
-        {latestSuggestion && (
-          <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 mb-2">
-              Suggested updates
-            </div>
-            <div className="text-xs space-y-0.5 mb-3 text-emerald-100/90">
-              {Object.entries(latestSuggestion.suggestion).map(([k, v]) => {
-                if (v == null || (Array.isArray(v) && v.length === 0))
-                  return null;
-                return (
-                  <div key={k}>
-                    <span className="text-emerald-400 font-mono">{k}:</span>{" "}
-                    {Array.isArray(v) ? v.join(", ") : String(v)}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  onApply(latestSuggestion.suggestion);
-                  setLatestSuggestion(null);
-                }}
-                className="px-3 py-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-medium"
-              >
-                Apply suggestions
-              </button>
-              <button
-                onClick={() => setLatestSuggestion(null)}
-                className="px-3 py-1.5 rounded text-xs text-emerald-200/70 hover:text-emerald-200"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-        {sendMutation.isPending && (
-          <div className="text-xs text-muted-foreground">Thinking…</div>
-        )}
-      </div>
-      <form onSubmit={onSend} className="border-t border-border p-3 flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Tell me about your role…"
-          className="flex-1 px-3 py-2 rounded-md bg-background border border-border text-sm focus:border-primary focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || sendMutation.isPending}
-          className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-        >
-          Send
-        </button>
-      </form>
-    </section>
-  );
-}
