@@ -29,8 +29,8 @@ artifacts/
   api-server/          Express 5 + Drizzle ORM backend (auth, profiles, catalog,
                        library, launches, admin, dashboard)
   marketplace/         React + Vite frontend — the main Semper AI storefront
-  brief-drafter/       AI tool: drafts mission briefs with Claude
-                       (claude-sonnet-4-6) + profile-aware RAG
+  brief-drafter/       AI tool: drafts mission briefs with Gemini
+                       (Gemini-3-flash-preview) + profile-aware RAG
   context-echo/        Demo tool that exchanges a launch token and renders the
                        received context (useful for verifying the launch flow)
   mission-chat/        AI chat tool that uses the user's profile + library
@@ -42,7 +42,6 @@ lib/
   api-zod/             Generated Zod schemas
   db/                  Drizzle schema, migrations, db client
   integrations/        Shared integration helpers
-  integrations-anthropic-ai/   Anthropic (Claude) helper used by brief-drafter
   integrations-gemini-ai/      Gemini helper used by api-server / admin draft
   mil-data/            Curated military reference data for Smart Mission Context
   replit-auth-web/     Replit OIDC auth helpers (used as @workspace/replit-auth-web)
@@ -69,7 +68,7 @@ The full pnpm packages list lives in [`pnpm-workspace.yaml`](./pnpm-workspace.ya
 | Bundler          | esbuild (api-server) / Vite 7 (frontends)                             |
 | Frontend         | React 19 + Vite + Tailwind 4                                          |
 | Embeddings       | `@xenova/transformers` — `Xenova/all-MiniLM-L6-v2` (384-dim, int8)    |
-| LLMs             | Gemini (`gemini-3-flash-preview`) and Claude (`claude-sonnet-4-6`)    |
+| LLMs             | Gemini (`gemini-3-flash-preview`)                                     |
 | Auth             | Replit OIDC via `@workspace/replit-auth-web`                          |
 | Object storage   | Replit App Storage (Google Cloud Storage)                             |
 | Tests            | Vitest (forked pool, `singleFork: true`) against a real Postgres      |
