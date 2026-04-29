@@ -3,12 +3,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   previewLaunchContext,
   useLaunchTool,
+  useCreateLaunchAffirmation,
   getListRecentLaunchesQueryKey,
   getGetDashboardSummaryQueryKey,
   getGetMyProfileQueryKey,
+  getGetLaunchAffirmationQueryKey,
   useUpdateMyProfile,
+  type ContextBlockState,
   type LaunchInitiateResponse,
+  type LaunchNeedsAffirmation,
   type LaunchPreviewResponse,
+  type MissionPreset,
   type RagSnippet,
 } from "@workspace/api-client-react";
 import {
@@ -36,29 +41,69 @@ interface Props {
   onLaunched: (
     result: LaunchInitiateResponse & { toolName: string },
   ) => void;
-  /** When true (or undefined), open the preview UI. When false, mint immediately. */
+  /**
+   * When true (or undefined), open the preview UI. When false, mint immediately.
+   * The parent should only set this to false when the operator's saved preference
+   * is "direct" AND a valid affirmation already exists — otherwise the server
+   * will refuse the mint with a 409.
+   */
   showPreview?: boolean;
+  /**
+   * Snapshot of the active mission preset. Rendered read-only at the top of
+   * the consolidated dialog and (together with `contextBlockSnapshot.version`)
+   * used as the affirmation key.
+   */
+  presetSnapshot: MissionPreset | null;
+  /**
+   * Snapshot of the user's six-element Context Block. Rendered read-only at
+   * the top of the consolidated dialog. The `version` field also keys the
+   * affirmation request.
+   */
+  contextBlockSnapshot: ContextBlockState | null;
+  /**
+   * Whether the operator has a server-recorded, unexpired affirmation that
+   * matches the active preset and current Context Block version. When false
+   * the dialog will record one before minting the launch.
+   */
+  hasValidAffirmation: boolean;
+  /**
+   * "launch" (default) — primary button affirms (if needed) then mints the
+   *  launch and opens the tool.
+   * "reaffirm" — primary button records a fresh affirmation and closes
+   *  without minting a launch. The same review content is shown.
+   */
+  mode?: "launch" | "reaffirm";
 }
 
 /**
- * Pre-launch context preview & redaction dialog.
+ * Consolidated pre-launch review & affirmation dialog (Task #125).
  *
- * Flow:
- *  1. When `trigger` is set, fetch the candidate payload (`/launch-preview`).
- *  2. The user toggles individual profile fields and snippets, optionally
- *     adds a freeform note.
- *  3. "Launch now" calls `/launch` with the explicit allowlist; the server
- *     persists the redaction on the launch row and mints a token.
- *  4. The opened tool only sees what the user approved.
+ * Shows, in one scrollable view:
+ *   - the active mission preset summary + the six-element Context Block
+ *     (read-only — same content the old affirmation modal showed),
+ *   - the operator profile fields with per-row redaction,
+ *   - the RAG library snippets with per-row redaction,
+ *   - the "Additional detail" textarea (debounced snippet refresh).
+ *
+ * A single acknowledgement checkbox covers both the "context is current"
+ * and "items checked are what I want sent" intents. Clicking the primary
+ * button records the affirmation (if one isn't already valid) and then
+ * mints the launch in sequence. Stale-snapshot 409s from either endpoint
+ * swap the snapshot in-place and reset the acknowledgement.
  */
 export function LaunchPreviewDialog({
   trigger,
   onClose,
   onLaunched,
   showPreview = true,
+  presetSnapshot,
+  contextBlockSnapshot,
+  hasValidAffirmation,
+  mode = "launch",
 }: Props) {
   const queryClient = useQueryClient();
   const launchMutation = useLaunchTool();
+  const affirmMutation = useCreateLaunchAffirmation();
   const updateProfile = useUpdateMyProfile();
 
   // Stash the unstable identities from useMutation / parent props in
@@ -72,6 +117,25 @@ export function LaunchPreviewDialog({
   onCloseRef.current = onClose;
   const onLaunchedRef = useRef(onLaunched);
   onLaunchedRef.current = onLaunched;
+
+  // Refs hold the snapshot/affirmation props so we can capture them at
+  // the moment a trigger fires without forcing the reset effect to
+  // re-run every time the parent rerenders.
+  const presetSnapshotRef = useRef(presetSnapshot);
+  presetSnapshotRef.current = presetSnapshot;
+  const contextBlockSnapshotRef = useRef(contextBlockSnapshot);
+  contextBlockSnapshotRef.current = contextBlockSnapshot;
+  const hasValidAffirmationRef = useRef(hasValidAffirmation);
+  hasValidAffirmationRef.current = hasValidAffirmation;
+  // The parent recomputes `showPreview` from launchPreference + affirmation
+  // status, both of which can change while the dialog is open (e.g. when
+  // the operator toggles "Skip this preview next time" inside this dialog
+  // and the profile re-fetches). We capture the prop's value at the moment
+  // a trigger arrives and latch it for the rest of that dialog session;
+  // otherwise the body would flip from review→"Launching…" mid-interaction
+  // and orphan the user with no controls.
+  const showPreviewRef = useRef(showPreview);
+  showPreviewRef.current = showPreview;
 
   // Guards against re-entry of the trigger effect for the same trigger
   // identity. Even with narrowed deps, React's StrictMode (and HMR)
@@ -96,6 +160,40 @@ export function LaunchPreviewDialog({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [savingPreference, setSavingPreference] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  // Locally track the operator's launch-preference choice so the toggle
+  // reflects the click immediately even before the profile re-fetch
+  // resolves. Initialized from the preview response when it arrives.
+  const [launchPrefOverride, setLaunchPrefOverride] =
+    useState<"preview" | "direct" | null>(null);
+  // Latched copy of the `showPreview` prop captured at trigger time so
+  // mid-session preference flips don't tear down the in-progress UI.
+  // `null` means "no trigger yet" — render falls back to the live prop
+  // (which will be ignored anyway because `open` is false).
+  const [latchedShowPreview, setLatchedShowPreview] = useState<boolean | null>(
+    null,
+  );
+
+  // Local mirror of the preset + CB snapshot. We can't keep using the
+  // props directly because a 409 from either /launches/affirmation or
+  // /tools/:id/launch will hand us a fresher snapshot we need to swap
+  // in-place without closing.
+  const [snapshotPreset, setSnapshotPreset] = useState<MissionPreset | null>(
+    presetSnapshot,
+  );
+  const [snapshotContextBlock, setSnapshotContextBlock] =
+    useState<ContextBlockState | null>(contextBlockSnapshot);
+  // Mirror of the affirmation status. Starts at the prop's value but
+  // flips to true after a successful affirm POST and to false after a
+  // 409-driven snapshot swap. Once true within a session, the dialog
+  // won't redundantly affirm again before minting.
+  const [affirmationValid, setAffirmationValid] =
+    useState(hasValidAffirmation);
+  // Acknowledgement checkbox state (the only gate on the primary button
+  // when the preview UI is shown).
+  const [acknowledged, setAcknowledged] = useState(false);
+  // Surfaced inline when a 409 caused us to swap the snapshot in place.
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
 
   // Reset state whenever a new trigger arrives. We depend on the
   // `trigger` object identity (not just `toolId`) so that two
@@ -110,6 +208,7 @@ export function LaunchPreviewDialog({
       // mints a fresh object, but resetting here keeps the guard from
       // becoming a footgun.)
       handledTriggerRef.current = null;
+      setLatchedShowPreview(null);
       return;
     }
     setPreview(null);
@@ -118,6 +217,13 @@ export function LaunchPreviewDialog({
     setExcludedFields(new Set());
     setExcludedSnippets(new Set());
     setAdditionalDetail("");
+    setAcknowledged(false);
+    setStaleNotice(null);
+    setSnapshotPreset(presetSnapshotRef.current);
+    setSnapshotContextBlock(contextBlockSnapshotRef.current);
+    setAffirmationValid(hasValidAffirmationRef.current);
+    setLaunchPrefOverride(null);
+    setLatchedShowPreview(showPreviewRef.current);
   }, [trigger]);
 
   // Initial fetch of the candidate payload OR direct mint depending on
@@ -131,10 +237,16 @@ export function LaunchPreviewDialog({
     if (!trigger) return;
     if (handledTriggerRef.current === trigger) return;
     handledTriggerRef.current = trigger;
+    // Capture showPreview at trigger time so a mid-session preference
+    // toggle inside this dialog can't re-route an already-rendered
+    // review screen into a direct mint mid-flight.
+    const initialShowPreview = showPreviewRef.current;
     let cancelled = false;
     (async () => {
-      if (!showPreview) {
+      if (!initialShowPreview) {
         // Direct launch — call /launch with no allowlist (server includes everything).
+        // The parent only sets showPreview=false when a valid affirmation
+        // already exists, so the server's gate should pass silently.
         try {
           setSubmitting(true);
           setSubmitError(null);
@@ -183,7 +295,9 @@ export function LaunchPreviewDialog({
     return () => {
       cancelled = true;
     };
-  }, [trigger, showPreview, queryClient]);
+    // showPreview intentionally not in deps — see initialShowPreview above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger, queryClient]);
 
   // Debounced additionalDetail → re-fetch preview. We wait ~500ms
   // after the operator stops typing so we don't spam the LLM-backed
@@ -191,7 +305,7 @@ export function LaunchPreviewDialog({
   // fetch is still running and only fires when the trimmed text
   // actually differs from what the last preview ran with.
   useEffect(() => {
-    if (!trigger || !showPreview) return;
+    if (!trigger || !latchedShowPreview) return;
     if (loadingPreview) return;
     const trimmed = additionalDetail.trim();
     const lastDetail = preview?.additionalDetail ?? "";
@@ -221,7 +335,7 @@ export function LaunchPreviewDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [additionalDetail, trigger?.toolId, showPreview, loadingPreview, preview?.additionalDetail]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [additionalDetail, trigger?.toolId, latchedShowPreview, loadingPreview, preview?.additionalDetail]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fieldsWithValues = useMemo(
     () => preview?.profileFields.filter((f) => f.hasValue) ?? [],
@@ -256,11 +370,59 @@ export function LaunchPreviewDialog({
     });
   };
 
-  const handleLaunch = async () => {
+  const handlePrimary = async () => {
     if (!trigger || !preview) return;
+    if (!snapshotPreset || !snapshotContextBlock) {
+      setSubmitError(
+        "Cannot continue without an active preset and Context Block.",
+      );
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
+    setStaleNotice(null);
     try {
+      // Step (a): record an affirmation if one isn't already valid.
+      // Reaffirm mode always records a fresh one (extending the TTL).
+      if (!affirmationValid || mode === "reaffirm") {
+        try {
+          await affirmMutation.mutateAsync({
+            data: {
+              presetId: snapshotPreset.id,
+              contextBlockVersion: snapshotContextBlock.version,
+            },
+          });
+          // Refresh the cached affirmation status so the catalog page's
+          // indicator flips immediately to "preset confirmed for this
+          // session".
+          queryClient.invalidateQueries({
+            queryKey: getGetLaunchAffirmationQueryKey(),
+          });
+          setAffirmationValid(true);
+        } catch (err) {
+          const stale = extractStalePayload(err);
+          if (stale) {
+            setSnapshotPreset(stale.preset);
+            setSnapshotContextBlock(stale.contextBlock);
+            setAffirmationValid(false);
+            setAcknowledged(false);
+            setStaleNotice(
+              "Your context block changed since you opened this dialog. Please review the updated content and re-confirm.",
+            );
+            return;
+          }
+          throw err;
+        }
+      }
+
+      if (mode === "reaffirm") {
+        // Re-affirm-only mode: we just recorded the fresh affirmation,
+        // close without minting a launch.
+        onClose();
+        return;
+      }
+
+      // Step (b): mint the launch with the operator's redaction allowlist.
       const selectedFieldKeys = fieldsWithValues
         .filter((f) => !excludedFields.has(f.key))
         .map((f) => f.key);
@@ -271,58 +433,104 @@ export function LaunchPreviewDialog({
       // the launch row persists it and the receiving tool sees it via
       // context-exchange.
       const trimmedDetail = additionalDetail.trim();
-      const resp = await launchMutation.mutateAsync({
-        toolId: trigger.toolId,
-        data: {
-          selectedFieldKeys,
-          selectedSnippetIds,
-          additionalDetail: trimmedDetail.length > 0 ? trimmedDetail : null,
-        },
-      });
-      if (resp.hostingType !== "local_install") {
-        window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
+      try {
+        const resp = await launchMutation.mutateAsync({
+          toolId: trigger.toolId,
+          data: {
+            selectedFieldKeys,
+            selectedSnippetIds,
+            additionalDetail: trimmedDetail.length > 0 ? trimmedDetail : null,
+          },
+        });
+        if (resp.hostingType !== "local_install") {
+          window.open(resp.launchUrl, "_blank", "noopener,noreferrer");
+        }
+        onLaunched({ ...resp, toolName: trigger.toolName });
+        queryClient.invalidateQueries({
+          queryKey: getListRecentLaunchesQueryKey(),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getGetDashboardSummaryQueryKey(),
+        });
+        onClose();
+      } catch (err) {
+        const stale = extractStalePayload(err);
+        if (stale) {
+          // Rare race: the CB drifted between our affirm and our launch.
+          // Swap the snapshot in place and ask the operator to re-affirm.
+          setSnapshotPreset(stale.preset);
+          setSnapshotContextBlock(stale.contextBlock);
+          setAffirmationValid(false);
+          setAcknowledged(false);
+          setStaleNotice(
+            "Your context block changed since you opened this dialog. Please review the updated content and re-confirm.",
+          );
+          return;
+        }
+        throw err;
       }
-      onLaunched({ ...resp, toolName: trigger.toolName });
-      queryClient.invalidateQueries({
-        queryKey: getListRecentLaunchesQueryKey(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: getGetDashboardSummaryQueryKey(),
-      });
-      onClose();
-    } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : "Launch failed");
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Launch failed");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // "Always launch directly from now on" preference toggle.
+  // "Always launch directly from now on" preference toggle. We update
+  // the local override immediately so the checkbox reflects the click
+  // before the network round-trip resolves; if the save fails we roll
+  // back to whatever the preview/profile said.
   const setLaunchPref = async (pref: "preview" | "direct") => {
+    const prior = launchPrefOverride;
+    setLaunchPrefOverride(pref);
     setSavingPreference(true);
+    setPreferenceError(null);
     try {
       await updateProfile.mutateAsync({ data: { launchPreference: pref } });
       queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+    } catch (err) {
+      setLaunchPrefOverride(prior);
+      setPreferenceError(
+        err instanceof Error
+          ? err.message
+          : "Could not save your launch preference. Please try again.",
+      );
     } finally {
       setSavingPreference(false);
     }
   };
 
   const open = !!trigger;
+  const isReaffirm = mode === "reaffirm";
+  const primaryLabel = isReaffirm
+    ? submitting
+      ? "Confirming…"
+      : "Confirm context"
+    : submitting
+      ? "Launching…"
+      : "Launch now";
+  const dialogTitle = isReaffirm
+    ? `Re-confirm what ${trigger?.toolName ?? "this tool"} would receive`
+    : `Review what ${trigger?.toolName ?? "this tool"} will receive`;
+  const dialogDescription = isReaffirm
+    ? "Refresh your launch-time affirmation against the active preset and Context Block. Nothing is sent to the tool."
+    : "Confirm your active preset and Context Block, then toggle off anything you don't want this tool to see.";
+
+  // Use the latched copy of showPreview so the body doesn't tear down
+  // mid-session if the parent's launchPreference / affirmation flips.
+  // Falls back to the live prop only before the first trigger has been
+  // captured (when `open` is false anyway).
+  const effectiveShowPreview = latchedShowPreview ?? showPreview;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            Review what {trigger?.toolName ?? "this tool"} will receive
-          </DialogTitle>
-          <DialogDescription>
-            Toggle off anything you don't want this tool to see. Only what's
-            checked is sent.
-          </DialogDescription>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
 
-        {!showPreview && (
+        {!effectiveShowPreview && (
           <div className="text-sm text-muted-foreground py-6">
             {submitError ? (
               <div className="rounded border border-rose-500/40 bg-rose-500/5 p-3 text-rose-300">
@@ -334,20 +542,36 @@ export function LaunchPreviewDialog({
           </div>
         )}
 
-        {showPreview && loadingPreview && (
+        {effectiveShowPreview && loadingPreview && (
           <div className="text-sm text-muted-foreground py-6">
             Computing what we'd send…
           </div>
         )}
 
-        {showPreview && previewError && (
+        {effectiveShowPreview && previewError && (
           <div className="rounded border border-rose-500/40 bg-rose-500/5 p-3 text-sm text-rose-300">
             {previewError}
           </div>
         )}
 
-        {showPreview && preview && (
+        {effectiveShowPreview && preview && (
           <div className="space-y-6">
+            {snapshotPreset && snapshotContextBlock && (
+              <ContextSnapshotSection
+                preset={snapshotPreset}
+                contextBlock={snapshotContextBlock}
+              />
+            )}
+
+            {staleNotice && (
+              <div
+                role="alert"
+                className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-200"
+              >
+                {staleNotice}
+              </div>
+            )}
+
             <section>
               <SectionLabel
                 title="Operator profile"
@@ -480,19 +704,55 @@ export function LaunchPreviewDialog({
               </div>
             )}
 
+            <label className="flex items-start gap-3 rounded-md border border-border bg-card px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="launch-acknowledge-checkbox"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-primary"
+              />
+              <span className="text-sm text-foreground">
+                I confirm this preset and Context Block are current and that
+                the items checked above are what I want this tool to receive.
+              </span>
+            </label>
+
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-border">
-              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={preview.launchPreference === "direct"}
-                  disabled={savingPreference}
-                  onChange={(e) =>
-                    setLaunchPref(e.target.checked ? "direct" : "preview")
-                  }
-                  className="h-3.5 w-3.5 rounded border-border bg-background text-primary"
-                />
-                Skip this preview next time
-              </label>
+              {isReaffirm ? (
+                <span className="text-xs text-muted-foreground">
+                  Recording a fresh affirmation only — no launch will fire.
+                </span>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      data-testid="launch-skip-preview-toggle"
+                      checked={
+                        (launchPrefOverride ?? preview.launchPreference) ===
+                        "direct"
+                      }
+                      disabled={savingPreference}
+                      onChange={(e) =>
+                        void setLaunchPref(
+                          e.target.checked ? "direct" : "preview",
+                        )
+                      }
+                      className="h-3.5 w-3.5 rounded border-border bg-background text-primary"
+                    />
+                    Skip this preview next time
+                  </label>
+                  {preferenceError && (
+                    <span
+                      data-testid="launch-preference-error"
+                      className="text-[11px] text-rose-300"
+                    >
+                      {preferenceError}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -504,11 +764,16 @@ export function LaunchPreviewDialog({
                 </button>
                 <button
                   type="button"
-                  onClick={handleLaunch}
-                  disabled={submitting}
+                  data-testid={
+                    isReaffirm
+                      ? "launch-confirm-context-button"
+                      : "launch-now-button"
+                  }
+                  onClick={handlePrimary}
+                  disabled={submitting || !acknowledged}
                   className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {submitting ? "Launching…" : "Launch now"}
+                  {primaryLabel}
                 </button>
               </div>
             </div>
@@ -532,6 +797,121 @@ function SectionLabel({ title, hint }: { title: string; hint?: string }) {
       )}
     </div>
   );
+}
+
+/**
+ * Read-only mirror of what the legacy LaunchAffirmationDialog showed:
+ * the active mission preset card, optional lower-assurance bypass
+ * warning, and the six-element Context Block grid.
+ */
+function ContextSnapshotSection({
+  preset,
+  contextBlock,
+}: {
+  preset: MissionPreset;
+  contextBlock: ContextBlockState;
+}) {
+  return (
+    <div className="space-y-4">
+      <section>
+        <SectionLabel title="Active mission preset" />
+        <div className="mt-2 rounded-md border border-border bg-card px-4 py-3">
+          <div className="text-sm font-medium text-foreground">
+            {preset.name}
+          </div>
+          {preset.description && (
+            <div className="text-xs text-muted-foreground mt-1">
+              {preset.description}
+            </div>
+          )}
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mt-2">
+            Context block v{contextBlock.version}
+          </div>
+        </div>
+      </section>
+
+      {contextBlock.bypassed && (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-200"
+        >
+          <div className="font-semibold uppercase tracking-wider text-[10px] text-amber-300 mb-1">
+            Lower-assurance context
+          </div>
+          This Context Block was confirmed under the 10/12 review threshold.
+          Tools you launch will see a flag indicating the block was
+          operator-bypassed; proceed only if that level of assurance is
+          acceptable for the work ahead.
+        </div>
+      )}
+
+      <section>
+        <SectionLabel title="Six-element context block" />
+        <ContextBlockGrid cb={contextBlock} />
+      </section>
+    </div>
+  );
+}
+
+function ContextBlockGrid({ cb }: { cb: ContextBlockState }) {
+  const elements: Array<{ label: string; value: string | null }> = [
+    { label: "Doctrine", value: cb.doctrine },
+    { label: "Intent", value: cb.intent },
+    { label: "Environment", value: cb.environment },
+    { label: "Constraints", value: cb.constraints },
+    { label: "Risk", value: cb.risk },
+    { label: "Experience", value: cb.experience },
+  ];
+  return (
+    <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+      {elements.map((el) => (
+        <li
+          key={el.label}
+          className="rounded-md border border-border bg-card px-3 py-2"
+        >
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            {el.label}
+          </div>
+          <div
+            className={`mt-1 text-xs whitespace-pre-wrap leading-relaxed ${
+              el.value ? "text-foreground/90" : "italic text-muted-foreground"
+            }`}
+          >
+            {el.value || "(empty)"}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// The generated client throws a fetch-style error when the response is
+// not 2xx; the parsed body is attached as `error.cause` (orval default).
+// We pull the structured 409 payload back out so the dialog can self-heal
+// when preset / CB version drift under us between open and confirm.
+function extractStalePayload(err: unknown): {
+  preset: MissionPreset;
+  contextBlock: ContextBlockState;
+} | null {
+  if (!err || typeof err !== "object") return null;
+  const candidate =
+    ("cause" in err ? (err as { cause?: unknown }).cause : null) ??
+    ("response" in err
+      ? (err as { response?: { data?: unknown } }).response?.data
+      : null) ??
+    err;
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    (candidate as LaunchNeedsAffirmation).code === "needs_affirmation"
+  ) {
+    const body = candidate as LaunchNeedsAffirmation;
+    return {
+      preset: body.preset,
+      contextBlock: body.contextBlock,
+    };
+  }
+  return null;
 }
 
 function SnippetRow({

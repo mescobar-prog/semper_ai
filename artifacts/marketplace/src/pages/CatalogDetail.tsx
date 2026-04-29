@@ -35,10 +35,6 @@ import {
   LaunchPreviewDialog,
   type LaunchTrigger,
 } from "@/components/LaunchPreviewDialog";
-import {
-  LaunchAffirmationDialog,
-  type AffirmationPrompt,
-} from "@/components/LaunchAffirmationDialog";
 
 export function CatalogDetail() {
   const params = useParams<{ slug: string }>();
@@ -83,18 +79,13 @@ export function CatalogDetail() {
   const [launchTrigger, setLaunchTrigger] = useState<LaunchTrigger | null>(
     null,
   );
-  // Holds the snapshot the affirmation modal should render. Set by the
-  // server's 409 response or assembled locally for a manual re-confirm.
-  const [affirmationPrompt, setAffirmationPrompt] =
-    useState<AffirmationPrompt | null>(null);
-  // When the affirmation modal closes after a successful confirm, we
-  // automatically re-fire the launch the operator originally clicked.
-  const [pendingLaunch, setPendingLaunch] = useState<{
-    forcePreview: boolean;
-  } | null>(null);
   // When the user clicks "Edit before launch", we explicitly force preview mode
   // for that single click even if their saved preference is "direct".
   const [forcePreview, setForcePreview] = useState(false);
+  // When true the consolidated dialog opens in "re-affirm only" mode —
+  // the same review content is shown but the primary button records a
+  // fresh affirmation and closes without minting a launch.
+  const [reaffirmOnly, setReaffirmOnly] = useState(false);
   const [launchState, setLaunchState] = useState<
     | { status: "idle" }
     | { status: "launched"; url: string; toolName: string }
@@ -152,51 +143,43 @@ export function CatalogDetail() {
     });
   };
 
-  // Triggered by the launch button. If the affirmation gate is already
-  // satisfied we proceed straight into the existing preview/direct flow;
-  // otherwise we open the affirmation modal first and stash the launch
-  // intent so it auto-resumes once the operator confirms.
+  // Triggered by the launch button. After Task #125 the affirmation
+  // gate is rolled into the consolidated review dialog, so we just
+  // open it here. The dialog itself records the affirmation (when
+  // needed) before minting the launch.
   const launch = (opts?: { forcePreview?: boolean }) => {
     if (isLaunchingRef.current || launchTrigger) return;
     isLaunchingRef.current = true;
     setLaunchState({ status: "idle" });
-    const fp = !!opts?.forcePreview;
-    if (!hasValidAffirmation) {
-      // Build the prompt locally from the data we already have. If we're
-      // missing anything (rare; would mean profile or presets haven't
-      // loaded yet), we let the launch attempt fall through and surface
-      // the server's 409 below.
-      if (activePreset && contextBlock) {
-        setAffirmationPrompt({
-          presetId: activePreset.id,
-          contextBlockVersion: contextBlock.version,
-          preset: activePreset,
-          contextBlock,
-        });
-        setPendingLaunch({ forcePreview: fp });
-        return;
-      }
-    }
-    setForcePreview(fp);
+    setForcePreview(!!opts?.forcePreview);
+    setReaffirmOnly(false);
     setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
   };
 
-  // Click handler for the "Re-confirm preset for this session" link. Just
-  // opens the modal without queuing a launch — the operator wants to
-  // freshen the affirmation, not launch anything yet.
+  // Click handler for the "Re-confirm preset for this session" link.
+  // Opens the same consolidated dialog in re-affirm-only mode — the
+  // primary button records a fresh affirmation and closes without
+  // minting a launch.
   const reaffirm = () => {
     if (!activePreset || !contextBlock) return;
-    setPendingLaunch(null);
-    setAffirmationPrompt({
-      presetId: activePreset.id,
-      contextBlockVersion: contextBlock.version,
-      preset: activePreset,
-      contextBlock,
-    });
+    if (isLaunchingRef.current || launchTrigger) return;
+    isLaunchingRef.current = true;
+    setLaunchState({ status: "idle" });
+    setForcePreview(true);
+    setReaffirmOnly(true);
+    setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
   };
 
   const launchPref = profile?.launchPreference ?? "preview";
-  const showPreview = forcePreview || launchPref !== "direct";
+  // The "skip preview" short-circuit only applies when the operator
+  // already has a server-valid affirmation. If they've toggled "direct"
+  // but their affirmation is missing/expired, we still need to show
+  // the consolidated dialog so they can re-affirm before launching.
+  const showPreview =
+    reaffirmOnly ||
+    forcePreview ||
+    launchPref !== "direct" ||
+    !hasValidAffirmation;
   const isLocal = tool.hostingType === "local_install";
   const cbConfirmed = !!contextBlock?.confirmedAt;
 
@@ -451,9 +434,14 @@ export function CatalogDetail() {
       <LaunchPreviewDialog
         trigger={launchTrigger}
         showPreview={showPreview}
+        presetSnapshot={activePreset}
+        contextBlockSnapshot={contextBlock}
+        hasValidAffirmation={hasValidAffirmation}
+        mode={reaffirmOnly ? "reaffirm" : "launch"}
         onClose={() => {
           setLaunchTrigger(null);
           setForcePreview(false);
+          setReaffirmOnly(false);
           isLaunchingRef.current = false;
         }}
         onLaunched={(r) => {
@@ -472,30 +460,6 @@ export function CatalogDetail() {
               url: r.launchUrl,
               toolName: r.toolName,
             });
-          }
-        }}
-      />
-
-      <LaunchAffirmationDialog
-        prompt={affirmationPrompt}
-        onClose={() => {
-          setAffirmationPrompt(null);
-          setPendingLaunch(null);
-          isLaunchingRef.current = false;
-        }}
-        onAffirmed={() => {
-          // The cached affirmation status was invalidated inside the
-          // dialog; close ourselves and resume the queued launch (if any).
-          const next = pendingLaunch;
-          setAffirmationPrompt(null);
-          setPendingLaunch(null);
-          if (next) {
-            setForcePreview(next.forcePreview);
-            setLaunchTrigger({ toolId: tool.id, toolName: tool.name });
-          } else {
-            // No queued launch — release the in-flight ref so the user
-            // can launch fresh after a re-affirmation.
-            isLaunchingRef.current = false;
           }
         }}
       />
