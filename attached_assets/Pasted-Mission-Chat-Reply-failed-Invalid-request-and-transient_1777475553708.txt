@@ -1,0 +1,30 @@
+Mission Chat: "Reply failed: Invalid request" and transient "Server returned 502" on Send
+What & Why
+After task #149 recovered the API Server from its orphan-port state, the original 404 on Send is gone — the request now reaches the API. Two new failures replaced it, both surfaced in the Mission Chat UI as a Reply failed: … toast/inline error:
+
+Issue 1 — Reply failed: Invalid request (HTTP 400, reproducible)
+The first user message in a freshly launched Mission Chat session is rejected by the API.
+
+Reproduced live during #149 verification (timestamps from the api-server log on 2026-04-29):
+
+15:08:02.466 POST /api/tools/<toolId>/launch → 200 (launch created)
+15:08:03.156 POST /api/tools/context-exchange → 200
+15:08:06.583 POST /api/tools/mission-chat/messages → 400 {"error":"Invalid request"} ← user-visible failure
+The 400 is emitted by the Zod parser in the route handler:
+
+// artifacts/api-server/src/routes/launches.ts:1074-1078
+const parsed = MissionChatBody.safeParse(req.body);
+if (!parsed.success) {
+  res.status(400).json({ error: "Invalid request" });
+  return;
+}
+
+MissionChatBody (defined at launches.ts:1060) requires:
+
+{ sessionToken: string (min 1), messages: [{ role, content }, ...] }
+
+The frontend send is at artifacts/mission-chat/src/App.tsx:469, posting { sessionToken, ... } (sessionToken captured at App.tsx:428-429 from launch-state). Either the body shape (e.g. message role/content keys, missing/empty messages, or extra/missing fields) or the sessionToken value doesn't satisfy the server schema on the first turn.
+
+Issue 2 — Reply failed: Server returned 502 (transient, not currently reproducible)
+Seen once when Send was clicked seconds after the API Server's restart at 15:07:17. The proxy received the POST while the upstream listener was either still binding or had just dropped its first TCP connection, and returned 502. After the API Server was fully up, subsequent sends produced the deterministic 400 above instead. Likely a race between proxy retries and API-Server cold-start; not seen in the steady state. Mention here only so it's captured — the fix for Issue 1 is the priority.
+
