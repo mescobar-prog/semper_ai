@@ -242,6 +242,7 @@ export async function runProfileSplitMigration(): Promise<void> {
       ADD COLUMN IF NOT EXISTS git_repo_owner varchar,
       ADD COLUMN IF NOT EXISTS git_repo_name varchar,
       ADD COLUMN IF NOT EXISTS git_default_branch varchar,
+      ADD COLUMN IF NOT EXISTS git_selected_branch varchar,
       ADD COLUMN IF NOT EXISTS git_latest_release_tag varchar,
       ADD COLUMN IF NOT EXISTS git_latest_commit_sha varchar,
       ADD COLUMN IF NOT EXISTS git_license_spdx varchar,
@@ -291,4 +292,31 @@ export async function runProfileSplitMigration(): Promise<void> {
   `);
 
   logger.info("profile-split migration complete");
+
+  await runGitSelectedBranchBackfill();
+}
+
+/**
+ * Idempotent backfill: tools imported before per-branch GitSync existed
+ * stored only `git_default_branch` (the repo's default at import time).
+ * Mirror that into `git_selected_branch` so the admin UI shows a branch
+ * chip immediately and re-syncs target the same branch the catalog has
+ * historically been hosted from. Only touches GitHub-linked tools whose
+ * selected branch is still NULL — running this repeatedly is a no-op.
+ */
+export async function runGitSelectedBranchBackfill(): Promise<void> {
+  const result = await db.execute(sql`
+    UPDATE tools
+       SET git_selected_branch = git_default_branch
+     WHERE git_selected_branch IS NULL
+       AND git_default_branch IS NOT NULL
+       AND git_repo_owner IS NOT NULL
+       AND git_repo_name IS NOT NULL
+  `);
+  // node-postgres returns rowCount; drizzle wraps it.
+  const rowCount =
+    (result as unknown as { rowCount?: number | null }).rowCount ?? 0;
+  if (rowCount > 0) {
+    logger.info({ rowCount }, "git_selected_branch backfill complete");
+  }
 }

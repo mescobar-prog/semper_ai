@@ -67,6 +67,11 @@ export const toolsTable = pgTable(
     gitRepoOwner: varchar("git_repo_owner"),
     gitRepoName: varchar("git_repo_name"),
     gitDefaultBranch: varchar("git_default_branch"),
+    // The branch the admin chose to host on the catalog. Tracked separately
+    // from `gitDefaultBranch` (which mirrors the repo's true default branch)
+    // so admins can publish from `develop`, `release/*`, etc. Re-syncs pull
+    // commit + README from this branch.
+    gitSelectedBranch: varchar("git_selected_branch"),
     gitLatestReleaseTag: varchar("git_latest_release_tag"),
     gitLatestCommitSha: varchar("git_latest_commit_sha"),
     gitLicenseSpdx: varchar("git_license_spdx"),

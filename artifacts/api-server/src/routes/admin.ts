@@ -23,9 +23,11 @@ import {
 import { requireAdmin } from "../middlewares/requireAuth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import {
+  GithubBranchNotFoundError,
   GithubNotConnectedError,
   GithubNotFoundError,
   getRepoMetadata,
+  listBranches,
   listRepos,
 } from "../lib/github";
 import { draftToolText } from "../lib/gemini-helpers";
@@ -120,6 +122,7 @@ router.get("/admin/tools", requireAdmin, async (_req, res) => {
       gitRepoOwner: toolsTable.gitRepoOwner,
       gitRepoName: toolsTable.gitRepoName,
       gitDefaultBranch: toolsTable.gitDefaultBranch,
+      gitSelectedBranch: toolsTable.gitSelectedBranch,
       gitLatestReleaseTag: toolsTable.gitLatestReleaseTag,
       gitLatestCommitSha: toolsTable.gitLatestCommitSha,
       gitLicenseSpdx: toolsTable.gitLicenseSpdx,
@@ -190,6 +193,7 @@ function buildToolWriteValues(
     gitRepoOwner: data.gitRepoOwner ?? null,
     gitRepoName: data.gitRepoName ?? null,
     gitDefaultBranch: data.gitDefaultBranch ?? null,
+    gitSelectedBranch: data.gitSelectedBranch ?? null,
     gitLatestReleaseTag: data.gitLatestReleaseTag ?? null,
     gitLatestCommitSha: data.gitLatestCommitSha ?? null,
     gitLicenseSpdx: data.gitLicenseSpdx ?? null,
@@ -307,6 +311,7 @@ async function loadToolDetailRow(toolId: string): Promise<ToolDetailRow | null> 
       gitRepoOwner: toolsTable.gitRepoOwner,
       gitRepoName: toolsTable.gitRepoName,
       gitDefaultBranch: toolsTable.gitDefaultBranch,
+      gitSelectedBranch: toolsTable.gitSelectedBranch,
       gitLatestReleaseTag: toolsTable.gitLatestReleaseTag,
       gitLatestCommitSha: toolsTable.gitLatestCommitSha,
       gitLicenseSpdx: toolsTable.gitLicenseSpdx,
@@ -494,13 +499,48 @@ router.get("/admin/github/repos", requireAdmin, async (req, res) => {
 router.get("/admin/github/repo-metadata", requireAdmin, async (req, res) => {
   const owner = typeof req.query.owner === "string" ? req.query.owner : "";
   const repo = typeof req.query.repo === "string" ? req.query.repo : "";
+  const branch =
+    typeof req.query.branch === "string" && req.query.branch.length > 0
+      ? req.query.branch
+      : undefined;
   if (!owner || !repo) {
     res.status(400).json({ error: "owner and repo are required" });
     return;
   }
   try {
-    const metadata = await getRepoMetadata(owner, repo);
+    const metadata = await getRepoMetadata(owner, repo, branch);
     res.json(metadata);
+  } catch (err) {
+    if (err instanceof GithubBranchNotFoundError) {
+      res.status(404).json({ error: err.message });
+      return;
+    }
+    if (err instanceof GithubNotFoundError) {
+      res.status(404).json({ error: err.message });
+      return;
+    }
+    if (err instanceof GithubNotConnectedError) {
+      res.status(503).json({ error: err.message });
+      return;
+    }
+    req.log.error(
+      { err, owner, repo, branch },
+      "Failed to fetch repo metadata",
+    );
+    res.status(500).json({ error: "Failed to fetch repo metadata" });
+  }
+});
+
+router.get("/admin/github/branches", requireAdmin, async (req, res) => {
+  const owner = typeof req.query.owner === "string" ? req.query.owner : "";
+  const repo = typeof req.query.repo === "string" ? req.query.repo : "";
+  if (!owner || !repo) {
+    res.status(400).json({ error: "owner and repo are required" });
+    return;
+  }
+  try {
+    const branches = await listBranches(owner, repo);
+    res.json(branches);
   } catch (err) {
     if (err instanceof GithubNotFoundError) {
       res.status(404).json({ error: err.message });
@@ -510,8 +550,8 @@ router.get("/admin/github/repo-metadata", requireAdmin, async (req, res) => {
       res.status(503).json({ error: err.message });
       return;
     }
-    req.log.error({ err, owner, repo }, "Failed to fetch repo metadata");
-    res.status(500).json({ error: "Failed to fetch repo metadata" });
+    req.log.error({ err, owner, repo }, "Failed to list repo branches");
+    res.status(500).json({ error: "Failed to list repo branches" });
   }
 });
 
@@ -535,15 +575,30 @@ router.post(
         .json({ error: "Tool is not linked to a GitHub repo" });
       return;
     }
+    // Re-sync hits the branch the admin chose to host on the catalog. Fall
+    // back to the previously-known repo default branch for tools imported
+    // before branch selection existed; if that's also missing, the
+    // metadata helper will resolve to the repo's current default branch.
+    const branchToSync =
+      existing.gitSelectedBranch ?? existing.gitDefaultBranch ?? null;
     try {
       const meta = await getRepoMetadata(
         existing.gitRepoOwner,
         existing.gitRepoName,
+        branchToSync,
       );
       await db
         .update(toolsTable)
         .set({
+          // Always refresh `gitDefaultBranch` to mirror the repo's true
+          // default branch — even when we host a different branch — so the
+          // picker can keep showing the correct "(default)" label.
           gitDefaultBranch: meta.defaultBranch,
+          // Persist the branch we synced against. If the admin had no
+          // selected branch yet, lock in the repo default so future syncs
+          // are stable when the upstream default flips.
+          gitSelectedBranch:
+            existing.gitSelectedBranch ?? branchToSync ?? meta.defaultBranch,
           gitLatestReleaseTag: meta.latestReleaseTag,
           gitLatestCommitSha: meta.latestCommitSha,
           gitLicenseSpdx: meta.licenseSpdx,
@@ -560,6 +615,17 @@ router.post(
       }
       res.json(serializeToolDetail(row));
     } catch (err) {
+      if (err instanceof GithubBranchNotFoundError) {
+        // 422 keeps it distinct from a missing repo (404) so the admin UI
+        // can prompt for a new branch instead of treating the whole link
+        // as broken.
+        res.status(422).json({
+          error: err.message,
+          code: "branch_not_found",
+          branch: err.branch,
+        });
+        return;
+      }
       if (err instanceof GithubNotFoundError) {
         res.status(404).json({ error: err.message });
         return;

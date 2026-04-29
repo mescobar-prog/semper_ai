@@ -1473,12 +1473,51 @@ paths:
           in: query
           required: true
           schema: { type: string }
+        - name: branch
+          in: query
+          required: false
+          description: >
+            Optional branch to scope the README and latest-commit fetch to.
+            Defaults to the repo's true default branch when omitted.
+          schema: { type: string }
       responses:
         '200':
           description: Repo metadata
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GithubRepoMetadata' }
+        '404':
+          description: Repo or requested branch not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '503':
+          description: GitHub integration not available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /admin/github/branches:
+    get:
+      tags: [Admin]
+      operationId: adminListGithubBranches
+      summary: List branches for a single repo (used by the import branch picker)
+      parameters:
+        - name: owner
+          in: query
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Branches
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GithubBranchSummary' }
         '404':
           description: Repo not found or access denied
           content:
@@ -2266,9 +2305,9 @@ components:
              hostingType, installerUrl, installerObjectKey, installerFilename,
              installerSizeBytes, installerPlatform, installInstructions,
              localLaunchUrlPattern, installerDownloadUrl,
-             gitRepoOwner, gitRepoName, gitDefaultBranch, gitLatestReleaseTag,
-             gitLatestCommitSha, gitLicenseSpdx, gitStars, gitLastSyncedAt,
-             createdAt, updatedAt]
+             gitRepoOwner, gitRepoName, gitDefaultBranch, gitSelectedBranch,
+             gitLatestReleaseTag, gitLatestCommitSha, gitLicenseSpdx, gitStars,
+             gitLastSyncedAt, createdAt, updatedAt]
           properties:
             longDescription: { type: string }
             purpose:
@@ -2312,7 +2351,15 @@ components:
                 Set when an installer file is attached via object storage.
             gitRepoOwner: { type: [string, 'null'] }
             gitRepoName: { type: [string, 'null'] }
-            gitDefaultBranch: { type: [string, 'null'] }
+            gitDefaultBranch:
+              type: [string, 'null']
+              description: The repo's true default branch as reported by GitHub.
+            gitSelectedBranch:
+              type: [string, 'null']
+              description: >
+                The branch the admin chose to host on the catalog. Re-syncs
+                pull commit + README from this branch. Defaults to the repo's
+                default branch when set via the GitHub import flow.
             gitLatestReleaseTag: { type: [string, 'null'] }
             gitLatestCommitSha: { type: [string, 'null'] }
             gitLicenseSpdx: { type: [string, 'null'] }
@@ -2365,6 +2412,12 @@ components:
         gitRepoOwner: { type: [string, 'null'] }
         gitRepoName: { type: [string, 'null'] }
         gitDefaultBranch: { type: [string, 'null'] }
+        gitSelectedBranch:
+          type: [string, 'null']
+          description: >
+            The branch the admin chose to host. Persisted on the tool so
+            re-syncs use it instead of always falling back to the repo's
+            default branch.
         gitLatestReleaseTag: { type: [string, 'null'] }
         gitLatestCommitSha: { type: [string, 'null'] }
         gitLicenseSpdx: { type: [string, 'null'] }
@@ -2382,6 +2435,18 @@ components:
         private: { type: boolean }
         stars: { type: integer }
         language: { type: [string, 'null'] }
+
+    GithubBranchSummary:
+      type: object
+      required: [name, isDefault, protected]
+      properties:
+        name: { type: string }
+        isDefault:
+          type: boolean
+          description: True if this branch is the repo's default branch.
+        protected:
+          type: boolean
+          description: True if the branch is marked protected on GitHub.
 
     GithubRepoMetadata:
       type: object

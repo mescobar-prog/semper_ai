@@ -20,6 +20,7 @@ import type {
   AdminContextBlockConfirmationsResponse,
   AdminGetGithubRepoMetadataParams,
   AdminHideReviewRequest,
+  AdminListGithubBranchesParams,
   AdminListGithubReposParams,
   AdminListReviewsParams,
   AdminReviewListResponse,
@@ -50,6 +51,7 @@ import type {
   DraftToolTextResult,
   ErrorEnvelope,
   GetAutoIngestStatusParams,
+  GithubBranchSummary,
   GithubRepoMetadata,
   GithubRepoSummary,
   HandleBrowserLoginCallbackParams,
@@ -5025,6 +5027,109 @@ export function useAdminGetGithubRepoMetadata<
     params,
     options,
   );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List branches for a single repo (used by the import branch picker)
+ */
+export const getAdminListGithubBranchesUrl = (
+  params: AdminListGithubBranchesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/github/branches?${stringifiedParams}`
+    : `/api/admin/github/branches`;
+};
+
+export const adminListGithubBranches = async (
+  params: AdminListGithubBranchesParams,
+  options?: RequestInit,
+): Promise<GithubBranchSummary[]> => {
+  return customFetch<GithubBranchSummary[]>(
+    getAdminListGithubBranchesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminListGithubBranchesQueryKey = (
+  params?: AdminListGithubBranchesParams,
+) => {
+  return [`/api/admin/github/branches`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListGithubBranchesQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListGithubBranches>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: AdminListGithubBranchesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListGithubBranches>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListGithubBranchesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListGithubBranches>>
+  > = ({ signal }) =>
+    adminListGithubBranches(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListGithubBranches>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListGithubBranchesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListGithubBranches>>
+>;
+export type AdminListGithubBranchesQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary List branches for a single repo (used by the import branch picker)
+ */
+
+export function useAdminListGithubBranches<
+  TData = Awaited<ReturnType<typeof adminListGithubBranches>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  params: AdminListGithubBranchesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListGithubBranches>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListGithubBranchesQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

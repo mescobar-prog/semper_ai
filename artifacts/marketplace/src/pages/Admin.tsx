@@ -21,6 +21,7 @@ import {
   useCompleteInstallerUpload,
   useAbortInstallerUpload,
   adminGetGithubRepoMetadata,
+  adminListGithubBranches,
   getAdminListToolsQueryKey,
   getListToolsQueryKey,
   getAdminListGithubReposQueryKey,
@@ -34,6 +35,7 @@ import type {
   SubmissionDetail,
   AdminToolReview,
   AdminContextBlockConfirmation,
+  GithubBranchSummary,
   GithubRepoMetadata,
   GithubRepoSummary,
 } from "@workspace/api-client-react";
@@ -86,6 +88,7 @@ const EMPTY_TOOL: ToolUpsert = {
   gitRepoOwner: null,
   gitRepoName: null,
   gitDefaultBranch: null,
+  gitSelectedBranch: null,
   gitLatestReleaseTag: null,
   gitLatestCommitSha: null,
   gitLicenseSpdx: null,
@@ -697,6 +700,7 @@ function CatalogManagement() {
         gitRepoOwner: t.gitRepoOwner,
         gitRepoName: t.gitRepoName,
         gitDefaultBranch: t.gitDefaultBranch,
+        gitSelectedBranch: t.gitSelectedBranch,
         gitLatestReleaseTag: t.gitLatestReleaseTag,
         gitLatestCommitSha: t.gitLatestCommitSha,
         gitLicenseSpdx: t.gitLicenseSpdx,
@@ -748,6 +752,7 @@ function CatalogManagement() {
               data: {
                 ...editing.data,
                 gitDefaultBranch: t.gitDefaultBranch,
+                gitSelectedBranch: t.gitSelectedBranch,
                 gitLatestReleaseTag: t.gitLatestReleaseTag,
                 gitLatestCommitSha: t.gitLatestCommitSha,
                 gitLicenseSpdx: t.gitLicenseSpdx,
@@ -1147,13 +1152,26 @@ function SourceSection({
   onReadmeFetched: (readme: string | null) => void;
   onSynced: (tool: ToolDetail) => void;
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // The picker has two phases. "repo" lists matching repos; "branch"
+  // appears once a repo has been chosen so the admin confirms (or
+  // changes) the branch we'll host. "branch-only" reopens just the
+  // branch picker for the already-linked repo so an admin can switch
+  // branches without re-picking the repo.
+  type PickerState =
+    | { phase: "closed" }
+    | { phase: "repo" }
+    | { phase: "branch"; repo: GithubRepoSummary }
+    | {
+        phase: "branch-only";
+        repo: { owner: string; name: string };
+      };
+  const [picker, setPicker] = useState<PickerState>({ phase: "closed" });
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const reposParams = { search: debouncedSearch || undefined, page: 1 };
   const reposQuery = useAdminListGithubRepos(reposParams, {
     query: {
-      enabled: pickerOpen,
+      enabled: picker.phase === "repo",
       retry: false,
       queryKey: getAdminListGithubReposQueryKey(reposParams),
     },
@@ -1186,17 +1204,24 @@ function SourceSection({
     }, 350);
   }
 
-  async function importRepo(r: GithubRepoSummary) {
+  async function applyImport(
+    owner: string,
+    repoName: string,
+    branch: string,
+  ) {
     setImporting(true);
     setImportError(null);
     try {
       const meta: GithubRepoMetadata = await adminGetGithubRepoMetadata({
-        owner: r.owner,
-        repo: r.name,
+        owner,
+        repo: repoName,
+        branch,
       });
       onReadmeFetched(meta.readmeMarkdown);
       onChange({
         ...data,
+        // Only seed the form fields on first import — switching branches
+        // shouldn't clobber an admin's hand-edited name/slug/description.
         name: data.name || meta.name,
         vendor: data.vendor || meta.owner,
         slug:
@@ -1209,12 +1234,13 @@ function SourceSection({
         gitRepoOwner: meta.owner,
         gitRepoName: meta.name,
         gitDefaultBranch: meta.defaultBranch,
+        gitSelectedBranch: branch,
         gitLatestReleaseTag: meta.latestReleaseTag,
         gitLatestCommitSha: meta.latestCommitSha,
         gitLicenseSpdx: meta.licenseSpdx,
         gitStars: meta.stars,
       });
-      setPickerOpen(false);
+      setPicker({ phase: "closed" });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -1237,6 +1263,7 @@ function SourceSection({
           const meta = await adminGetGithubRepoMetadata({
             owner: updated.gitRepoOwner,
             repo: updated.gitRepoName,
+            branch: updated.gitSelectedBranch ?? undefined,
           });
           onReadmeFetched(meta.readmeMarkdown);
         }
@@ -1245,9 +1272,36 @@ function SourceSection({
       }
       onSynced(updated);
     } catch (err) {
+      // The API server returns HTTP 422 with `code: "branch_not_found"` and
+      // the dead branch name when the previously-hosted branch is gone.
+      // Surface a useful message AND reopen the branch picker so the admin
+      // can immediately switch to a different branch instead of being stuck
+      // staring at a dead-end error.
+      const apiErr = err as {
+        status?: number;
+        data?: { code?: string; branch?: string; error?: string };
+      };
+      if (
+        apiErr?.status === 422 &&
+        apiErr?.data?.code === "branch_not_found" &&
+        data.gitRepoOwner &&
+        data.gitRepoName
+      ) {
+        setSyncError(
+          apiErr.data.error ??
+            `The branch "${apiErr.data.branch}" no longer exists on this repo. Pick a new branch.`,
+        );
+        setPicker({
+          phase: "branch-only",
+          repo: { owner: data.gitRepoOwner, name: data.gitRepoName },
+        });
+        return;
+      }
       setSyncError(err instanceof Error ? err.message : "Sync failed");
     }
   }
+
+  const pickerOpen = picker.phase !== "closed";
 
   return (
     <div className="space-y-3">
@@ -1255,7 +1309,7 @@ function SourceSection({
         {!pickerOpen && (
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onClick={() => setPicker({ phase: "repo" })}
             className="h-9 px-4 rounded-md border border-primary/40 text-primary text-sm hover:bg-primary/10"
           >
             {data.gitRepoOwner ? "Switch GitHub repo" : "Import from GitHub"}
@@ -1271,6 +1325,36 @@ function SourceSection({
             >
               {data.gitRepoOwner}/{data.gitRepoName}
             </a>
+            {data.gitSelectedBranch && (
+              <span className="text-[10px] text-muted-foreground font-mono inline-flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded bg-background/60 border border-border">
+                  branch: {data.gitSelectedBranch}
+                </span>
+                {data.gitDefaultBranch &&
+                  data.gitSelectedBranch !== data.gitDefaultBranch && (
+                    <span className="text-amber-400/80">
+                      (repo default: {data.gitDefaultBranch})
+                    </span>
+                  )}
+              </span>
+            )}
+            {!pickerOpen && (
+              <button
+                type="button"
+                onClick={() =>
+                  setPicker({
+                    phase: "branch-only",
+                    repo: {
+                      owner: data.gitRepoOwner!,
+                      name: data.gitRepoName!,
+                    },
+                  })
+                }
+                className="h-8 px-3 rounded-md border border-border text-xs hover:bg-accent"
+              >
+                Change branch
+              </button>
+            )}
             {data.gitLatestReleaseTag && (
               <span className="text-[10px] text-muted-foreground font-mono">
                 release {data.gitLatestReleaseTag}
@@ -1299,6 +1383,7 @@ function SourceSection({
                   gitRepoOwner: null,
                   gitRepoName: null,
                   gitDefaultBranch: null,
+                  gitSelectedBranch: null,
                   gitLatestReleaseTag: null,
                   gitLatestCommitSha: null,
                   gitLicenseSpdx: null,
@@ -1314,7 +1399,7 @@ function SourceSection({
         )}
       </div>
       {syncError && <ErrorBox>{syncError}</ErrorBox>}
-      {pickerOpen && (
+      {picker.phase === "repo" && (
         <div className="bg-background/40 border border-border rounded-md p-3 space-y-2">
           <div className="flex gap-2 items-center">
             <input
@@ -1327,7 +1412,7 @@ function SourceSection({
             />
             <button
               type="button"
-              onClick={() => setPickerOpen(false)}
+              onClick={() => setPicker({ phase: "closed" })}
               className="h-9 px-3 rounded-md border border-border text-xs"
             >
               Close
@@ -1373,11 +1458,10 @@ function SourceSection({
                   </div>
                   <button
                     type="button"
-                    disabled={importing}
-                    onClick={() => importRepo(r)}
-                    className="h-8 px-3 rounded-md bg-primary/20 text-primary text-xs hover:bg-primary/30 disabled:opacity-50"
+                    onClick={() => setPicker({ phase: "branch", repo: r })}
+                    className="h-8 px-3 rounded-md bg-primary/20 text-primary text-xs hover:bg-primary/30"
                   >
-                    Import
+                    Choose branch
                   </button>
                 </li>
               ))}
@@ -1386,6 +1470,210 @@ function SourceSection({
           {importError && <ErrorBox>{importError}</ErrorBox>}
         </div>
       )}
+      {(picker.phase === "branch" || picker.phase === "branch-only") && (
+        <BranchPicker
+          owner={
+            picker.phase === "branch" ? picker.repo.owner : picker.repo.owner
+          }
+          repo={
+            picker.phase === "branch" ? picker.repo.name : picker.repo.name
+          }
+          // For initial import, no current branch is selected yet — let the
+          // picker default to the repo's default. For branch-only switches,
+          // start the radio on whatever the form currently has.
+          currentBranch={
+            picker.phase === "branch-only"
+              ? data.gitSelectedBranch ?? null
+              : null
+          }
+          repoDefaultBranchHint={
+            picker.phase === "branch"
+              ? picker.repo.defaultBranch
+              : data.gitDefaultBranch ?? null
+          }
+          mode={picker.phase === "branch" ? "import" : "switch"}
+          importing={importing}
+          importError={importError}
+          onCancel={() => {
+            setImportError(null);
+            // Going back from initial-import branch step lands on the repo
+            // list again so the admin can pick a different repo. From the
+            // dedicated branch-switch dialog we just close the picker.
+            setPicker(
+              picker.phase === "branch"
+                ? { phase: "repo" }
+                : { phase: "closed" },
+            );
+          }}
+          onConfirm={(branch) => {
+            if (picker.phase === "branch") {
+              return applyImport(picker.repo.owner, picker.repo.name, branch);
+            }
+            return applyImport(picker.repo.owner, picker.repo.name, branch);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Branch picker ───────────────────────────────────────────────────────
+function BranchPicker({
+  owner,
+  repo,
+  currentBranch,
+  repoDefaultBranchHint,
+  mode,
+  importing,
+  importError,
+  onCancel,
+  onConfirm,
+}: {
+  owner: string;
+  repo: string;
+  currentBranch: string | null;
+  repoDefaultBranchHint: string | null;
+  mode: "import" | "switch";
+  importing: boolean;
+  importError: string | null;
+  onCancel: () => void;
+  onConfirm: (branch: string) => void;
+}) {
+  const [branches, setBranches] = useState<GithubBranchSummary[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [selected, setSelected] = useState<string | null>(currentBranch);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    adminListGithubBranches({ owner, repo })
+      .then((list) => {
+        if (cancelled) return;
+        setBranches(list);
+        // Pre-select: existing selected branch (if it's still in the list),
+        // else the repo's default branch, else the first item.
+        const fromList = (name: string | null) =>
+          name && list.some((b) => b.name === name) ? name : null;
+        const def = list.find((b) => b.isDefault)?.name ?? null;
+        setSelected(
+          fromList(currentBranch) ??
+            fromList(repoDefaultBranchHint) ??
+            def ??
+            list[0]?.name ??
+            null,
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(
+          err instanceof Error ? err.message : "Failed to load branches",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // We intentionally only refetch when the repo identity changes — the
+    // currentBranch / hint just seed the initial selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, repo]);
+
+  const filtered = (branches ?? []).filter((b) =>
+    filter ? b.name.toLowerCase().includes(filter.toLowerCase()) : true,
+  );
+
+  return (
+    <div className="bg-background/40 border border-border rounded-md p-3 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-mono text-muted-foreground">
+          {mode === "import" ? "Pick a branch to host" : "Switch branch"} ·{" "}
+          <span className="text-primary">
+            {owner}/{repo}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-8 px-3 rounded-md border border-border text-xs"
+        >
+          {mode === "import" ? "Back" : "Close"}
+        </button>
+      </div>
+      {loading && (
+        <div className="text-xs text-muted-foreground font-mono">
+          Loading branches…
+        </div>
+      )}
+      {loadError && <ErrorBox>{loadError}</ErrorBox>}
+      {branches && branches.length === 0 && !loading && (
+        <div className="text-xs text-muted-foreground font-mono">
+          This repo has no branches.
+        </div>
+      )}
+      {branches && branches.length > 0 && (
+        <>
+          {branches.length > 8 && (
+            <input
+              type="text"
+              placeholder="Filter branches…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className={inputCls}
+            />
+          )}
+          <ul className="max-h-60 overflow-y-auto divide-y divide-border">
+            {filtered.map((b) => (
+              <li key={b.name}>
+                <label className="flex items-center gap-3 py-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="branch-pick"
+                    checked={selected === b.name}
+                    onChange={() => setSelected(b.name)}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm font-mono truncate">{b.name}</span>
+                  {b.isDefault && (
+                    <span className="text-[10px] uppercase tracking-wider text-primary font-mono">
+                      default
+                    </span>
+                  )}
+                  {b.protected && (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+                      protected
+                    </span>
+                  )}
+                </label>
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li className="py-2 text-xs text-muted-foreground font-mono">
+                No branches match "{filter}".
+              </li>
+            )}
+          </ul>
+        </>
+      )}
+      {importError && <ErrorBox>{importError}</ErrorBox>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          disabled={!selected || importing || loading}
+          onClick={() => selected && onConfirm(selected)}
+          className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
+        >
+          {importing
+            ? "Loading…"
+            : mode === "import"
+            ? "Import this branch"
+            : "Use this branch"}
+        </button>
+      </div>
     </div>
   );
 }

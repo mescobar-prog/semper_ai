@@ -18,6 +18,21 @@ export class GithubNotFoundError extends Error {
   }
 }
 
+export class GithubBranchNotFoundError extends Error {
+  constructor(
+    public readonly owner: string,
+    public readonly repo: string,
+    public readonly branch: string,
+    msg?: string,
+  ) {
+    super(
+      msg ??
+        `Branch "${branch}" no longer exists on ${owner}/${repo}. Pick a different branch and try again.`,
+    );
+    this.name = "GithubBranchNotFoundError";
+  }
+}
+
 function getConnectors(): ReplitConnectors {
   // Always construct a fresh client; the SDK refreshes tokens internally.
   return new ReplitConnectors();
@@ -126,10 +141,29 @@ interface ApiReadme {
   content: string;
   encoding: string;
 }
+interface ApiBranch {
+  name: string;
+  protected?: boolean;
+}
 
-async function getReadme(owner: string, repo: string): Promise<string | null> {
+export interface GithubBranchSummary {
+  name: string;
+  isDefault: boolean;
+  protected: boolean;
+}
+
+async function getReadme(
+  owner: string,
+  repo: string,
+  branch?: string,
+): Promise<string | null> {
+  // The README endpoint accepts `?ref=<branch>` to resolve against a specific
+  // branch instead of the repo's default branch.
+  const path = branch
+    ? `/repos/${owner}/${repo}/readme?ref=${encodeURIComponent(branch)}`
+    : `/repos/${owner}/${repo}/readme`;
   try {
-    const data = await ghJson<ApiReadme>(`/repos/${owner}/${repo}/readme`);
+    const data = await ghJson<ApiReadme>(path);
     if (data.encoding === "base64") {
       try {
         return Buffer.from(data.content, "base64").toString("utf8");
@@ -142,6 +176,34 @@ async function getReadme(owner: string, repo: string): Promise<string | null> {
     if (err instanceof GithubNotFoundError) return null;
     throw err;
   }
+}
+
+export async function listBranches(
+  owner: string,
+  repo: string,
+): Promise<GithubBranchSummary[]> {
+  // Walk all pages of /branches (per_page=100, GitHub max). A short-page
+  // response signals we've hit the end. The hard cap is a paranoia stop
+  // — even huge monorepos rarely have >5k branches, and we don't want a
+  // pathological repo to peg the API server forever.
+  const collected: ApiBranch[] = [];
+  const PER_PAGE = 100;
+  const MAX_PAGES = 50; // 5,000 branches, far beyond any realistic repo
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const data = await ghJson<ApiBranch[]>(
+      `/repos/${owner}/${repo}/branches?per_page=${PER_PAGE}&page=${page}`,
+    );
+    collected.push(...data);
+    if (data.length < PER_PAGE) break;
+  }
+  // Look up the repo's default branch so the picker can pre-select it.
+  const repoData = await ghJson<ApiRepo>(`/repos/${owner}/${repo}`);
+  const defaultBranch = repoData.default_branch;
+  return collected.map((b) => ({
+    name: b.name,
+    isDefault: b.name === defaultBranch,
+    protected: b.protected === true,
+  }));
 }
 
 async function getLatestReleaseTag(
@@ -164,30 +226,48 @@ async function getLatestCommitSha(
   repo: string,
   branch: string,
 ): Promise<string | null> {
-  try {
-    const data = await ghJson<ApiCommit>(
-      `/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`,
-    );
-    return data.sha ?? null;
-  } catch (err) {
-    if (err instanceof GithubNotFoundError) return null;
-    throw err;
-  }
+  // Re-throw NotFound here so the caller can convert it into a clear
+  // "branch missing" error — silently returning null would let an outdated
+  // branch selection survive a re-sync without surfacing the problem.
+  const data = await ghJson<ApiCommit>(
+    `/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`,
+  );
+  return data.sha ?? null;
 }
 
 export async function getRepoMetadata(
   owner: string,
   repo: string,
+  branchOverride?: string | null,
 ): Promise<GithubRepoMetadata> {
   const r = await ghJson<ApiRepo>(`/repos/${owner}/${repo}`);
   const summary = toSummary(r);
-  const [readme, releaseTag, commitSha] = await Promise.all([
-    getReadme(owner, repo),
+  const branch =
+    branchOverride && branchOverride.length > 0
+      ? branchOverride
+      : summary.defaultBranch;
+  let commitSha: string | null;
+  try {
+    commitSha = await getLatestCommitSha(owner, repo, branch);
+  } catch (err) {
+    // The /commits/{ref} endpoint returns 404 when the branch is gone.
+    // Surface this as a typed error so callers can show an actionable
+    // message and re-prompt the admin to pick a different branch instead
+    // of silently falling back to the repo's default branch.
+    if (err instanceof GithubNotFoundError) {
+      throw new GithubBranchNotFoundError(owner, repo, branch);
+    }
+    throw err;
+  }
+  const [readme, releaseTag] = await Promise.all([
+    getReadme(owner, repo, branch),
     getLatestReleaseTag(owner, repo),
-    getLatestCommitSha(owner, repo, summary.defaultBranch),
   ]);
   return {
     ...summary,
+    // The summary already carries the repo's true default branch in
+    // `defaultBranch`; the README/commit/etc above are scoped to the
+    // requested branch (which may be the same).
     licenseSpdx: r.license?.spdx_id ?? null,
     latestReleaseTag: releaseTag,
     latestCommitSha: commitSha,

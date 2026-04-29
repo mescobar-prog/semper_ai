@@ -980,7 +980,16 @@ export const GetToolBySlugResponse = zod
         ),
       gitRepoOwner: zod.string().nullable(),
       gitRepoName: zod.string().nullable(),
-      gitDefaultBranch: zod.string().nullable(),
+      gitDefaultBranch: zod
+        .string()
+        .nullable()
+        .describe("The repo's true default branch as reported by GitHub."),
+      gitSelectedBranch: zod
+        .string()
+        .nullable()
+        .describe(
+          "The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.\n",
+        ),
       gitLatestReleaseTag: zod.string().nullable(),
       gitLatestCommitSha: zod.string().nullable(),
       gitLicenseSpdx: zod.string().nullable(),
@@ -2088,7 +2097,16 @@ export const AdminListToolsResponseItem = zod
         ),
       gitRepoOwner: zod.string().nullable(),
       gitRepoName: zod.string().nullable(),
-      gitDefaultBranch: zod.string().nullable(),
+      gitDefaultBranch: zod
+        .string()
+        .nullable()
+        .describe("The repo's true default branch as reported by GitHub."),
+      gitSelectedBranch: zod
+        .string()
+        .nullable()
+        .describe(
+          "The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.\n",
+        ),
       gitLatestReleaseTag: zod.string().nullable(),
       gitLatestCommitSha: zod.string().nullable(),
       gitLicenseSpdx: zod.string().nullable(),
@@ -2134,6 +2152,12 @@ export const CreateToolBody = zod.object({
   gitRepoOwner: zod.string().nullish(),
   gitRepoName: zod.string().nullish(),
   gitDefaultBranch: zod.string().nullish(),
+  gitSelectedBranch: zod
+    .string()
+    .nullish()
+    .describe(
+      "The branch the admin chose to host. Persisted on the tool so re-syncs use it instead of always falling back to the repo's default branch.\n",
+    ),
   gitLatestReleaseTag: zod.string().nullish(),
   gitLatestCommitSha: zod.string().nullish(),
   gitLicenseSpdx: zod.string().nullish(),
@@ -2204,7 +2228,16 @@ export const CreateToolResponse = zod
         ),
       gitRepoOwner: zod.string().nullable(),
       gitRepoName: zod.string().nullable(),
-      gitDefaultBranch: zod.string().nullable(),
+      gitDefaultBranch: zod
+        .string()
+        .nullable()
+        .describe("The repo's true default branch as reported by GitHub."),
+      gitSelectedBranch: zod
+        .string()
+        .nullable()
+        .describe(
+          "The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.\n",
+        ),
       gitLatestReleaseTag: zod.string().nullable(),
       gitLatestCommitSha: zod.string().nullable(),
       gitLicenseSpdx: zod.string().nullable(),
@@ -2252,6 +2285,12 @@ export const UpdateToolBody = zod.object({
   gitRepoOwner: zod.string().nullish(),
   gitRepoName: zod.string().nullish(),
   gitDefaultBranch: zod.string().nullish(),
+  gitSelectedBranch: zod
+    .string()
+    .nullish()
+    .describe(
+      "The branch the admin chose to host. Persisted on the tool so re-syncs use it instead of always falling back to the repo's default branch.\n",
+    ),
   gitLatestReleaseTag: zod.string().nullish(),
   gitLatestCommitSha: zod.string().nullish(),
   gitLicenseSpdx: zod.string().nullish(),
@@ -2322,7 +2361,16 @@ export const UpdateToolResponse = zod
         ),
       gitRepoOwner: zod.string().nullable(),
       gitRepoName: zod.string().nullable(),
-      gitDefaultBranch: zod.string().nullable(),
+      gitDefaultBranch: zod
+        .string()
+        .nullable()
+        .describe("The repo's true default branch as reported by GitHub."),
+      gitSelectedBranch: zod
+        .string()
+        .nullable()
+        .describe(
+          "The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.\n",
+        ),
       gitLatestReleaseTag: zod.string().nullable(),
       gitLatestCommitSha: zod.string().nullable(),
       gitLicenseSpdx: zod.string().nullable(),
@@ -2415,7 +2463,16 @@ export const SyncToolFromGithubResponse = zod
         ),
       gitRepoOwner: zod.string().nullable(),
       gitRepoName: zod.string().nullable(),
-      gitDefaultBranch: zod.string().nullable(),
+      gitDefaultBranch: zod
+        .string()
+        .nullable()
+        .describe("The repo's true default branch as reported by GitHub."),
+      gitSelectedBranch: zod
+        .string()
+        .nullable()
+        .describe(
+          "The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.\n",
+        ),
       gitLatestReleaseTag: zod.string().nullable(),
       gitLatestCommitSha: zod.string().nullable(),
       gitLicenseSpdx: zod.string().nullable(),
@@ -2459,6 +2516,12 @@ export const AdminListGithubReposResponse = zod.array(
 export const AdminGetGithubRepoMetadataQueryParams = zod.object({
   owner: zod.coerce.string(),
   repo: zod.coerce.string(),
+  branch: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Optional branch to scope the README and latest-commit fetch to. Defaults to the repo's true default branch when omitted.\n",
+    ),
 });
 
 export const AdminGetGithubRepoMetadataResponse = zod.object({
@@ -2476,6 +2539,27 @@ export const AdminGetGithubRepoMetadataResponse = zod.object({
   homepageUrl: zod.string().nullable(),
   readmeMarkdown: zod.string().nullable(),
 });
+
+/**
+ * @summary List branches for a single repo (used by the import branch picker)
+ */
+export const AdminListGithubBranchesQueryParams = zod.object({
+  owner: zod.coerce.string(),
+  repo: zod.coerce.string(),
+});
+
+export const AdminListGithubBranchesResponseItem = zod.object({
+  name: zod.string(),
+  isDefault: zod
+    .boolean()
+    .describe("True if this branch is the repo's default branch."),
+  protected: zod
+    .boolean()
+    .describe("True if the branch is marked protected on GitHub."),
+});
+export const AdminListGithubBranchesResponse = zod.array(
+  AdminListGithubBranchesResponseItem,
+);
 
 /**
  * Returns a draft only — the admin must still click Save on the regular

@@ -58,6 +58,12 @@ export interface ToolUpsert {
   gitRepoName?: string | null;
   /** @nullable */
   gitDefaultBranch?: string | null;
+  /**
+   * The branch the admin chose to host. Persisted on the tool so re-syncs use it instead of always falling back to the repo's default branch.
+
+   * @nullable
+   */
+  gitSelectedBranch?: string | null;
   /** @nullable */
   gitLatestReleaseTag?: string | null;
   /** @nullable */

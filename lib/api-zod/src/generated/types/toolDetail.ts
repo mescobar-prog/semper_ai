@@ -54,8 +54,17 @@ export type ToolDetail = ToolSummary & {
   gitRepoOwner: string | null;
   /** @nullable */
   gitRepoName: string | null;
-  /** @nullable */
+  /**
+   * The repo's true default branch as reported by GitHub.
+   * @nullable
+   */
   gitDefaultBranch: string | null;
+  /**
+   * The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.
+
+   * @nullable
+   */
+  gitSelectedBranch: string | null;
   /** @nullable */
   gitLatestReleaseTag: string | null;
   /** @nullable */

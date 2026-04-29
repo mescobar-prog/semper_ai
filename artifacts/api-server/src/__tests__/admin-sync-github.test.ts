@@ -19,15 +19,21 @@ vi.mock("../lib/github", async () => {
   return {
     ...actual,
     getRepoMetadata: vi.fn(),
+    listBranches: vi.fn(),
   };
 });
 
 // eslint-disable-next-line import/first
 import app from "../app";
 // eslint-disable-next-line import/first
-import { getRepoMetadata } from "../lib/github";
+import {
+  getRepoMetadata,
+  listBranches,
+  GithubBranchNotFoundError,
+} from "../lib/github";
 
 const mockedGetRepoMetadata = vi.mocked(getRepoMetadata);
+const mockedListBranches = vi.mocked(listBranches);
 
 describe("POST /api/admin/tools/:id/sync-github", () => {
   const createdUserIds: string[] = [];
@@ -160,6 +166,167 @@ describe("POST /api/admin/tools/:id/sync-github", () => {
       .post(`/api/admin/tools/${toolId}/sync-github`)
       .set(nonAdmin.authHeader)
       .send({});
+
+    expect(res.status).toBe(403);
+  });
+
+  it("syncs against the explicitly selected branch when set", async () => {
+    const toolId = await createTestTool({
+      gitRepoOwner: "octo-org",
+      gitRepoName: "octo-repo",
+      gitDefaultBranch: "main",
+      gitSelectedBranch: "release/v2",
+    });
+    createdToolIds.push(toolId);
+
+    mockedGetRepoMetadata.mockResolvedValueOnce({
+      owner: "octo-org",
+      name: "octo-repo",
+      fullName: "octo-org/octo-repo",
+      description: null,
+      defaultBranch: "main",
+      private: false,
+      stars: 0,
+      language: null,
+      licenseSpdx: null,
+      latestReleaseTag: null,
+      latestCommitSha: "v2branchsha",
+      homepageUrl: null,
+      readmeMarkdown: "# v2",
+    });
+
+    const res = await request(app)
+      .post(`/api/admin/tools/${toolId}/sync-github`)
+      .set(admin.authHeader)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(mockedGetRepoMetadata).toHaveBeenLastCalledWith(
+      "octo-org",
+      "octo-repo",
+      "release/v2",
+    );
+    // Selected branch must be preserved; default branch mirrors the repo's true default.
+    expect(res.body.gitSelectedBranch).toBe("release/v2");
+    expect(res.body.gitDefaultBranch).toBe("main");
+    expect(res.body.gitLatestCommitSha).toBe("v2branchsha");
+  });
+
+  it("locks in selected branch on first sync (legacy tools)", async () => {
+    const toolId = await createTestTool({
+      gitRepoOwner: "octo-org",
+      gitRepoName: "octo-repo",
+      gitDefaultBranch: "main",
+      gitSelectedBranch: null,
+    });
+    createdToolIds.push(toolId);
+
+    mockedGetRepoMetadata.mockResolvedValueOnce({
+      owner: "octo-org",
+      name: "octo-repo",
+      fullName: "octo-org/octo-repo",
+      description: null,
+      defaultBranch: "main",
+      private: false,
+      stars: 0,
+      language: null,
+      licenseSpdx: null,
+      latestReleaseTag: null,
+      latestCommitSha: "abc123",
+      homepageUrl: null,
+      readmeMarkdown: null,
+    });
+
+    const res = await request(app)
+      .post(`/api/admin/tools/${toolId}/sync-github`)
+      .set(admin.authHeader)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(mockedGetRepoMetadata).toHaveBeenLastCalledWith(
+      "octo-org",
+      "octo-repo",
+      "main",
+    );
+    expect(res.body.gitSelectedBranch).toBe("main");
+
+    const [row] = await db
+      .select()
+      .from(toolsTable)
+      .where(eq(toolsTable.id, toolId))
+      .limit(1);
+    expect(row.gitSelectedBranch).toBe("main");
+  });
+
+  it("returns 422 with branch_not_found when the selected branch disappears", async () => {
+    const toolId = await createTestTool({
+      gitRepoOwner: "octo-org",
+      gitRepoName: "octo-repo",
+      gitDefaultBranch: "main",
+      gitSelectedBranch: "deleted-branch",
+    });
+    createdToolIds.push(toolId);
+
+    mockedGetRepoMetadata.mockRejectedValueOnce(
+      new GithubBranchNotFoundError("octo-org", "octo-repo", "deleted-branch"),
+    );
+
+    const res = await request(app)
+      .post(`/api/admin/tools/${toolId}/sync-github`)
+      .set(admin.authHeader)
+      .send({});
+
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe("branch_not_found");
+    expect(res.body.branch).toBe("deleted-branch");
+  });
+});
+
+describe("GET /api/admin/github/branches", () => {
+  const createdUserIds: string[] = [];
+  let admin: TestUser;
+  let nonAdmin: TestUser;
+
+  beforeAll(async () => {
+    admin = await createTestUser({ isAdmin: true });
+    nonAdmin = await createTestUser({ isAdmin: false });
+    createdUserIds.push(admin.userId, nonAdmin.userId);
+  });
+
+  afterAll(async () => {
+    await cleanupTestData({ userIds: createdUserIds });
+  });
+
+  it("lists branches for the given repo", async () => {
+    mockedListBranches.mockResolvedValueOnce([
+      { name: "main", isDefault: true, protected: true },
+      { name: "develop", isDefault: false, protected: false },
+      { name: "release/v2", isDefault: false, protected: false },
+    ]);
+
+    const res = await request(app)
+      .get("/api/admin/github/branches?owner=octo-org&repo=octo-repo")
+      .set(admin.authHeader);
+
+    expect(res.status).toBe(200);
+    expect(mockedListBranches).toHaveBeenCalledWith("octo-org", "octo-repo");
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBe(3);
+    expect(res.body[0]).toMatchObject({ name: "main", isDefault: true });
+  });
+
+  it("requires owner and repo query params", async () => {
+    const res = await request(app)
+      .get("/api/admin/github/branches?owner=foo")
+      .set(admin.authHeader);
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects non-admin callers with 403", async () => {
+    const res = await request(app)
+      .get("/api/admin/github/branches?owner=octo-org&repo=octo-repo")
+      .set(nonAdmin.authHeader);
 
     expect(res.status).toBe(403);
   });

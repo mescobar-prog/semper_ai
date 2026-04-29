@@ -9,4 +9,9 @@
 export type AdminGetGithubRepoMetadataParams = {
   owner: string;
   repo: string;
+  /**
+ * Optional branch to scope the README and latest-commit fetch to. Defaults to the repo's true default branch when omitted.
+
+ */
+  branch?: string;
 };

@@ -408,8 +408,17 @@ export type ToolDetail = ToolSummary & {
   gitRepoOwner: string | null;
   /** @nullable */
   gitRepoName: string | null;
-  /** @nullable */
+  /**
+   * The repo's true default branch as reported by GitHub.
+   * @nullable
+   */
   gitDefaultBranch: string | null;
+  /**
+   * The branch the admin chose to host on the catalog. Re-syncs pull commit + README from this branch. Defaults to the repo's default branch when set via the GitHub import flow.
+
+   * @nullable
+   */
+  gitSelectedBranch: string | null;
   /** @nullable */
   gitLatestReleaseTag: string | null;
   /** @nullable */
@@ -483,6 +492,12 @@ export interface ToolUpsert {
   gitRepoName?: string | null;
   /** @nullable */
   gitDefaultBranch?: string | null;
+  /**
+   * The branch the admin chose to host. Persisted on the tool so re-syncs use it instead of always falling back to the repo's default branch.
+
+   * @nullable
+   */
+  gitSelectedBranch?: string | null;
   /** @nullable */
   gitLatestReleaseTag?: string | null;
   /** @nullable */
@@ -504,6 +519,14 @@ export interface GithubRepoSummary {
   stars: number;
   /** @nullable */
   language: string | null;
+}
+
+export interface GithubBranchSummary {
+  name: string;
+  /** True if this branch is the repo's default branch. */
+  isDefault: boolean;
+  /** True if the branch is marked protected on GitHub. */
+  protected: boolean;
 }
 
 export interface GithubRepoMetadata {
@@ -1439,6 +1462,16 @@ export type AdminListGithubReposParams = {
 };
 
 export type AdminGetGithubRepoMetadataParams = {
+  owner: string;
+  repo: string;
+  /**
+ * Optional branch to scope the README and latest-commit fetch to. Defaults to the repo's true default branch when omitted.
+
+ */
+  branch?: string;
+};
+
+export type AdminListGithubBranchesParams = {
   owner: string;
   repo: string;
 };
