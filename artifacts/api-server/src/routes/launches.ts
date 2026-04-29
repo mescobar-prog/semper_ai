@@ -1073,7 +1073,16 @@ const MissionChatBody = z.object({
 router.post("/tools/mission-chat/messages", async (req, res) => {
   const parsed = MissionChatBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request" });
+    // Include Zod issues so the next time this fails we can diagnose it
+    // from the 400 body alone (instead of attaching a debugger). Also
+    // mirror the issues to the server log for parity.
+    logger.warn(
+      { issues: parsed.error.issues },
+      "mission-chat /messages rejected: invalid request body",
+    );
+    res
+      .status(400)
+      .json({ error: "Invalid request", issues: parsed.error.issues });
     return;
   }
   const { sessionToken, messages } = parsed.data;

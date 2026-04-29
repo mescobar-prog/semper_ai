@@ -429,41 +429,61 @@ function MissionChatPage() {
     state.status === "ready" ? state.data.sessionToken : null;
 
   /**
-   * Stream a reply for a given assistant placeholder. The history we
-   * send to the server is everything BEFORE the placeholder that has a
+   * Build the wire history that should be POSTed for a given assistant
+   * placeholder. We take everything BEFORE the placeholder that has a
    * resolved, error-free body — so retries don't leak partial content
    * from a prior failed attempt and the structured opening-turn payload
    * (which has empty content) is correctly excluded.
+   *
+   * IMPORTANT: this is a pure helper over a caller-supplied messages
+   * snapshot. We deliberately do NOT read it inside a `setMessages`
+   * updater, because React schedules updaters to run later (during the
+   * next render commit) — by which point the surrounding `fetch` has
+   * already serialized its body with whatever `wireHistory` was at the
+   * moment of the call, producing an empty `messages` array on the
+   * very first send (see Task #150).
    */
-  async function streamReplyFor(assistantId: string) {
+  function buildWireHistory(
+    snapshot: ChatMessage[],
+    assistantId: string,
+  ): { role: "user" | "assistant"; content: string }[] {
+    const idx = snapshot.findIndex((m) => m.id === assistantId);
+    if (idx === -1) return [];
+    return snapshot
+      .slice(0, idx)
+      .filter(
+        (m) =>
+          !m.pending &&
+          !m.error &&
+          !m.payload &&
+          m.content.trim().length > 0,
+      )
+      .map((m) => ({ role: m.role, content: m.content }));
+  }
+
+  /**
+   * Stream a reply for a given assistant placeholder. Callers must pass
+   * the wire history they want sent — see `buildWireHistory` above for
+   * why we don't recompute it from React state inside this function.
+   */
+  async function streamReplyFor(
+    assistantId: string,
+    wireHistory: { role: "user" | "assistant"; content: string }[],
+  ) {
     if (!sessionToken) return;
 
     const controller = new AbortController();
     abortRef.current = controller;
     setSending(true);
 
-    // Build the wire history from current state at the moment we send.
-    let wireHistory: { role: "user" | "assistant"; content: string }[] = [];
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === assistantId);
-      if (idx === -1) return prev;
-      wireHistory = prev
-        .slice(0, idx)
-        .filter(
-          (m) =>
-            !m.pending &&
-            !m.error &&
-            !m.payload &&
-            m.content.trim().length > 0,
-        )
-        .map((m) => ({ role: m.role, content: m.content }));
-      // Reset the placeholder to "pending, no error, no partial body".
-      return prev.map((m) =>
+    // Reset the placeholder to "pending, no error, no partial body".
+    setMessages((prev) =>
+      prev.map((m) =>
         m.id === assistantId
           ? { ...m, content: "", error: undefined, pending: true }
           : m,
-      );
-    });
+      ),
+    );
 
     try {
       const response = await fetch("/api/tools/mission-chat/messages", {
@@ -557,20 +577,30 @@ function MissionChatPage() {
 
     const userId = newId();
     const assistantId = newId();
-    setMessages((prev) => [
-      ...prev,
-      { id: userId, role: "user", content: trimmed },
-      {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        pending: true,
-        parentUserId: userId,
-      },
-    ]);
+    const userMsg: ChatMessage = {
+      id: userId,
+      role: "user",
+      content: trimmed,
+    };
+    const placeholder: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      pending: true,
+      parentUserId: userId,
+    };
+
+    // Compute the wire history synchronously from current state plus
+    // the user message we're about to add. We can't read it inside a
+    // setMessages updater because React schedules updaters to run
+    // later — by then the fetch body has already been serialized.
+    const snapshot: ChatMessage[] = [...messages, userMsg, placeholder];
+    const wireHistory = buildWireHistory(snapshot, assistantId);
+
+    setMessages((prev) => [...prev, userMsg, placeholder]);
     setInput("");
 
-    await streamReplyFor(assistantId);
+    await streamReplyFor(assistantId, wireHistory);
   }
 
   /**
@@ -579,7 +609,8 @@ function MissionChatPage() {
    */
   function handleRetry(assistantId: string) {
     if (sending) return;
-    void streamReplyFor(assistantId);
+    const wireHistory = buildWireHistory(messages, assistantId);
+    void streamReplyFor(assistantId, wireHistory);
   }
 
   function handleClear() {
