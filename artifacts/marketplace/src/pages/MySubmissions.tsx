@@ -59,7 +59,7 @@ export function MySubmissions() {
             My tool submissions
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Track tools you've submitted to the marketplace and address any
+            Track tools you've submitted to the platform and address any
             reviewer feedback.
           </p>
         </div>
@@ -85,7 +85,7 @@ export function MySubmissions() {
       ) : !data || data.length === 0 ? (
         <EmptyState
           title="You haven't submitted any tools yet"
-          description="Submit a tool to be reviewed by a marketplace admin. Approved tools appear in the public catalog."
+          description="Submit a tool to be reviewed by a platform admin. Approved tools appear in the public catalog."
         />
       ) : (
         <div className="space-y-3">

@@ -197,14 +197,14 @@ function BriefDrafterPage() {
             This tool drafts a SITREP, OPORD paragraph, or training brief in
             your service's voice — anchored in your profile and the most
             relevant snippets from your personal library. Launch it from the
-            marketplace catalog so the marketplace can mint a one-time launch
+            Semper AI catalog so the platform can mint a one-time launch
             token for you.
           </p>
           <a
             href="/"
             className="inline-block mt-2 px-4 py-2 rounded-md bg-sky-500 hover:bg-sky-400 text-slate-900 font-medium"
           >
-            Open marketplace
+            Open platform
           </a>
         </div>
       </div>
@@ -222,7 +222,7 @@ function BriefDrafterPage() {
             href="/"
             className="inline-block mt-2 px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
           >
-            Back to marketplace
+            Back to platform
           </a>
         </div>
       </div>
@@ -265,7 +265,7 @@ function BriefDrafterPage() {
             </div>
           </div>
           <a href="/" className="text-sm text-slate-400 hover:text-slate-100">
-            ← Back to marketplace
+            ← Back to platform
           </a>
         </div>
       </header>

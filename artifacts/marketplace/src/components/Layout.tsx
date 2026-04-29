@@ -79,11 +79,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-sm bg-primary" />
             <span className="text-[10px] uppercase tracking-[0.25em] text-primary font-mono font-semibold">
-              DoW AI
+              Semper AI
             </span>
           </div>
           <h1 className="text-base font-semibold tracking-tight mt-1.5">
-            Marketplace
+            Platform
           </h1>
           <p className="text-[11px] text-muted-foreground font-mono mt-0.5 uppercase tracking-wider">
             Authorized Toolkit

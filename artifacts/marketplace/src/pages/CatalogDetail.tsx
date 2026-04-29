@@ -916,7 +916,7 @@ function LocalLaunchPanel({
         <div className="px-5 py-4 space-y-4">
           <p className="text-xs text-muted-foreground leading-relaxed">
             {toolName} runs on your workstation. Install it once, then click the
-            handoff button to open it with a fresh marketplace context token.
+            handoff button to open it with a fresh platform context token.
           </p>
 
           {installInstructions && (

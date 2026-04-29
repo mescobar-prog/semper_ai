@@ -161,17 +161,17 @@ function ContextEchoPage() {
             Context Echo
           </div>
           <p className="text-slate-400 leading-relaxed">
-            This is the demo tool used by the marketplace launch protocol. To
-            see it in action, launch it from the marketplace catalog — the
-            marketplace will mint a one-time launch token, and Context Echo will
-            exchange that token for the context bundle the marketplace forwarded
+            This is the demo tool used by the Semper AI launch protocol. To
+            see it in action, launch it from the Semper AI catalog — the
+            platform will mint a one-time launch token, and Context Echo will
+            exchange that token for the context bundle the platform forwarded
             on your behalf.
           </p>
           <a
             href="/"
             className="inline-block mt-2 px-4 py-2 rounded-md bg-sky-500 hover:bg-sky-400 text-slate-900 font-medium"
           >
-            Open marketplace
+            Open platform
           </a>
         </div>
       </div>
@@ -189,7 +189,7 @@ function ContextEchoPage() {
             href="/"
             className="inline-block mt-2 px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
           >
-            Back to marketplace
+            Back to platform
           </a>
         </div>
       </div>
@@ -226,7 +226,7 @@ function ContextEchoPage() {
             </div>
           </div>
           <a href="/" className="text-sm text-slate-400 hover:text-slate-100">
-            ← Back to marketplace
+            ← Back to platform
           </a>
         </div>
       </header>
@@ -237,7 +237,7 @@ function ContextEchoPage() {
             Launch payload received
           </h2>
           <p className="text-sm text-slate-400 mb-6">
-            This is exactly what the marketplace forwarded to {tool.name} on
+            This is exactly what the platform forwarded to {tool.name} on
             your behalf. Session token expires{" "}
             {new Date(sessionExpiresAt).toLocaleTimeString()}.
           </p>
@@ -324,7 +324,7 @@ function ContextEchoPage() {
               RAG primer from your library
             </h2>
             <p className="text-sm text-slate-400 mt-1">
-              The marketplace generated search queries from your context and{" "}
+              The platform generated search queries from your context and{" "}
               {tool.name}'s description, then ran them against your uploaded
               documents.
             </p>

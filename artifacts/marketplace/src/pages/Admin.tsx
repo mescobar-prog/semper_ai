@@ -140,7 +140,7 @@ export function Admin() {
       <PageContainer>
         <EmptyState
           title="Admin access required"
-          description="This area is restricted to marketplace administrators. If you believe this is in error, contact your tenant admin."
+          description="This area is restricted to platform administrators. If you believe this is in error, contact your tenant admin."
         />
       </PageContainer>
     );
@@ -160,7 +160,7 @@ function AdminInner() {
           Admin
         </div>
         <h1 className="text-3xl font-semibold tracking-tight">
-          Marketplace administration
+          Platform administration
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           Review vendor submissions, manage the published catalog, moderate

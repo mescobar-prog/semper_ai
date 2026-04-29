@@ -42,7 +42,7 @@ export function Launches() {
       ) : !data || data.length === 0 ? (
         <EmptyState
           title="No launches yet"
-          description="Browse the catalog and launch a tool. The marketplace mints a token, attaches your context, and opens the tool in a new tab."
+          description="Browse the catalog and launch a tool. The platform mints a token, attaches your context, and opens the tool in a new tab."
           action={
             <Link
               href="/catalog"

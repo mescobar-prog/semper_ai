@@ -104,7 +104,7 @@ export function Dashboard() {
                 <div className="p-10">
                   <EmptyState
                     title="No launches yet"
-                    description="Browse the catalog and launch a tool to see it here. The marketplace mints a one-time token and forwards your context."
+                    description="Browse the catalog and launch a tool to see it here. The platform mints a one-time token and forwards your context."
                     action={
                       <Link
                         href="/catalog"

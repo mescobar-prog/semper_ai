@@ -189,7 +189,7 @@ export function SubmitTool() {
         <p className="text-sm text-muted-foreground mt-1">
           {isEditing
             ? "Address the reviewer feedback and resubmit. Saving will move this submission back to pending review."
-            : "Submit an AI tool for marketplace admin review. Approved tools appear in the public catalog with a vendor-submitted badge."}
+            : "Submit an AI tool for platform admin review. Approved tools appear in the public catalog with a vendor-submitted badge."}
         </p>
       </div>
 
