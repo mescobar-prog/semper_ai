@@ -1049,6 +1049,7 @@ export interface RagPrimer {
 export interface ContextExchangeResponse {
   sessionToken: string;
   sessionExpiresAt: string;
+  presetName: string;
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;

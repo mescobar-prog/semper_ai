@@ -2994,10 +2994,14 @@ components:
       required:
         [sessionToken, sessionExpiresAt, tool, user, profile, contextBlock,
          contextMarkdown, primer, additionalNote, launchIntent,
-         sharedFieldKeys]
+         sharedFieldKeys, presetName]
       properties:
         sessionToken: { type: string }
         sessionExpiresAt: { type: string, format: date-time }
+        # Name of the active mission preset at launch time. Receiving
+        # tools can surface this in their header so the operator sees
+        # which mission context the chat is grounded in.
+        presetName: { type: string }
         tool:
           type: object
           required: [id, slug, name, vendor, atoStatus]

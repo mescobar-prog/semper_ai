@@ -27,9 +27,12 @@ import { generateOpaqueToken } from "../lib/tokens";
 import {
   draftMissionBrief,
   generateRagQueries,
+  streamMissionChat,
   type BriefType,
   type ContextBlockSituation,
+  type MissionChatTurn,
 } from "../lib/gemini-helpers";
+import { z } from "zod";
 import { searchChunks, searchChunksMultiQuery } from "../lib/rag";
 import {
   buildContextBlock,
@@ -882,6 +885,7 @@ router.post("/tools/context-exchange", async (req, res) => {
   res.json({
     sessionToken,
     sessionExpiresAt: sessionExpiresAt.toISOString(),
+    presetName: ctx.activePreset.name,
     tool: {
       id: tool.id,
       slug: tool.slug,
@@ -1036,6 +1040,183 @@ router.post("/tools/draft-brief", async (req, res) => {
     queries,
     snippets,
   });
+});
+
+// ----- Mission Chat (Task #132) ----------------------------------------
+// Streaming chat for the Mission Chat tool. Token-gated like
+// /tools/library-query and /tools/draft-brief — the operator already
+// affirmed and exchanged a launch token for a session token in the
+// Marketplace, so we just verify the session and stream Gemini.
+//
+// Wire format: NDJSON (one JSON object per line).
+//   {"type":"text","delta":"..."}      — streamed Markdown chunk
+//   {"type":"snippets","snippets":[…]} — emitted ONCE before text starts;
+//                                         these are the additional library
+//                                         snippets we pulled for this
+//                                         specific user question.
+//   {"type":"done"}                    — clean end of stream
+//   {"type":"error","message":"..."}   — fatal error mid-stream
+
+const MissionChatBody = z.object({
+  sessionToken: z.string().min(1),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1).max(8000),
+      }),
+    )
+    .min(1)
+    .max(40),
+});
+
+router.post("/tools/mission-chat/messages", async (req, res) => {
+  const parsed = MissionChatBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request" });
+    return;
+  }
+  const { sessionToken, messages } = parsed.data;
+
+  // The last message must be from the user — that's the question we go
+  // searching the library for.
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || lastMessage.role !== "user") {
+    res.status(400).json({ error: "Last message must be from the operator" });
+    return;
+  }
+
+  const [sess] = await db
+    .select()
+    .from(sessionTokensTable)
+    .where(eq(sessionTokensTable.token, sessionToken))
+    .limit(1);
+  if (!sess) {
+    res.status(401).json({ error: "Invalid session token" });
+    return;
+  }
+  if (sess.expiresAt.getTime() < Date.now()) {
+    res.status(401).json({ error: "Session token expired" });
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, sess.userId))
+    .limit(1);
+  if (!user) {
+    res.status(401).json({ error: "Launch user unavailable" });
+    return;
+  }
+
+  const [launch] = await db
+    .select()
+    .from(launchesTable)
+    .where(eq(launchesTable.id, sess.launchId))
+    .limit(1);
+  if (!launch) {
+    res.status(401).json({ error: "Launch unavailable" });
+    return;
+  }
+
+  const [profile, contextBlockRow, ctx] = await Promise.all([
+    getOrCreateProfile(user.id),
+    getOrCreateContextBlock(user.id),
+    getActiveContext(user.id),
+  ]);
+
+  const displayName =
+    [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+    user.email ||
+    user.id;
+
+  const contextMarkdown = buildContextBlock(
+    { displayName, email: user.email },
+    profile,
+    contextBlockRow,
+  );
+
+  // Pull a handful of additional snippets for the latest question, scoped
+  // to the same documents the launch was bounded to. We don't refuse to
+  // answer if nothing comes back — Gemini will fall back to the primer.
+  let followupSnippets: Awaited<ReturnType<typeof searchChunks>> = [];
+  try {
+    followupSnippets = await searchChunks(
+      user.id,
+      lastMessage.content,
+      6,
+      { documentIds: ctx.documentIds },
+    );
+  } catch (err) {
+    logger.warn({ err }, "mission-chat followup snippet search failed");
+  }
+
+  // Snapshot of snippets the operator approved at launch ("primer").
+  const primerSnippets = (launch.sharedSnippets ?? []).map((s) => ({
+    documentTitle: s.documentTitle,
+    chunkIndex: s.chunkIndex,
+    content: s.content,
+  }));
+
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const writeFrame = (frame: unknown) => {
+    res.write(JSON.stringify(frame) + "\n");
+  };
+
+  // Emit the new snippets first so the UI can render citations alongside
+  // the streamed reply.
+  writeFrame({
+    type: "snippets",
+    snippets: followupSnippets.map((s) => ({
+      chunkId: s.chunkId,
+      documentId: s.documentId,
+      documentTitle: s.documentTitle,
+      chunkIndex: s.chunkIndex,
+      content: s.content,
+      score: s.score,
+    })),
+  });
+
+  const turns: MissionChatTurn[] = messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  try {
+    const iterator = streamMissionChat(turns, {
+      contextMarkdown,
+      launchIntent: launch.launchIntent,
+      additionalNote: launch.additionalNote,
+      primerSnippets,
+      followupSnippets: followupSnippets.map((s) => ({
+        documentTitle: s.documentTitle,
+        chunkIndex: s.chunkIndex,
+        content: s.content,
+      })),
+      operatorDisplayName: displayName,
+    });
+    for await (const delta of iterator) {
+      writeFrame({ type: "text", delta });
+    }
+    writeFrame({ type: "done" });
+  } catch (err) {
+    logger.error({ err }, "mission-chat stream failed");
+    writeFrame({
+      type: "error",
+      message:
+        err instanceof Error
+          ? err.message
+          : "Gemini stream failed unexpectedly.",
+    });
+  } finally {
+    res.end();
+  }
 });
 
 router.get("/launches/recent", requireAuth, async (req, res) => {

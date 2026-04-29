@@ -1809,6 +1809,7 @@ export const ExchangeContextTokenBody = zod.object({
 export const ExchangeContextTokenResponse = zod.object({
   sessionToken: zod.string(),
   sessionExpiresAt: zod.coerce.date(),
+  presetName: zod.string(),
   tool: zod.object({
     id: zod.string(),
     slug: zod.string(),

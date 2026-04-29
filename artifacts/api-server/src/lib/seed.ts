@@ -122,6 +122,32 @@ const TOOLS: SeedTool[] = [
     isActive: true,
   },
   {
+    slug: "mission-chat",
+    name: "Mission Chat",
+    vendor: "DoW AI Marketplace",
+    categorySlug: "comms-writing",
+    shortDescription:
+      "Streaming chat seeded with your profile, Context Block, and library snippets.",
+    longDescription:
+      "Mission Chat is the third reference tool for the marketplace. On launch it exchanges your launch token for the same context bundle the other reference tools see, then opens a clean chat window primed with your operator identity, your 6-element Context Block, and the snippets you approved at launch. Each message you send pulls additional snippets from your personal library and streams a Gemini reply back token-by-token. Conversation history lives only in your browser session — refresh the page and you start fresh.",
+    purpose:
+      "Provide an open-ended conversational interface that's grounded in the operator's profile, Context Block, and personal library so the model answers in-context without re-prompting.",
+    ragQueryTemplates: [
+      "{billets} {dutyTitle}",
+      "{unit} SOP",
+      "commander's intent {dutyTitle}",
+    ],
+    atoStatus: "full_ato",
+    impactLevels: ["il2", "il4"],
+    dataClassification: "cui",
+    version: "1.0",
+    badges: ["Reference Implementation", "FedRAMP Moderate", "Section 508"],
+    homepageUrl: null,
+    launchUrl: "/mission-chat/",
+    documentationUrl: null,
+    isActive: true,
+  },
+  {
     slug: "eval-assist",
     name: "EvalAssist",
     vendor: "Talent Forge",
@@ -490,6 +516,43 @@ export async function seedCatalog(): Promise<void> {
         sql`${toolsTable.slug} = ${t.slug}
           AND ${toolsTable.launchUrl} = '/context-echo/'`,
       );
+  }
+
+  // Insert any newly-defined seed tools that aren't in the DB yet. This is
+  // how additive demo tools (e.g. Mission Chat, Task #132) get into already-
+  // seeded environments without forcing a wipe-and-reseed.
+  const existing = await db
+    .select({ slug: toolsTable.slug })
+    .from(toolsTable);
+  const existingSlugs = new Set(existing.map((r) => r.slug));
+  const missing = TOOLS.filter((t) => !existingSlugs.has(t.slug));
+  if (missing.length > 0) {
+    await db.insert(toolsTable).values(
+      missing.map((t) => ({
+        slug: t.slug,
+        name: t.name,
+        vendor: t.vendor,
+        shortDescription: t.shortDescription,
+        longDescription: t.longDescription,
+        purpose: t.purpose,
+        ragQueryTemplates: t.ragQueryTemplates,
+        categoryId: slugToId.get(t.categorySlug) ?? null,
+        atoStatus: t.atoStatus,
+        impactLevels: t.impactLevels,
+        dataClassification: t.dataClassification,
+        version: t.version,
+        badges: t.badges,
+        homepageUrl: t.homepageUrl,
+        launchUrl: t.launchUrl,
+        documentationUrl: t.documentationUrl,
+        isActive: t.isActive ? "true" : "false",
+        createdBy: null,
+      })),
+    );
+    logger.info(
+      { added: missing.map((m) => m.slug) },
+      "backfill inserted missing seed tools",
+    );
   }
 
   logger.info("backfill complete");

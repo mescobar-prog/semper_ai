@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/mission-chat/"
+title = "Mission Chat"
+version = "1.0.0"
+id = "artifacts/mission-chat"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/mission-chat/" ]
+localPort = 18633
+
+[services.development]
+run = "pnpm --filter @workspace/mission-chat run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mission-chat", "run", "build" ]
+publicDir = "artifacts/mission-chat/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18633"
+BASE_PATH = "/mission-chat/"

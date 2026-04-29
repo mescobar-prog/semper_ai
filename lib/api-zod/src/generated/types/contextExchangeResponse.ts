@@ -14,6 +14,7 @@ import type { UserProfile } from "./userProfile";
 export interface ContextExchangeResponse {
   sessionToken: string;
   sessionExpiresAt: Date;
+  presetName: string;
   tool: ContextExchangeResponseTool;
   user: ContextExchangeResponseUser;
   profile: UserProfile;

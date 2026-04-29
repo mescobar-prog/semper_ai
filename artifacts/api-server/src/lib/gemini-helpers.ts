@@ -771,6 +771,104 @@ export interface DraftBriefInput {
   snippets: BriefSnippetInput[];
 }
 
+// ---------------------------------------------------------------------------
+// Mission Chat — generic streaming chat grounded in the operator's launch
+// context (profile + Context Block + RAG snippets).
+// ---------------------------------------------------------------------------
+
+export interface MissionChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface MissionChatGrounding {
+  /** Pre-formatted Markdown summary of identity + Context Block. */
+  contextMarkdown: string;
+  /** Operator-supplied launch intent (if any). */
+  launchIntent: string | null;
+  /** Operator-supplied "additional detail" note from launch preview. */
+  additionalNote: string | null;
+  /** Snippets approved at launch ("primer"). */
+  primerSnippets: BriefSnippetInput[];
+  /** Snippets fetched mid-conversation for the latest user question. */
+  followupSnippets: BriefSnippetInput[];
+  /** Operator's display name (for voice). */
+  operatorDisplayName: string;
+}
+
+function formatGroundingSnippets(
+  label: string,
+  snippets: BriefSnippetInput[],
+): string {
+  if (!snippets.length) return "";
+  const lines = snippets.map((s, i) => {
+    const trimmed = s.content.trim().slice(0, 1200);
+    return `[${label} ${i + 1}: ${s.documentTitle} — chunk #${s.chunkIndex}]\n${trimmed}`;
+  });
+  return `${label} snippets pulled from the operator's library:\n${lines.join("\n\n")}`;
+}
+
+export async function* streamMissionChat(
+  history: MissionChatTurn[],
+  grounding: MissionChatGrounding,
+): AsyncGenerator<string, void, unknown> {
+  const intentLine = grounding.launchIntent?.trim()
+    ? `Operator's launch intent (the question they were thinking when they opened this tool): "${grounding.launchIntent.trim()}"`
+    : "";
+  const noteLine = grounding.additionalNote?.trim()
+    ? `Operator's additional detail at launch: "${grounding.additionalNote.trim()}"`
+    : "";
+
+  const primerBlock = formatGroundingSnippets("Primer", grounding.primerSnippets);
+  const followupBlock = formatGroundingSnippets(
+    "Follow-up",
+    grounding.followupSnippets,
+  );
+
+  const groundingSections = [
+    grounding.contextMarkdown.trim(),
+    intentLine,
+    noteLine,
+    primerBlock,
+    followupBlock,
+  ]
+    .filter((s) => s.length > 0)
+    .join("\n\n---\n\n");
+
+  const systemPrompt = `You are Mission Chat, a generic AI assistant embedded in a U.S. Department of Defense AI Tool Marketplace. You are talking with ${grounding.operatorDisplayName}.
+
+You have already been given the operator's structured context below — their identity, their 6-element Context Block (Doctrine & Orders, Commander's Intent, Environment, Constraints & Limitations, Risk, Experience & Judgment), and snippets pulled from their personal doctrine/SOP library. Use this grounding to answer their questions concretely without re-asking who they are or what mission they're on.
+
+Conduct rules:
+- Be brief, professional, and direct — match the operator's service voice when their branch is known.
+- Anchor specifics in the provided library snippets. Cite document titles inline when you draw from them (e.g. "per ${'`'}Squad SOP${'`'}, …"). Do NOT invent doctrine references.
+- If the operator's question goes beyond the loaded context, say what's missing and suggest what to upload to their library — do not silently guess.
+- Never invent classified facts, casualty figures, friendly force locations, or specific OPSEC-sensitive details. If the operator hasn't given you a fact, say "TBD".
+- Output Markdown. No "Here is your answer" preamble — go straight in.
+
+Operator grounding (do not repeat this verbatim back to them — they already saw it):
+${groundingSections}`;
+
+  const contents = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const stream = await ai.models.generateContentStream({
+    model: MODEL,
+    contents,
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 2048,
+    },
+  });
+
+  for await (const chunk of stream) {
+    const text = chunk.text;
+    if (text) yield text;
+  }
+}
+
 export async function draftMissionBrief(
   input: DraftBriefInput,
 ): Promise<string> {
