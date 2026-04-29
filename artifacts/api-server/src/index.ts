@@ -1,3 +1,4 @@
+import type { Server } from "node:http";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedCatalog } from "./lib/seed";
@@ -39,16 +40,18 @@ async function bootstrap() {
     logger.error({ err }, "Catalog seed failed");
   }
 
-  await new Promise<void>((resolve, reject) => {
-    app.listen(port, (err) => {
+  const server = await new Promise<Server>((resolve, reject) => {
+    const s = app.listen(port, (err) => {
       if (err) {
         reject(err);
         return;
       }
       logger.info({ port }, "Server listening");
-      resolve();
+      resolve(s);
     });
   });
+
+  installShutdownHandlers(server);
 
   // Warm the embedding model (so the first user query doesn't pay the
   // cold-start cost) and then run the chunk-embedding backfill in the
@@ -82,6 +85,39 @@ async function bootstrap() {
       logger.error({ err }, "embeddings backfill crashed");
     }
   })();
+}
+
+function installShutdownHandlers(server: Server) {
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) {
+      logger.warn({ signal }, "second shutdown signal received — forcing exit");
+      process.exit(1);
+      return;
+    }
+    shuttingDown = true;
+    logger.info({ signal }, "shutdown started");
+
+    // Fallback: if close() hangs on a stuck connection, exit anyway so the
+    // workflow's port is freed and the next start can bind.
+    const forceExit = setTimeout(() => {
+      logger.warn("shutdown timed out — forcing exit");
+      process.exit(0);
+    }, 5000);
+    forceExit.unref();
+
+    server.close((err) => {
+      if (err) {
+        logger.error({ err }, "error while closing server");
+      }
+      logger.info("shutdown complete");
+      clearTimeout(forceExit);
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 bootstrap().catch((err) => {

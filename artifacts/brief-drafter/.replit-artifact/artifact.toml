@@ -15,7 +15,7 @@ paths = [ "/brief-drafter/" ]
 localPort = 22574
 
 [services.development]
-run = "pnpm --filter @workspace/brief-drafter run dev"
+run = "exec pnpm --filter @workspace/brief-drafter run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/brief-drafter", "run", "build" ]

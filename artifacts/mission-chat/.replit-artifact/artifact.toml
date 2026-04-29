@@ -15,7 +15,7 @@ paths = [ "/mission-chat/" ]
 localPort = 18633
 
 [services.development]
-run = "pnpm --filter @workspace/mission-chat run dev"
+run = "exec pnpm --filter @workspace/mission-chat run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/mission-chat", "run", "build" ]

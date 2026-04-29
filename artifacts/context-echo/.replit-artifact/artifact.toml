@@ -15,7 +15,7 @@ paths = [ "/context-echo/" ]
 localPort = 22361
 
 [services.development]
-run = "pnpm --filter @workspace/context-echo run dev"
+run = "exec pnpm --filter @workspace/context-echo run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/context-echo", "run", "build" ]

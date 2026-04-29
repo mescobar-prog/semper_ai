@@ -15,7 +15,7 @@ paths = [ "/" ]
 localPort = 20787
 
 [services.development]
-run = "pnpm --filter @workspace/marketplace run dev"
+run = "exec pnpm --filter @workspace/marketplace run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/marketplace", "run", "build" ]
