@@ -1,0 +1,33 @@
+Fix Mission Chat "Reply failed: Invalid request" when sending the first message
+What & Why
+After task #149 recovered the API Server from its orphan-port state, sending a message in Mission Chat no longer 404s — the request now reaches the API. However, the API responds HTTP 400 "Invalid request" for the very first send of a fresh launch session, surfaced in the UI as "Reply failed: Invalid request".
+
+Reproduced live during #149 verification:
+
+15:08:02 POST /api/tools/<toolId>/launch → 200 (launch created)
+15:08:03 POST /api/tools/context-exchange → 200
+15:08:06 POST /api/tools/mission-chat/messages → 400 "Invalid request" (← user-visible failure)
+The 400 comes from the Zod parser at artifacts/api-server/src/routes/launches.ts:1074-1078:
+
+const parsed = MissionChatBody.safeParse(req.body);
+if (!parsed.success) {
+  res.status(400).json({ error: "Invalid request" });
+  return;
+}
+
+MissionChatBody (defined just above at line 1060) requires { sessionToken: string, messages: [{ role, content }, ...] }.
+
+The frontend send lives in artifacts/mission-chat/src/App.tsx:469 (POSTs { sessionToken, ... }). Either the body shape (e.g. message role/content keys, or an empty/missing messages array on first send) or the sessionToken value doesn't match what the server expects on the first turn.
+
+Done looks like
+Sending a message in Mission Chat right after launching the tool returns a streamed assistant reply with no "Reply failed" error.
+The 400 from POST /api/tools/mission-chat/messages no longer reproduces.
+Either the server's MissionChatBody schema is corrected to accept what the client actually sends, OR the client payload at App.tsx:469 is corrected to match the schema — whichever is wrong. Include the failing payload in the PR description so the fix is auditable.
+The error path in launches.ts:1075-1077 should also include the Zod error.issues in the response (or in a server log line) so the next time this happens it's diagnosable from a single 400 body without needing to attach a debugger.
+Out of scope
+The 502 also briefly seen during #149: that was the proxy hitting the API mid-restart and is no longer reproducible. No action needed.
+The 401 at /api/tools/context-exchange seen at 15:07:36 — it succeeded on retry at 15:08:03 and looks like a pre-launch timing artifact, not a real bug.
+Relevant files
+artifacts/api-server/src/routes/launches.ts:1060 (MissionChatBody schema)
+artifacts/api-server/src/routes/launches.ts:1073-1087 (route + 400 branch)
+artifacts/mission-chat/src/App.tsx:428-475 (sessionToken capture + send call)
