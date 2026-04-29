@@ -214,12 +214,6 @@ export function Catalog() {
   const evaluateMutation = useEvaluateContextBlock();
   const confirmMutation = useConfirmContextBlock();
 
-  const allFilled = useMemo(
-    () =>
-      ELEMENTS.every((e) => (fields[e.key] ?? "").trim().length > 0),
-    [fields],
-  );
-
   // Stale = the user has edited any field since the last evaluation we hold.
   const evaluationStale = useMemo(() => {
     if (!evaluation || !evaluatedSnapshot) return false;
@@ -290,12 +284,14 @@ export function Catalog() {
 
   const isGo = evaluation?.status === "GO" && !evaluation.opsecFlag;
   // OPSEC failures remain a hard block — no bypass is offered.
+  // Partial blocks (one or more elements empty) are allowed — the evaluator
+  // already coerces empty fields to "(empty)" and scores them as Novice (1),
+  // and the existing sub-threshold bypass dialog will catch low scores.
   const canBypass =
     !!evaluation &&
     !evaluation.opsecFlag &&
     !isGo &&
-    !evaluationStale &&
-    allFilled;
+    !evaluationStale;
 
   const onConfirm = async () => {
     if (canBypass) {
@@ -351,16 +347,10 @@ export function Catalog() {
   });
 
   useVoiceTool("clickEvaluate", async () => {
-    // Make sure every field has at least some content before calling the
-    // server — the evaluator will reject an empty block with a generic
-    // error otherwise.
-    const cur = fieldsRef.current;
-    const missing = ELEMENTS.filter(
-      (e) => !(cur[e.key] ?? "").trim().length,
-    ).map((e) => e.key);
-    if (missing.length) {
-      return `Error: cannot evaluate — these elements are still empty: ${missing.join(", ")}.`;
-    }
+    // Partial blocks are allowed: the evaluator coerces empty elements to
+    // "(empty)" and scores them as Novice (1). The existing sub-threshold
+    // bypass flow on confirm catches low scores, so no pre-flight refusal
+    // is needed here.
     // Use the value `onEvaluate` returns directly. Reading
     // `evaluationRef.current` here is racy: the ref is updated by a
     // useEffect after the React `setEvaluation` commit, which is not
@@ -413,8 +403,9 @@ export function Catalog() {
   const confirming = confirmMutation.isPending;
   // Confirm is enabled when the operator has either a clean GO score, OR
   // a sub-threshold (non-OPSEC) score that they can choose to bypass.
+  // Partial blocks are allowed; OPSEC and sub-threshold gates still apply.
   const canConfirm =
-    (isGo || canBypass) && !evaluationStale && allFilled && !confirming;
+    (isGo || canBypass) && !evaluationStale && !confirming;
 
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(
     null,
@@ -637,7 +628,7 @@ export function Catalog() {
             <button
               type="button"
               onClick={onEvaluate}
-              disabled={!allFilled || evaluating}
+              disabled={evaluating}
               className="px-4 py-2 rounded-md bg-secondary text-secondary-foreground text-sm font-medium disabled:opacity-50 hover:bg-secondary/80 transition-colors"
             >
               {evaluating ? "Scoring…" : "Evaluate"}
@@ -671,7 +662,6 @@ export function Catalog() {
           <EvaluationCard
             evaluation={evaluation}
             stale={evaluationStale}
-            allFilled={allFilled}
           />
         </aside>
       </div>
@@ -909,11 +899,9 @@ function ConfirmationCard({
 function EvaluationCard({
   evaluation,
   stale,
-  allFilled,
 }: {
   evaluation: ContextBlockEvaluation | null;
   stale: boolean;
-  allFilled: boolean;
 }) {
   if (!evaluation) {
     return (
@@ -922,9 +910,8 @@ function EvaluationCard({
           Latest Evaluation
         </div>
         <p className="text-xs text-muted-foreground">
-          {allFilled
-            ? "Press Evaluate to score this Context Block."
-            : "Fill in all six elements, then Evaluate."}
+          Press Evaluate to score this Context Block. Empty elements are
+          allowed and will score as Novice.
         </p>
       </div>
     );
