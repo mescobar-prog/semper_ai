@@ -6,6 +6,7 @@ import {
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { requireAuth } from "../middlewares/requireAuth";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -35,7 +36,12 @@ export const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
 router.post("/storage/uploads/request-url", requireAuth, async (req: Request, res: Response) => {
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Missing or invalid required fields" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Missing or invalid required fields",
+      "POST /storage/uploads/request-url",
+    );
     return;
   }
 

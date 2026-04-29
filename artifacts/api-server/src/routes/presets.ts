@@ -21,6 +21,7 @@ import {
   emptySnapshot,
 } from "../lib/profile-helpers";
 import { logger } from "../lib/logger";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 
@@ -94,7 +95,12 @@ router.get("/profile/presets", requireAuth, async (req, res) => {
 router.post("/profile/presets", requireAuth, async (req, res) => {
   const parsed = CreateMyPresetBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid preset" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid preset",
+      "POST /profile/presets",
+    );
     return;
   }
   const userId = req.user!.id;
@@ -161,7 +167,12 @@ router.post("/profile/presets", requireAuth, async (req, res) => {
 router.put("/profile/presets/:id", requireAuth, async (req, res) => {
   const parsed = UpdateMyPresetBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid preset update" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid preset update",
+      "PUT /profile/presets/:id",
+    );
     return;
   }
   const userId = req.user!.id;

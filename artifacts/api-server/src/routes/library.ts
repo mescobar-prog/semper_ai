@@ -26,6 +26,7 @@ import {
 import { ensureActivePreset } from "../lib/profile-helpers";
 import { parseAutoSource } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
+import { respondInvalidRequest } from "../lib/respond";
 import {
   processStoredDocument,
   retryFailedStoredDocument,
@@ -188,7 +189,12 @@ router.get("/library/documents", requireAuth, async (req, res) => {
 router.post("/library/documents", requireAuth, async (req, res) => {
   const parsed = UploadTextDocumentBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid document upload" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid document upload",
+      "POST /library/documents",
+    );
     return;
   }
   const {
@@ -535,7 +541,12 @@ router.put(
   async (req, res) => {
     const parsed = SetDocumentPresetTagsBody.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid preset tag update" });
+      respondInvalidRequest(
+        res,
+        parsed.error,
+        "Invalid preset tag update",
+        "PUT /library/documents/:id/preset-tags",
+      );
       return;
     }
     const userId = req.user!.id;
@@ -768,7 +779,12 @@ router.delete("/library/documents/:id", requireAuth, async (req, res) => {
 router.post("/library/auto-ingest", requireAuth, async (req, res) => {
   const parsed = TriggerAutoIngestBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid auto-ingest request" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid auto-ingest request",
+      "POST /library/auto-ingest",
+    );
     return;
   }
   const { source } = parsed.data;
@@ -818,7 +834,12 @@ router.get("/library/auto-ingest/status", requireAuth, async (req, res) => {
 router.post("/library/test-query", requireAuth, async (req, res) => {
   const parsed = TestLibraryQueryBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid query" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid query",
+      "POST /library/test-query",
+    );
     return;
   }
   const { query, limit } = parsed.data;

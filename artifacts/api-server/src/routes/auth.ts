@@ -20,6 +20,7 @@ import {
 } from "../lib/auth";
 import { autoPromoteAdminIfListed } from "../lib/profile-helpers";
 import { logger } from "../lib/logger";
+import { respondInvalidRequest } from "../lib/respond";
 
 const OIDC_COOKIE_TTL = 10 * 60 * 1000;
 
@@ -220,7 +221,12 @@ router.post(
   async (req: Request, res: Response) => {
     const parsed = ExchangeMobileAuthorizationCodeBody.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Missing or invalid required parameters" });
+      respondInvalidRequest(
+        res,
+        parsed.error,
+        "Missing or invalid required parameters",
+        "POST /auth/mobile/token",
+      );
       return;
     }
 

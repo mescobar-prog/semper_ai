@@ -31,6 +31,7 @@ import {
   listRepos,
 } from "../lib/github";
 import { draftToolText } from "../lib/gemini-helpers";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -345,7 +346,12 @@ async function loadToolDetailRow(toolId: string): Promise<ToolDetailRow | null> 
 router.post("/admin/tools", requireAdmin, async (req, res) => {
   const parsed = CreateToolBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid tool data" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid tool data",
+      "POST /admin/tools",
+    );
     return;
   }
   const data = parsed.data;
@@ -383,7 +389,12 @@ router.post("/admin/tools", requireAdmin, async (req, res) => {
 router.put("/admin/tools/:id", requireAdmin, async (req, res) => {
   const parsed = UpdateToolBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid tool data" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid tool data",
+      "PUT /admin/tools/:id",
+    );
     return;
   }
   const data = parsed.data;
@@ -740,7 +751,12 @@ router.get(
 router.post("/admin/tools/draft-text", requireAdmin, async (req, res) => {
   const parsed = DraftToolTextBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid draft request" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid draft request",
+      "POST /admin/tools/draft-text",
+    );
     return;
   }
   const { field, sourceMaterial, steering } = parsed.data;
@@ -767,7 +783,12 @@ router.post(
   async (req, res) => {
     const parsed = RequestInstallerUploadUrlBody.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid installer upload request" });
+      respondInvalidRequest(
+        res,
+        parsed.error,
+        "Invalid installer upload request",
+        "POST /admin/installer-uploads/request-url",
+      );
       return;
     }
     if (parsed.data.sizeBytes > MAX_INSTALLER_UPLOAD_SIZE_BYTES) {
@@ -821,7 +842,12 @@ router.post(
   async (req, res) => {
     const parsed = InitInstallerUploadBody.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid installer upload request" });
+      respondInvalidRequest(
+        res,
+        parsed.error,
+        "Invalid installer upload request",
+        "POST /admin/installer-uploads/init",
+      );
       return;
     }
     const { filename, sizeBytes, contentType, fileFingerprint } = parsed.data;

@@ -32,6 +32,7 @@ import {
   isValidCommandCode,
 } from "@workspace/mil-data";
 import { logger } from "../lib/logger";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 
@@ -56,10 +57,12 @@ router.put("/profile", requireAuth, async (req, res) => {
   // from believing they wrote a value that we actually dropped.
   const parsed = UpdateMyProfileBody.strict().safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({
-      error: "Invalid profile data",
-      issues: parsed.error.issues,
-    });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid profile data",
+      "PUT /profile",
+    );
     return;
   }
 
@@ -236,7 +239,12 @@ router.put("/profile", requireAuth, async (req, res) => {
 router.post("/profile/context-block/evaluate", requireAuth, async (req, res) => {
   const parsed = EvaluateContextBlockBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid Context Block submission" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid Context Block submission",
+      "POST /profile/context-block/evaluate",
+    );
     return;
   }
   try {
@@ -251,7 +259,12 @@ router.post("/profile/context-block/evaluate", requireAuth, async (req, res) => 
 router.post("/profile/context-block/confirm", requireAuth, async (req, res) => {
   const parsed = ConfirmContextBlockBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid Context Block submission" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid Context Block submission",
+      "POST /profile/context-block/confirm",
+    );
     return;
   }
   const userId = req.user!.id;

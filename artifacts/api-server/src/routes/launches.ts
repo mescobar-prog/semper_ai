@@ -51,6 +51,7 @@ import {
   profileFieldDisplayValue,
 } from "../lib/profile-helpers";
 import { logger } from "../lib/logger";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 
@@ -350,7 +351,12 @@ router.post("/tools/:toolId/launch-preview", requireAuth, async (req, res) => {
   // the schema when the body is missing.
   const previewBody = PreviewLaunchContextBody.safeParse(req.body ?? {});
   if (!previewBody.success) {
-    res.status(400).json({ error: "Invalid launch preview body" });
+    respondInvalidRequest(
+      res,
+      previewBody.error,
+      "Invalid launch preview body",
+      "POST /launches/preview",
+    );
     return;
   }
   const rawDetail = previewBody.data.additionalDetail ?? null;
@@ -440,7 +446,12 @@ router.post("/tools/:toolId/launch", requireAuth, async (req, res) => {
   const body = req.body && Object.keys(req.body).length > 0 ? req.body : {};
   const parsed = LaunchToolBody.safeParse(body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid launch selection" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid launch selection",
+      "POST /launches/launch",
+    );
     return;
   }
   const {
@@ -706,7 +717,12 @@ router.get("/launches/affirmation", requireAuth, async (req, res) => {
 router.post("/launches/affirm", requireAuth, async (req, res) => {
   const parsed = CreateLaunchAffirmationBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid request",
+      "POST /launches/affirm",
+    );
     return;
   }
   const userId = req.user!.id;
@@ -783,7 +799,12 @@ router.post("/launches/affirm", requireAuth, async (req, res) => {
 router.post("/tools/context-exchange", async (req, res) => {
   const parsed = ExchangeContextTokenBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid request",
+      "POST /tools/context-exchange",
+    );
     return;
   }
   const { launchToken } = parsed.data;
@@ -916,7 +937,12 @@ router.post("/tools/context-exchange", async (req, res) => {
 router.post("/tools/library-query", async (req, res) => {
   const parsed = QueryLibraryBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid request",
+      "POST /tools/library-query",
+    );
     return;
   }
   const { sessionToken, query, limit } = parsed.data;
@@ -952,7 +978,12 @@ router.post("/tools/library-query", async (req, res) => {
 router.post("/tools/draft-brief", async (req, res) => {
   const parsed = DraftBriefBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid request",
+      "POST /tools/draft-brief",
+    );
     return;
   }
   const { sessionToken, topic, briefType, audience } = parsed.data;
@@ -1076,13 +1107,12 @@ router.post("/tools/mission-chat/messages", async (req, res) => {
     // Include Zod issues so the next time this fails we can diagnose it
     // from the 400 body alone (instead of attaching a debugger). Also
     // mirror the issues to the server log for parity.
-    logger.warn(
-      { issues: parsed.error.issues },
-      "mission-chat /messages rejected: invalid request body",
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid request",
+      "POST /tools/mission-chat/messages",
     );
-    res
-      .status(400)
-      .json({ error: "Invalid request", issues: parsed.error.issues });
     return;
   }
   const { sessionToken, messages } = parsed.data;

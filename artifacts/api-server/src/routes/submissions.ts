@@ -13,6 +13,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
 import { logger } from "../lib/logger";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 
@@ -159,7 +160,12 @@ router.get("/submissions", requireAuth, async (req, res) => {
 router.post("/submissions", requireAuth, async (req, res) => {
   const parsed = CreateSubmissionBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid submission data" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid submission data",
+      "POST /submissions",
+    );
     return;
   }
   const data = parsed.data;
@@ -253,7 +259,12 @@ router.get("/submissions/:id", requireAuth, async (req, res) => {
 router.put("/submissions/:id", requireAuth, async (req, res) => {
   const parsed = UpdateMySubmissionBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid submission data" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid submission data",
+      "PUT /submissions/:id",
+    );
     return;
   }
   const id = String(req.params.id);
@@ -395,7 +406,12 @@ router.post(
   async (req, res) => {
     const parsed = ReviewSubmissionBody.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid review payload" });
+      respondInvalidRequest(
+        res,
+        parsed.error,
+        "Invalid review payload",
+        "POST /admin/submissions/:id/review",
+      );
       return;
     }
     const id = String(req.params.id);

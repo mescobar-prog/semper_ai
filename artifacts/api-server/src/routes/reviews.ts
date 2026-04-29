@@ -15,6 +15,7 @@ import {
   AdminHideReviewBody,
 } from "@workspace/api-zod";
 import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
+import { respondInvalidRequest } from "../lib/respond";
 
 const router: IRouter = Router();
 
@@ -50,7 +51,12 @@ function publicReviewRow(row: {
 router.get("/catalog/reviews", async (req, res) => {
   const parsed = ListToolReviewsQueryParams.safeParse(req.query);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid query parameters" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid query parameters",
+      "GET /catalog/reviews",
+    );
     return;
   }
   const { tool_slug: toolSlug, limit: rawLimit, offset: rawOffset } =
@@ -162,7 +168,12 @@ router.get("/catalog/reviews", async (req, res) => {
 router.put("/catalog/tools/:toolId/review", requireAuth, async (req, res) => {
   const parsed = UpsertMyToolReviewBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid review payload" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid review payload",
+      "PUT /catalog/tools/:toolId/review",
+    );
     return;
   }
   const { rating, comment } = parsed.data;
@@ -309,7 +320,12 @@ function adminReviewRow(row: {
 router.get("/admin/reviews", requireAdmin, async (req, res) => {
   const parsed = AdminListReviewsQueryParams.safeParse(req.query);
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid query parameters" });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid query parameters",
+      "GET /admin/reviews",
+    );
     return;
   }
   const {
@@ -400,7 +416,12 @@ async function fetchAdminReview(id: string) {
 router.post("/admin/reviews/:reviewId/hide", requireAdmin, async (req, res) => {
   const parsed = AdminHideReviewBody.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request body." });
+    respondInvalidRequest(
+      res,
+      parsed.error,
+      "Invalid request body.",
+      "POST /admin/reviews/:reviewId/hide",
+    );
     return;
   }
   const reviewId = String(req.params.reviewId);
